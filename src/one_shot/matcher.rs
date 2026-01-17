@@ -1,4 +1,5 @@
 use super::Appendable;
+#[cfg(feature = "simd")]
 use super::bucket::FixedWidthBucket;
 
 use crate::one_shot::match_too_large;
@@ -63,22 +64,39 @@ pub(crate) fn match_list_impl<S1: AsRef<str>, S2: AsRef<str>, M: Appendable<Matc
 
     let prefilter = Prefilter::new(needle, config.max_typos.unwrap_or(0));
 
+    #[cfg(feature = "simd")]
     let mut bucket_size_4 = FixedWidthBucket::<4, M>::new(needle, &config);
+    #[cfg(feature = "simd")]
     let mut bucket_size_8 = FixedWidthBucket::<8, M>::new(needle, &config);
+    #[cfg(feature = "simd")]
     let mut bucket_size_12 = FixedWidthBucket::<12, M>::new(needle, &config);
+    #[cfg(feature = "simd")]
     let mut bucket_size_16 = FixedWidthBucket::<16, M>::new(needle, &config);
+    #[cfg(feature = "simd")]
     let mut bucket_size_20 = FixedWidthBucket::<20, M>::new(needle, &config);
+    #[cfg(feature = "simd")]
     let mut bucket_size_24 = FixedWidthBucket::<24, M>::new(needle, &config);
+    #[cfg(feature = "simd")]
     let mut bucket_size_32 = FixedWidthBucket::<32, M>::new(needle, &config);
+    #[cfg(feature = "simd")]
     let mut bucket_size_48 = FixedWidthBucket::<48, M>::new(needle, &config);
+    #[cfg(feature = "simd")]
     let mut bucket_size_64 = FixedWidthBucket::<64, M>::new(needle, &config);
+    #[cfg(feature = "simd")]
     let mut bucket_size_96 = FixedWidthBucket::<96, M>::new(needle, &config);
+    #[cfg(feature = "simd")]
     let mut bucket_size_128 = FixedWidthBucket::<128, M>::new(needle, &config);
+    #[cfg(feature = "simd")]
     let mut bucket_size_160 = FixedWidthBucket::<160, M>::new(needle, &config);
+    #[cfg(feature = "simd")]
     let mut bucket_size_192 = FixedWidthBucket::<192, M>::new(needle, &config);
+    #[cfg(feature = "simd")]
     let mut bucket_size_224 = FixedWidthBucket::<224, M>::new(needle, &config);
+    #[cfg(feature = "simd")]
     let mut bucket_size_256 = FixedWidthBucket::<256, M>::new(needle, &config);
+    #[cfg(feature = "simd")]
     let mut bucket_size_384 = FixedWidthBucket::<384, M>::new(needle, &config);
+    #[cfg(feature = "simd")]
     let mut bucket_size_512 = FixedWidthBucket::<512, M>::new(needle, &config);
 
     // If max_typos is set, we can ignore any haystacks that are shorter than the needle
@@ -113,22 +131,39 @@ pub(crate) fn match_list_impl<S1: AsRef<str>, S2: AsRef<str>, M: Appendable<Matc
 
         // Pick the bucket to insert into based on the length of the haystack
         match haystack.len() {
+            #[cfg(feature = "simd")]
             0..=4 => bucket_size_4.add_haystack(matches, haystack, i),
+            #[cfg(feature = "simd")]
             5..=8 => bucket_size_8.add_haystack(matches, haystack, i),
+            #[cfg(feature = "simd")]
             9..=12 => bucket_size_12.add_haystack(matches, haystack, i),
+            #[cfg(feature = "simd")]
             13..=16 => bucket_size_16.add_haystack(matches, haystack, i),
+            #[cfg(feature = "simd")]
             17..=20 => bucket_size_20.add_haystack(matches, haystack, i),
+            #[cfg(feature = "simd")]
             21..=24 => bucket_size_24.add_haystack(matches, haystack, i),
+            #[cfg(feature = "simd")]
             25..=32 => bucket_size_32.add_haystack(matches, haystack, i),
+            #[cfg(feature = "simd")]
             33..=48 => bucket_size_48.add_haystack(matches, haystack, i),
+            #[cfg(feature = "simd")]
             49..=64 => bucket_size_64.add_haystack(matches, haystack, i),
+            #[cfg(feature = "simd")]
             65..=96 => bucket_size_96.add_haystack(matches, haystack, i),
+            #[cfg(feature = "simd")]
             97..=128 => bucket_size_128.add_haystack(matches, haystack, i),
+            #[cfg(feature = "simd")]
             129..=160 => bucket_size_160.add_haystack(matches, haystack, i),
+            #[cfg(feature = "simd")]
             161..=192 => bucket_size_192.add_haystack(matches, haystack, i),
+            #[cfg(feature = "simd")]
             193..=224 => bucket_size_224.add_haystack(matches, haystack, i),
+            #[cfg(feature = "simd")]
             225..=256 => bucket_size_256.add_haystack(matches, haystack, i),
+            #[cfg(feature = "simd")]
             257..=384 => bucket_size_384.add_haystack(matches, haystack, i),
+            #[cfg(feature = "simd")]
             385..=512 => bucket_size_512.add_haystack(matches, haystack, i),
 
             // fallback to greedy matching
@@ -145,22 +180,39 @@ pub(crate) fn match_list_impl<S1: AsRef<str>, S2: AsRef<str>, M: Appendable<Matc
     }
 
     // Run processing on remaining haystacks in the buckets
+    #[cfg(feature = "simd")]
     bucket_size_4.finalize(matches);
+    #[cfg(feature = "simd")]
     bucket_size_8.finalize(matches);
+    #[cfg(feature = "simd")]
     bucket_size_12.finalize(matches);
+    #[cfg(feature = "simd")]
     bucket_size_16.finalize(matches);
+    #[cfg(feature = "simd")]
     bucket_size_20.finalize(matches);
+    #[cfg(feature = "simd")]
     bucket_size_24.finalize(matches);
+    #[cfg(feature = "simd")]
     bucket_size_32.finalize(matches);
+    #[cfg(feature = "simd")]
     bucket_size_48.finalize(matches);
+    #[cfg(feature = "simd")]
     bucket_size_64.finalize(matches);
+    #[cfg(feature = "simd")]
     bucket_size_96.finalize(matches);
+    #[cfg(feature = "simd")]
     bucket_size_128.finalize(matches);
+    #[cfg(feature = "simd")]
     bucket_size_160.finalize(matches);
+    #[cfg(feature = "simd")]
     bucket_size_192.finalize(matches);
+    #[cfg(feature = "simd")]
     bucket_size_224.finalize(matches);
+    #[cfg(feature = "simd")]
     bucket_size_256.finalize(matches);
+    #[cfg(feature = "simd")]
     bucket_size_384.finalize(matches);
+    #[cfg(feature = "simd")]
     bucket_size_512.finalize(matches);
 }
 

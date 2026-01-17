@@ -1,7 +1,7 @@
 #![allow(stable_features)]
-#![feature(avx512_target_feature)]
-#![feature(portable_simd)]
-#![feature(get_mut_unchecked)]
+#![cfg_attr(feature = "simd", feature(avx512_target_feature))]
+#![cfg_attr(feature = "simd", feature(portable_simd))]
+#![cfg_attr(feature = "simd", feature(get_mut_unchecked))]
 
 use std::cmp::Ordering;
 
@@ -9,11 +9,13 @@ use std::cmp::Ordering;
 use serde::{Deserialize, Serialize};
 
 mod r#const;
+#[cfg(feature = "simd")]
 mod incremental;
 mod one_shot;
 pub mod prefilter;
 pub mod smith_waterman;
 
+#[cfg(feature = "simd")]
 pub use incremental::IncrementalMatcher;
 pub use one_shot::{match_indices, match_list, match_list_parallel};
 
