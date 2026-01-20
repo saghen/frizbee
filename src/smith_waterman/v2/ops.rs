@@ -32,13 +32,39 @@ pub unsafe fn argmax_epu16(v: __m256i) -> usize {
 }
 
 #[inline(always)]
-pub unsafe fn _mm256_shift_left_epi16(v: __m256i) -> __m256i {
-    // Permute: [low, high] -> [high, zeros]
-    let shifted_lanes = _mm256_permute2x128_si256(v, v, 0x81);
+pub unsafe fn _mm256_shift_right_padded_epi16(v: __m256i, padding: __m256i) -> __m256i {
+    // Permute: [padding_low, padding_high] + [low, high] -> [padding_high, low]
+    let shifted_lanes = _mm256_permute2x128_si256(padding, v, 0x21);
 
-    // alignr with 2 bytes shifts left by one u16
-    // alignr(a, b, n) concatenates and shifts right, so we swap operand order
-    _mm256_alignr_epi8(shifted_lanes, v, 2)
+    // alignr to shift right by 2 bytes within each 128-bit lane pair
+    // alignr(b, combined, 2) does:
+    //   low lane:  takes from [a_high : b_low] and shifts right by 2
+    //   high lane: takes from [b_low : b_high] and shifts right by 2
+    _mm256_alignr_epi8(v, shifted_lanes, 14)
+}
+
+#[inline(always)]
+pub unsafe fn _mm256_shift_right_two_padded_epi16(v: __m256i, padding: __m256i) -> __m256i {
+    // Permute: [padding_low, padding_high] + [low, high] -> [padding_high, low]
+    let shifted_lanes = _mm256_permute2x128_si256(padding, v, 0x21);
+
+    // alignr to shift right by 4 bytes within each 128-bit lane pair
+    // alignr(b, combined, 4) does:
+    //   low lane:  takes from [a_high : b_low] and shifts right by 4
+    //   high lane: takes from [b_low : b_high] and shifts right by 4
+    _mm256_alignr_epi8(v, shifted_lanes, 12)
+}
+
+#[inline(always)]
+pub unsafe fn _mm256_shift_right_four_padded_epi16(v: __m256i, padding: __m256i) -> __m256i {
+    // Permute: [padding_low, padding_high] + [low, high] -> [padding_high, low]
+    let shifted_lanes = _mm256_permute2x128_si256(padding, v, 0x21);
+
+    // alignr to shift right by 8 bytes within each 128-bit lane pair
+    // alignr(b, combined, 8) does:
+    //   low lane:  takes from [a_high : b_low] and shifts right by 8
+    //   high lane: takes from [b_low : b_high] and shifts right by 8
+    _mm256_alignr_epi8(v, shifted_lanes, 8)
 }
 
 #[inline(always)]
@@ -84,5 +110,18 @@ mod tests {
         let result = unsafe { argmax_epu16(v) };
         assert_eq!(result, 10);
     }
-}
 
+    #[test]
+    fn test_shift_right_padded_epi16() {
+        let v =
+            unsafe { _mm256_setr_epi16(5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20) };
+        let padding = unsafe { _mm256_setr_epi16(1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1) };
+        let result = unsafe { _mm256_shift_right_two_padded_epi16(v, padding) };
+        let mut result_arr: [i16; 16] = [0; 16];
+        unsafe { _mm256_storeu_si256(result_arr.as_mut_ptr() as *mut __m256i, result) };
+        assert_eq!(
+            result_arr,
+            [1, 1, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+        );
+    }
+}
