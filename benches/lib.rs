@@ -11,7 +11,7 @@ use frizbee::{
     Scoring,
     smith_waterman::{
         simd::{smith_waterman, typos_from_score_matrix},
-        v2,
+        v2::{self, AlignmentChunk},
     },
 };
 use interleave::{interleave_bench, interleave_misaligned_bench};
@@ -23,14 +23,19 @@ fn criterion_benchmark(c: &mut Criterion) {
     let haystack: [&str; 16] = std::array::repeat("~~~~~~t~est~~~~");
 
     let mut max_score_val = 0;
+    let mut typo_count = 0;
     c.bench_function("intra-sequence", |b| {
         let mut max_score = unsafe { _mm256_setzero_si256() };
         let scoring = Scoring::default();
+        let mut score_matrix = (0..needle.len())
+            .map(|_| unsafe { _mm256_setzero_si256() })
+            .collect::<Vec<_>>();
         b.iter(|| unsafe {
             for haystack in haystack.iter() {
-                let (max_score_vec, score_matrix) = v2::smith_waterman(haystack, needle, &scoring);
-                max_score = max_score_vec;
-                black_box(score_matrix);
+                max_score = v2::smith_waterman(needle, haystack, &mut score_matrix, &scoring);
+                // typo_count = v2::typos_from_score_matrix(&score_matrix);
+                black_box(max_score);
+                black_box(typo_count);
             }
         });
         max_score_val = unsafe {
@@ -52,13 +57,12 @@ fn criterion_benchmark(c: &mut Criterion) {
                 .max(_mm256_extract_epi16(max_score, 15))
         };
     });
+    println!("typo_count: {}", typo_count);
     println!("max_score_val: {}", max_score_val);
 
     let mut max_score_val = 0;
     c.bench_function("inter-sequence", |b| {
-        let mut scoring = Scoring::default();
-        scoring.gap_open_penalty = scoring.gap_extend_penalty;
-
+        let scoring = Scoring::default();
         b.iter(|| {
             let (max_scores, score_matrix, _) =
                 smith_waterman::<16, 16>(needle, &haystack, None, &scoring);
