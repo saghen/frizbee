@@ -60,11 +60,6 @@ pub unsafe fn smith_waterman(
         );
 
         score_matrix[i] = row_scores;
-        // alignment[i] = AlignmentChunk::new(
-        //     _mm256_cmpeq_epi16(diag_scores, row_scores),
-        //     _mm256_setzero_si256(),
-        //     _mm256_cmpeq_epi16(up_scores, row_scores),
-        // );
         prev_row_scores = row_scores;
         up_gap_mask = match_mask;
         max_scores = _mm256_max_epu16(max_scores, row_scores);
@@ -106,7 +101,7 @@ mod tests {
     #[test]
     fn thisthisthis() {
         let needle = "test";
-        let haystack = "~~~~~~t~est~~~~";
+        let haystack = "~~~~~~t~est~~~~~";
 
         let scoring = Scoring::default();
         let mut score_matrix = make_score_matrix(needle);
