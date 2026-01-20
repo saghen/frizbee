@@ -73,3 +73,16 @@ pub unsafe fn _mm256_shift_right_four_epi16(v: __m256i) -> __m256i {
     // alignr(a, b, n) = (a:b) >> (n*8) for each 128-bit lane
     _mm256_alignr_epi8(v, shifted_lanes, 8)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_argmax_epu16() {
+        let v = unsafe { _mm256_setr_epi16(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 30, 11, 12, 13, 14, 15) };
+        let result = unsafe { argmax_epu16(v) };
+        assert_eq!(result, 10);
+    }
+}
+
