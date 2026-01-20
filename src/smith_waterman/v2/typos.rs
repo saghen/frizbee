@@ -2,26 +2,25 @@ use std::arch::x86_64::*;
 
 use super::ops::argmax_epu16;
 
-pub unsafe fn typos_from_score_matrix(score_matrix: &[__m256i]) -> u16 {
+pub unsafe fn typos_from_score_matrix(score_matrix: &[__m256i]) -> usize {
     let mut typo_count = 0;
 
     let mut row_idx = score_matrix.len() - 1;
     let mut col_idx = argmax_epu16(score_matrix[row_idx]);
 
+    // TODO: dont transmute and figure out how it does it so quickly
     let score_matrix = std::mem::transmute::<_, &[std::simd::Simd<u16, 16>]>(score_matrix);
     let mut score = score_matrix[row_idx][col_idx];
 
-    while col_idx > 0 {
-        // Must be moving left
-        if row_idx == 0 {
-            typo_count += 1;
-            col_idx -= 1;
-            continue;
+    while row_idx > 0 {
+        // Must be moving up
+        if col_idx == 0 {
+            return typo_count + row_idx;
         }
 
         // Gather up the scores for all possible paths
         let diag = score_matrix[row_idx - 1][col_idx - 1];
-        let left = score_matrix[row_idx][col_idx];
+        let left = score_matrix[row_idx][col_idx - 1];
         let up = score_matrix[row_idx - 1][col_idx];
 
         // Match or mismatch
@@ -34,13 +33,13 @@ pub unsafe fn typos_from_score_matrix(score_matrix: &[__m256i]) -> u16 {
             col_idx -= 1;
             score = diag;
         // Skipped character in needle
-        } else if left >= up {
+        } else if up >= left {
             typo_count += 1;
-            col_idx -= 1;
+            row_idx -= 1;
             score = left;
         // Skipped character in haystack
         } else {
-            row_idx -= 1;
+            col_idx -= 1;
             score = up;
         }
     }
