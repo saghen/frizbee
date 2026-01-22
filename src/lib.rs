@@ -1,5 +1,3 @@
-#![allow(stable_features)]
-#![feature(avx512_target_feature)]
 #![feature(portable_simd)]
 #![feature(get_mut_unchecked)]
 
@@ -15,7 +13,7 @@ pub mod prefilter;
 pub mod smith_waterman;
 
 pub use incremental::IncrementalMatcher;
-pub use one_shot::{match_indices, match_list, match_list_parallel};
+pub use one_shot::{match_indices, match_list, match_list_parallel, matcher_v2};
 
 use r#const::*;
 
@@ -36,8 +34,8 @@ impl PartialOrd for Match {
 }
 impl Ord for Match {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.score
-            .cmp(&other.score)
+        (self.score as u64)
+            .cmp(&(other.score as u64))
             .reverse()
             .then_with(|| self.index.cmp(&other.index))
     }

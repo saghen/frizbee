@@ -7,7 +7,7 @@ use super::Appendable;
 
 #[derive(Debug)]
 pub(crate) struct FixedWidthBucket<'a, const W: usize, M: Appendable<Match>> {
-    has_avx512: bool,
+    // has_avx512: bool,
     has_avx2: bool,
 
     length: usize,
@@ -24,14 +24,14 @@ pub(crate) struct FixedWidthBucket<'a, const W: usize, M: Appendable<Match>> {
 impl<'a, const W: usize, M: Appendable<Match>> FixedWidthBucket<'a, W, M> {
     pub fn new(needle: &'a str, config: &Config) -> Self {
         FixedWidthBucket {
-            #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-            has_avx512: is_x86_feature_detected!("avx512f")
-                && is_x86_feature_detected!("avx512bitalg"),
+            // #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+            // has_avx512: is_x86_feature_detected!("avx512f")
+            //     && is_x86_feature_detected!("avx512bitalg"),
             #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
             has_avx2: is_x86_feature_detected!("avx2"),
 
-            #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
-            has_avx512: false,
+            // #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
+            // has_avx512: false,
             #[cfg(not(any(target_arch = "x86", target_arch = "x86_64")))]
             has_avx2: false,
 
@@ -53,16 +53,16 @@ impl<'a, const W: usize, M: Appendable<Match>> FixedWidthBucket<'a, W, M> {
         self.length += 1;
 
         match self.length {
-            32 if self.has_avx512 => self._finalize::<32>(matches),
-            16 if self.has_avx2 && !self.has_avx512 => self._finalize::<16>(matches),
-            8 if !self.has_avx2 && !self.has_avx512 => self._finalize::<8>(matches),
+            // 32 if self.has_avx512 => self._finalize::<32>(matches),
+            16 if self.has_avx2 => self._finalize::<16>(matches),
+            8 if !self.has_avx2 => self._finalize::<8>(matches),
             _ => {}
         }
     }
 
     pub fn finalize(&mut self, matches: &mut M) {
         match self.length {
-            17.. => self._finalize::<32>(matches),
+            // 17.. => self._finalize::<32>(matches),
             9.. => self._finalize::<16>(matches),
             0.. => self._finalize::<8>(matches),
         }

@@ -1,6 +1,7 @@
 pub mod bucket;
 mod indices;
 mod matcher;
+pub mod matcher_v2;
 mod parallel;
 
 pub use indices::match_indices;

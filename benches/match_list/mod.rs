@@ -63,6 +63,11 @@ pub fn match_list_bench(c: &mut criterion::Criterion, name: &str, needle: &str, 
         },
     );
     group.bench_with_input(
+        BenchmarkId::new("Frizbee V2", median_length),
+        haystack,
+        |b, haystack| b.iter(|| match_list_v2(needle, haystack, Some(0))),
+    );
+    group.bench_with_input(
         BenchmarkId::new("Frizbee", median_length),
         haystack,
         |b, haystack| b.iter(|| match_list(needle, haystack, Some(0))),
@@ -93,6 +98,17 @@ pub fn match_list_bench(c: &mut criterion::Criterion, name: &str, needle: &str, 
 
 fn match_list(needle: &str, haystack: &[&str], max_typos: Option<u16>) -> Vec<frizbee::Match> {
     frizbee::match_list(
+        black_box(needle),
+        black_box(haystack),
+        black_box(&frizbee::Config {
+            max_typos,
+            ..Default::default()
+        }),
+    )
+}
+
+fn match_list_v2(needle: &str, haystack: &[&str], max_typos: Option<u16>) -> Vec<frizbee::Match> {
+    frizbee::matcher_v2::match_list(
         black_box(needle),
         black_box(haystack),
         black_box(&frizbee::Config {
