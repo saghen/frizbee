@@ -1,6 +1,14 @@
 use std::arch::x86_64::*;
 
 #[inline(always)]
+pub unsafe fn get_prefix_mask() -> __m256i {
+    _mm256_setr_epi8(
+        -1, -1, // -1 = 0xFF as i8
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    )
+}
+
+#[inline(always)]
 unsafe fn load_partial_safe(ptr: *const u8, len: usize) -> __m128i {
     debug_assert!(len < 8);
 

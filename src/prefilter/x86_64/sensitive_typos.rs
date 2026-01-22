@@ -1,4 +1,4 @@
-use super::super::overlapping_load;
+use super::overlapping_load;
 use std::arch::x86_64::*;
 
 /// Checks if the needle is wholly contained in the haystack, ignoring the exact order of the
@@ -17,18 +17,16 @@ pub unsafe fn match_haystack_unordered_typos(
     needle: &[u8],
     haystack: &[u8],
     max_typos: u16,
-) -> bool {
+) -> (bool, usize) {
     let len = haystack.len();
+
+    // TODO: skipped chunks calculation
 
     let mut needle_iter = needle.iter().map(|&c| unsafe { _mm_set1_epi8(c as i8) });
     let mut needle_char = needle_iter.next().unwrap();
 
     let mut typos = 0;
     loop {
-        if typos > max_typos as usize {
-            return false;
-        }
-
         // TODO: this is slightly incorrect, because if we match on the third chunk,
         // we would only scan from the third chunk onwards for the next needle. Technically,
         // we should scan from the beginning of the haystack instead, but I believe the
@@ -48,20 +46,20 @@ pub unsafe fn match_haystack_unordered_typos(
                 if let Some(next_needle_char) = needle_iter.next() {
                     needle_char = next_needle_char;
                 } else {
-                    return true;
+                    return (true, 0);
                 }
             }
         }
 
         typos += 1;
         if typos > max_typos as usize {
-            return false;
+            return (false, 0);
         }
 
         if let Some(next_needle_char) = needle_iter.next() {
             needle_char = next_needle_char;
         } else {
-            return true;
+            return (true, 0);
         }
     }
 }

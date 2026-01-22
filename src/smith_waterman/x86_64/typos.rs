@@ -1,8 +1,8 @@
 use std::arch::x86_64::*;
 
-use crate::smith_waterman::v2::ops::_mm256_idx_epu16;
+use super::ops::_mm256_idx_epu16;
 
-pub unsafe fn typos_from_score_matrix(
+pub fn typos_from_score_matrix(
     score_matrix: &[Vec<__m256i>],
     max_score: u16,
     max_typos: u16,
@@ -11,12 +11,13 @@ pub unsafe fn typos_from_score_matrix(
     let mut row_idx = score_matrix[0].len() - 1;
     let mut col_idx = (0..(haystack_len.div_ceil(16) + 1))
         .find_map(|chunk_idx| {
-            let index = _mm256_idx_epu16(score_matrix[chunk_idx][row_idx], max_score);
+            let index = unsafe { _mm256_idx_epu16(score_matrix[chunk_idx][row_idx], max_score) };
             (index != 8).then(|| chunk_idx * 16 + index)
         })
         .expect("Could not find max score in score matrix final row");
 
-    let score_matrix = std::mem::transmute::<&[Vec<__m256i>], &[Vec<[u16; 16]>]>(score_matrix);
+    let score_matrix =
+        unsafe { std::mem::transmute::<&[Vec<__m256i>], &[Vec<[u16; 16]>]>(score_matrix) };
 
     let mut typo_count = 0;
     let mut score = max_score;

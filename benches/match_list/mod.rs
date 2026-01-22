@@ -63,11 +63,6 @@ pub fn match_list_bench(c: &mut criterion::Criterion, name: &str, needle: &str, 
         },
     );
     group.bench_with_input(
-        BenchmarkId::new("Frizbee V2", median_length),
-        haystack,
-        |b, haystack| b.iter(|| match_list_v2(needle, haystack, Some(0))),
-    );
-    group.bench_with_input(
         BenchmarkId::new("Frizbee", median_length),
         haystack,
         |b, haystack| b.iter(|| match_list(needle, haystack, Some(0))),
@@ -82,18 +77,6 @@ pub fn match_list_bench(c: &mut criterion::Criterion, name: &str, needle: &str, 
         haystack,
         |b, haystack| b.iter(|| match_list(needle, haystack, Some(1))),
     );
-
-    // Parallel
-    group.bench_with_input(
-        BenchmarkId::new("Frizbee (Parallel)", median_length),
-        haystack,
-        |b, haystack| b.iter(|| match_list_parallel(needle, haystack, Some(0), 8)),
-    );
-    group.bench_with_input(
-        BenchmarkId::new("Frizbee: All Scores (Parallel)", median_length),
-        haystack,
-        |b, haystack| b.iter(|| match_list_parallel(needle, haystack, None, 8)),
-    );
 }
 
 fn match_list(needle: &str, haystack: &[&str], max_typos: Option<u16>) -> Vec<frizbee::Match> {
@@ -104,33 +87,5 @@ fn match_list(needle: &str, haystack: &[&str], max_typos: Option<u16>) -> Vec<fr
             max_typos,
             ..Default::default()
         }),
-    )
-}
-
-fn match_list_v2(needle: &str, haystack: &[&str], max_typos: Option<u16>) -> Vec<frizbee::Match> {
-    frizbee::matcher_v2::match_list(
-        black_box(needle),
-        black_box(haystack),
-        black_box(&frizbee::Config {
-            max_typos,
-            ..Default::default()
-        }),
-    )
-}
-
-fn match_list_parallel(
-    needle: &str,
-    haystack: &[&str],
-    max_typos: Option<u16>,
-    num_threads: usize,
-) -> Vec<frizbee::Match> {
-    frizbee::match_list_parallel(
-        black_box(needle),
-        black_box(haystack),
-        &frizbee::Config {
-            max_typos,
-            ..Default::default()
-        },
-        num_threads,
     )
 }

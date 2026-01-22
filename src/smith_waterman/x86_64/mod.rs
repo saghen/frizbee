@@ -12,37 +12,6 @@ use gaps::propagate_horizontal_gaps;
 use ops::*;
 pub use typos::typos_from_score_matrix;
 
-pub struct Needle(Vec<(u8, u8)>);
-
-impl Needle {
-    pub fn new(needle: &str) -> Self {
-        let mut data = Vec::with_capacity(needle.len());
-        for c in needle.chars() {
-            if c.is_lowercase() {
-                data.push((c.to_ascii_uppercase() as u8, c as u8));
-            } else if c.is_uppercase() {
-                data.push((c.to_ascii_lowercase() as u8, c as u8));
-            } else {
-                data.push((c as u8, c as u8));
-            }
-        }
-
-        Self(data)
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &(u8, u8)> {
-        self.0.iter()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.0.len()
-    }
-}
-
 pub fn generate_score_matrix(needle_len: usize, haystack_len: usize) -> Vec<Vec<__m256i>> {
     (0..=(haystack_len.div_ceil(16) + 1))
         .map(|_| {
@@ -54,16 +23,16 @@ pub fn generate_score_matrix(needle_len: usize, haystack_len: usize) -> Vec<Vec<
 }
 
 pub fn smith_waterman(
-    needle: &Needle,
+    needle: &[(u8, u8)],
     haystack: &[u8],
     scoring: &Scoring,
     score_matrix: &mut [Vec<__m256i>],
 ) -> u16 {
     unsafe {
-        // TODO: capitalization, prefix, offset_prefix bonuses
-        let mut max_scores = _mm256_setzero_si256();
+        // TODO: capitalization bonus
+        // TODO: have prefix bonus scale based on distance
 
-        // constants
+        // Constants
         let gap_extend = _mm256_set1_epi16(scoring.gap_extend_penalty as i16);
         let gap_open =
             _mm256_set1_epi16((scoring.gap_open_penalty - scoring.gap_extend_penalty) as i16);
@@ -71,13 +40,18 @@ pub fn smith_waterman(
             _mm256_set1_epi16((scoring.match_score + scoring.mismatch_penalty) as i16);
         let mismatch_penalty = _mm256_set1_epi16(scoring.mismatch_penalty as i16);
         let matching_case_bonus = _mm256_set1_epi16(scoring.matching_case_bonus as i16);
+        let prefix_bonus = _mm256_set1_epi16(scoring.prefix_bonus as i16);
 
         let delimiter_bonus = _mm256_set1_epi16(scoring.delimiter_bonus as i16);
         let delimiters = [b' ', b'/', b'.', b',', b'_', b'-', b':'];
 
+        // State
         let mut prev_delimiter_mask = _mm256_setzero_si256();
+        let mut max_scores = _mm256_setzero_si256();
 
         for mut col_idx in 0..(haystack.len().div_ceil(16)) {
+            let mut prefix_mask = get_prefix_mask();
+
             let haystack = _mm_loadu(haystack, col_idx * 16, haystack.len());
             col_idx += 1;
 
@@ -87,6 +61,7 @@ pub fn smith_waterman(
             for (row_idx, (needle_char, flipped_case_needle_char)) in
                 needle.iter().enumerate().map(|(i, c)| (i + 1, c))
             {
+                // Match needle chars against the haystack (case insensitive)
                 let exact_case_match_mask =
                     _mm_cmpeq_epi8(_mm_set1_epi8(*needle_char as i8), haystack);
                 let flipped_case_match_mask =
@@ -126,10 +101,15 @@ pub fn smith_waterman(
                         score_matrix[col_idx - 1][row_idx - 1],
                     );
 
-                    // Always add mismatch penalty
-                    let diag = _mm256_subs_epu16(diag, mismatch_penalty);
                     // Add match score (+ mismatch penalty) for matches, avoiding blendv
                     let diag = _mm256_add_epi16(diag, _mm256_and_si256(match_mask, match_score));
+                    // Always add mismatch penalty
+                    let diag = _mm256_subs_epu16(diag, mismatch_penalty);
+                    // Add prefix bonus
+                    let diag = _mm256_add_epi16(
+                        diag,
+                        _mm256_and_si256(_mm256_and_si256(prefix_mask, match_mask), prefix_bonus),
+                    );
                     // Add delimiter bonus
                     let diag =
                         _mm256_add_epi16(diag, _mm256_and_si256(delimiter_mask, delimiter_bonus));
@@ -149,9 +129,11 @@ pub fn smith_waterman(
                     scoring.gap_extend_penalty,
                 );
 
+                // Store results
                 score_matrix[col_idx][row_idx] = row_scores;
                 prev_row_scores = row_scores;
                 up_gap_mask = match_mask;
+                prefix_mask = _mm256_setzero_si256();
 
                 if row_idx == needle.len() {
                     max_scores = _mm256_max_epu16(max_scores, row_scores);
@@ -192,33 +174,98 @@ pub fn print_score_matrix(needle: &str, haystack: &str, score_matrix: &[Vec<__m2
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::r#const::*;
+    use crate::prefilter::Prefilter;
+
+    const CHAR_SCORE: u16 = MATCH_SCORE + MATCHING_CASE_BONUS;
+
+    fn get_score(needle: &str, haystack: &str) -> u16 {
+        let mut score_matrix = generate_score_matrix(needle.len(), haystack.len());
+        let score = smith_waterman(
+            &Prefilter::case_needle(needle),
+            haystack.as_bytes(),
+            &Scoring::default(),
+            &mut score_matrix,
+        );
+        print_score_matrix(needle, haystack, &score_matrix);
+        score
+    }
 
     #[test]
-    fn thisthisthis() {
-        let needle = "deadbe";
-        let haystack = "deadbeef";
+    fn test_score_basic() {
+        assert_eq!(get_score("b", "abc"), CHAR_SCORE);
+        assert_eq!(get_score("c", "abc"), CHAR_SCORE);
+    }
 
-        let scoring = Scoring::default();
-        let mut score_matrix = generate_score_matrix(needle.len(), haystack.len());
+    #[test]
+    fn test_score_prefix() {
+        assert_eq!(get_score("a", "abc"), CHAR_SCORE + PREFIX_BONUS);
+        assert_eq!(get_score("a", "aabc"), CHAR_SCORE + PREFIX_BONUS);
+        assert_eq!(get_score("a", "babc"), CHAR_SCORE);
+    }
 
-        let score = smith_waterman(
-            &Needle::new(needle),
-            haystack.as_bytes(),
-            &scoring,
-            &mut score_matrix,
+    #[test]
+    fn test_score_exact_match() {
+        assert_eq!(get_score("a", "a"), CHAR_SCORE + PREFIX_BONUS);
+        assert_eq!(get_score("abc", "abc"), 3 * CHAR_SCORE + PREFIX_BONUS);
+    }
+
+    #[test]
+    fn test_score_delimiter() {
+        assert_eq!(get_score("-", "a--bc"), CHAR_SCORE);
+        assert_eq!(get_score("b", "a-b"), CHAR_SCORE + DELIMITER_BONUS);
+        assert_eq!(get_score("a", "a-b-c"), CHAR_SCORE + PREFIX_BONUS);
+        assert_eq!(get_score("b", "a--b"), CHAR_SCORE + DELIMITER_BONUS);
+        assert_eq!(get_score("c", "a--bc"), CHAR_SCORE);
+        assert_eq!(get_score("a", "-a--bc"), CHAR_SCORE + DELIMITER_BONUS);
+    }
+
+    #[test]
+    fn test_score_no_delimiter_for_delimiter_chars() {
+        assert_eq!(get_score("-", "a-bc"), CHAR_SCORE);
+        assert_eq!(get_score("-", "a--bc"), CHAR_SCORE);
+        assert!(get_score("a_b", "a_bb") > get_score("a_b", "a__b"));
+    }
+
+    #[test]
+    fn test_score_affine_gap() {
+        assert_eq!(
+            get_score("test", "Uterst"),
+            CHAR_SCORE * 4 - GAP_OPEN_PENALTY
         );
-        print_score_matrix(needle, haystack, &score_matrix);
-        println!("max_score: {}", score);
-
-        let haystack = "deadbf";
-        let score = smith_waterman(
-            &Needle::new(needle),
-            haystack.as_bytes(),
-            &scoring,
-            &mut score_matrix,
+        assert_eq!(
+            get_score("test", "Uterrst"),
+            CHAR_SCORE * 4 - GAP_OPEN_PENALTY - GAP_EXTEND_PENALTY
         );
+    }
 
-        print_score_matrix(needle, haystack, &score_matrix);
-        println!("max_score: {}", score);
+    #[test]
+    fn test_score_capital_bonus() {
+        assert_eq!(get_score("a", "A"), MATCH_SCORE + PREFIX_BONUS);
+        assert_eq!(get_score("A", "Aa"), CHAR_SCORE + PREFIX_BONUS);
+        assert_eq!(get_score("D", "forDist"), CHAR_SCORE + CAPITALIZATION_BONUS);
+        assert_eq!(get_score("D", "foRDist"), CHAR_SCORE);
+        assert_eq!(get_score("D", "FOR_DIST"), CHAR_SCORE + DELIMITER_BONUS);
+    }
+
+    #[test]
+    fn test_score_prefix_beats_delimiter() {
+        assert!(get_score("swap", "swap(test)") > get_score("swap", "iter_swap(test)"));
+        assert!(get_score("_", "_private_member") > get_score("_", "public_member"));
+    }
+
+    #[test]
+    fn test_score_prefix_beats_capitalization() {
+        assert!(get_score("H", "HELLO") > get_score("H", "fooHello"));
+    }
+
+    #[test]
+    fn test_score_continuous_beats_delimiter() {
+        assert!(get_score("foo", "fooo") > get_score("foo", "f_o_o_o"));
+    }
+
+    #[test]
+    fn test_score_continuous_beats_capitalization() {
+        assert!(get_score("fo", "foo") > get_score("fo", "faOo"));
     }
 }

@@ -6,14 +6,7 @@ use crate::Scoring;
 
 const DELIMITERS: [u8; 7] = [b' ', b'/', b'.', b',', b'_', b'-', b':'];
 
-pub fn match_greedy<S1: AsRef<str>, S2: AsRef<str>>(
-    needle: S1,
-    haystack: S2,
-    scoring: &Scoring,
-) -> (u16, Vec<usize>, bool) {
-    let needle = needle.as_ref().as_bytes();
-    let haystack = haystack.as_ref().as_bytes();
-
+pub fn match_greedy(needle: &[u8], haystack: &[u8], scoring: &Scoring) -> (u16, Vec<usize>) {
     let mut score = 0;
     let mut indices = vec![];
     let mut haystack_idx = 0;
@@ -91,15 +84,10 @@ pub fn match_greedy<S1: AsRef<str>, S2: AsRef<str>>(
         }
 
         // didn't find a match
-        return (0, vec![], false);
+        return (0, vec![]);
     }
 
-    let exact = haystack == needle;
-    if exact {
-        score += scoring.exact_match_bonus;
-    }
-
-    (score, indices, exact)
+    (score, indices)
 }
 
 #[cfg(test)]
@@ -110,7 +98,7 @@ mod tests {
     const CHAR_SCORE: u16 = MATCH_SCORE + MATCHING_CASE_BONUS;
 
     fn get_score(needle: &str, haystack: &str) -> u16 {
-        match_greedy(needle, haystack, &Scoring::default()).0
+        match_greedy(needle.as_bytes(), haystack.as_bytes(), &Scoring::default()).0
     }
 
     #[test]
@@ -137,18 +125,6 @@ mod tests {
         assert_eq!(get_score("a", "abc"), CHAR_SCORE + PREFIX_BONUS);
         assert_eq!(get_score("a", "aabc"), CHAR_SCORE + PREFIX_BONUS);
         assert_eq!(get_score("a", "babc"), CHAR_SCORE);
-    }
-
-    #[test]
-    fn test_score_exact_match() {
-        assert_eq!(
-            get_score("a", "a"),
-            CHAR_SCORE + EXACT_MATCH_BONUS + PREFIX_BONUS
-        );
-        assert_eq!(
-            get_score("abc", "abc"),
-            3 * CHAR_SCORE + EXACT_MATCH_BONUS + PREFIX_BONUS
-        );
     }
 
     #[test]

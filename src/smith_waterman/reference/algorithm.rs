@@ -1,6 +1,6 @@
 use crate::r#const::*;
 
-pub fn smith_waterman(needle: &str, haystack: &str) -> (u16, Vec<Vec<u16>>, bool) {
+pub fn smith_waterman(needle: &str, haystack: &str) -> (u16, Vec<Vec<u16>>) {
     let needle = needle.as_bytes();
     let haystack = haystack.as_bytes();
 
@@ -24,14 +24,11 @@ pub fn smith_waterman(needle: &str, haystack: &str) -> (u16, Vec<Vec<u16>>, bool
         let needle_char = needle_char.to_ascii_lowercase();
 
         let mut left_gap_penalty_mask = true;
-        let mut delimiter_bonus_enabled = false;
         let mut prev_haystack_is_delimiter = false;
         let mut prev_haystack_is_lowercase = false;
 
         for j in 0..haystack.len() {
             let is_prefix = j == 0;
-            let is_offset_prefix =
-                j == 1 && prev_col_scores[0] == 0 && !haystack[0].is_ascii_alphabetic();
 
             // Load chunk and remove casing
             let haystack_char = haystack[j];
@@ -46,8 +43,6 @@ pub fn smith_waterman(needle: &str, haystack: &str) -> (u16, Vec<Vec<u16>>, bool
             // Give a bonus for prefix matches
             let match_score = if is_prefix {
                 MATCH_SCORE + PREFIX_BONUS
-            } else if is_offset_prefix {
-                MATCH_SCORE + OFFSET_PREFIX_BONUS
             } else {
                 MATCH_SCORE
             };
@@ -57,7 +52,7 @@ pub fn smith_waterman(needle: &str, haystack: &str) -> (u16, Vec<Vec<u16>>, bool
             let is_match = needle_char == haystack_char;
             let diag_score = if is_match {
                 diag + match_score
-                    + if prev_haystack_is_delimiter && delimiter_bonus_enabled && !haystack_is_delimiter { DELIMITER_BONUS } else { 0 }
+                    + if prev_haystack_is_delimiter && !haystack_is_delimiter { DELIMITER_BONUS } else { 0 }
                     // ignore capitalization on the prefix
                     + if !is_prefix && haystack_is_uppercase && prev_haystack_is_lowercase { CAPITALIZATION_BONUS } else { 0 }
                     + if matched_casing_mask { MATCHING_CASE_BONUS } else { 0 }
@@ -93,8 +88,6 @@ pub fn smith_waterman(needle: &str, haystack: &str) -> (u16, Vec<Vec<u16>>, bool
             // Update haystack char masks
             prev_haystack_is_lowercase = haystack_is_lowercase;
             prev_haystack_is_delimiter = haystack_is_delimiter;
-            // Only enable delimiter bonus if we've seen a non-delimiter char
-            delimiter_bonus_enabled |= !prev_haystack_is_delimiter;
 
             // Store the scores for the next iterations
             up_score_simd = max_score;
@@ -105,33 +98,17 @@ pub fn smith_waterman(needle: &str, haystack: &str) -> (u16, Vec<Vec<u16>>, bool
         }
     }
 
-    let mut max_score = all_time_max_score;
-    let exact = haystack == needle;
-    if exact {
-        max_score += EXACT_MATCH_BONUS;
-    }
-
-    (max_score, score_matrix, exact)
+    (all_time_max_score, score_matrix)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Scoring, smith_waterman::simd::smith_waterman as smith_waterman_simd};
 
     const CHAR_SCORE: u16 = MATCH_SCORE + MATCHING_CASE_BONUS;
 
     fn get_score(needle: &str, haystack: &str) -> u16 {
-        let ref_score = smith_waterman(needle, haystack).0;
-        let simd_score =
-            smith_waterman_simd::<16, 1>(needle, &[haystack], None, &Scoring::default()).0[0];
-
-        assert_eq!(
-            ref_score, simd_score,
-            "Reference and SIMD scores don't match"
-        );
-
-        ref_score
+        smith_waterman(needle, haystack).0
     }
 
     #[test]
@@ -148,26 +125,9 @@ mod tests {
     }
 
     #[test]
-    fn test_score_offset_prefix() {
-        // Give prefix bonus on second char if the first char isn't a letter
-        assert_eq!(get_score("a", "-a"), CHAR_SCORE + OFFSET_PREFIX_BONUS);
-        assert_eq!(get_score("-a", "-ab"), 2 * CHAR_SCORE + PREFIX_BONUS);
-        assert_eq!(get_score("a", "'a"), CHAR_SCORE + OFFSET_PREFIX_BONUS);
-        assert_eq!(get_score("a", "Ba"), CHAR_SCORE);
-    }
-
-    #[test]
     fn test_score_exact_match() {
-        assert_eq!(
-            get_score("a", "a"),
-            CHAR_SCORE + EXACT_MATCH_BONUS + PREFIX_BONUS
-        );
-        assert_eq!(
-            get_score("abc", "abc"),
-            3 * CHAR_SCORE + EXACT_MATCH_BONUS + PREFIX_BONUS
-        );
-        assert_eq!(get_score("ab", "abc"), 2 * CHAR_SCORE + PREFIX_BONUS);
-        assert_eq!(get_score("abc", "ab"), 2 * CHAR_SCORE + PREFIX_BONUS);
+        assert_eq!(get_score("a", "a"), CHAR_SCORE + PREFIX_BONUS);
+        assert_eq!(get_score("abc", "abc"), 3 * CHAR_SCORE + PREFIX_BONUS);
     }
 
     #[test]
@@ -177,7 +137,7 @@ mod tests {
         assert_eq!(get_score("a", "a-b-c"), CHAR_SCORE + PREFIX_BONUS);
         assert_eq!(get_score("b", "a--b"), CHAR_SCORE + DELIMITER_BONUS);
         assert_eq!(get_score("c", "a--bc"), CHAR_SCORE);
-        assert_eq!(get_score("a", "-a--bc"), CHAR_SCORE + OFFSET_PREFIX_BONUS);
+        assert_eq!(get_score("a", "-a--bc"), CHAR_SCORE + DELIMITER_BONUS);
     }
 
     #[test]

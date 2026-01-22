@@ -84,7 +84,7 @@ mod tests {
     use super::char_indices_from_score_matrix;
 
     fn get_indices(needle: &str, haystack: &str) -> Vec<usize> {
-        let (_, score_matrix, _) = smith_waterman(needle, haystack);
+        let (_, score_matrix) = smith_waterman(needle, haystack);
         let score_matrix_ref = score_matrix
             .iter()
             .map(|v| v.as_slice())
