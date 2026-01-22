@@ -6,13 +6,9 @@ use std::arch::x86_64::*;
 /// the order does matter across 16 byte boundaries. The needle chars must include both the
 /// uppercase and lowercase variants of the character.
 ///
-/// Fastest with SSE2, AVX, and AVX2, but still very fast with just SSE2. Use a function with
-/// `#[target_feature(enable = "sse2,avx,avx2")]` or `#[target_feature(enable = "sse2")]`
-///
 /// # Safety
-/// When W > 16, the caller must ensure that the minimum length of the haystack is >= 16.
-/// When W <= 16, the caller must ensure that the minimum length of the haystack is >= 8.
-/// In all cases, the caller must ensure the needle.len() > 0 and that SSE2 is available.
+/// The caller must ensure that the minimum length of the haystack is >= 8.
+/// The caller must ensure the needle.len() > 0 and that SSE2 is available.
 #[inline(always)]
 pub unsafe fn match_haystack_unordered_insensitive(
     needle: &[(u8, u8)],
