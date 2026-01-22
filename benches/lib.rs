@@ -1,7 +1,7 @@
 #![feature(portable_simd)]
 
 use criterion::{Criterion, criterion_group, criterion_main};
-use std::{arch::x86_64::*, hint::black_box, time::Duration};
+use std::{hint::black_box, time::Duration};
 
 mod interleave;
 mod match_list;
@@ -9,10 +9,7 @@ mod prefilter;
 
 use frizbee::{
     Scoring,
-    smith_waterman::{
-        simd::{smith_waterman, typos_from_score_matrix},
-        v2,
-    },
+    smith_waterman::{simd, v2},
 };
 use interleave::{interleave_bench, interleave_misaligned_bench};
 use match_list::{match_list_bench, match_list_generated_bench};
@@ -22,58 +19,38 @@ fn criterion_benchmark(c: &mut Criterion) {
     let needle = "test";
     let haystack: [&str; 16] = std::array::repeat("~~~~~~t~est~~~~");
 
-    let mut max_score_val = 0;
+    let mut max_score = 0;
     let mut typo_count = 0;
     c.bench_function("intra-sequence", |b| {
-        let mut max_score = unsafe { _mm256_setzero_si256() };
         let scoring = Scoring::default();
-        let mut score_matrix = (0..(haystack.len() / 16 + 1))
-            .map(|_| {
-                (0..=needle.len())
-                    .map(|_| unsafe { _mm256_setzero_si256() })
-                    .collect()
-            })
-            .collect::<Vec<_>>();
+        let mut score_matrix = v2::generate_score_matrix(needle.len(), haystack[0].len());
+        let needle = v2::Needle::new(needle);
         b.iter(|| unsafe {
             for haystack in haystack.iter() {
-                max_score = v2::smith_waterman(needle, haystack, &mut score_matrix, &scoring);
-                // typo_count = v2::typos_from_score_matrix(&score_matrix);
-                black_box(max_score);
+                max_score =
+                    v2::smith_waterman(&needle, haystack.as_bytes(), &scoring, &mut score_matrix);
+                typo_count =
+                    v2::typos_from_score_matrix(&score_matrix, max_score, 0, haystack.len());
                 black_box(typo_count);
             }
         });
-        max_score_val = unsafe {
-            _mm256_extract_epi16(max_score, 0)
-                .max(_mm256_extract_epi16(max_score, 1))
-                .max(_mm256_extract_epi16(max_score, 2))
-                .max(_mm256_extract_epi16(max_score, 3))
-                .max(_mm256_extract_epi16(max_score, 4))
-                .max(_mm256_extract_epi16(max_score, 5))
-                .max(_mm256_extract_epi16(max_score, 6))
-                .max(_mm256_extract_epi16(max_score, 7))
-                .max(_mm256_extract_epi16(max_score, 8))
-                .max(_mm256_extract_epi16(max_score, 9))
-                .max(_mm256_extract_epi16(max_score, 10))
-                .max(_mm256_extract_epi16(max_score, 11))
-                .max(_mm256_extract_epi16(max_score, 12))
-                .max(_mm256_extract_epi16(max_score, 13))
-                .max(_mm256_extract_epi16(max_score, 14))
-                .max(_mm256_extract_epi16(max_score, 15))
-        };
     });
     println!("typo_count: {}", typo_count);
-    println!("max_score_val: {}", max_score_val);
+    println!("max_score: {}", max_score);
 
     let mut max_score_val = 0;
     c.bench_function("inter-sequence", |b| {
         let scoring = Scoring::default();
         b.iter(|| {
-            let (max_scores, score_matrix, _) =
-                smith_waterman::<16, 16>(black_box(needle), black_box(&haystack), None, &scoring);
+            let (max_scores, score_matrix, _) = simd::smith_waterman::<16, 16>(
+                black_box(needle),
+                black_box(&haystack),
+                None,
+                &scoring,
+            );
             max_score_val = max_scores[0];
-            black_box(score_matrix);
-            // let typo_count = typos_from_score_matrix(&score_matrix, 0);
-            // assert_eq!(typo_count[0], 0);
+            let typo_count = simd::typos_from_score_matrix(&score_matrix, 0);
+            assert_eq!(typo_count[0], 0);
         })
     });
     println!("max_score_val: {}", max_score_val);
