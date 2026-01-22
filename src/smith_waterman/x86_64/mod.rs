@@ -47,11 +47,10 @@ pub fn smith_waterman(
 
         // State
         let mut prev_delimiter_mask = _mm256_setzero_si256();
+        let mut prefix_mask = get_prefix_mask();
         let mut max_scores = _mm256_setzero_si256();
 
         for mut col_idx in 0..(haystack.len().div_ceil(16)) {
-            let mut prefix_mask = get_prefix_mask();
-
             let haystack = _mm_loadu(haystack, col_idx * 16, haystack.len());
             col_idx += 1;
 
@@ -133,12 +132,13 @@ pub fn smith_waterman(
                 score_matrix[col_idx][row_idx] = row_scores;
                 prev_row_scores = row_scores;
                 up_gap_mask = match_mask;
-                prefix_mask = _mm256_setzero_si256();
 
                 if row_idx == needle.len() {
                     max_scores = _mm256_max_epu16(max_scores, row_scores);
                 }
             }
+
+            prefix_mask = _mm256_setzero_si256();
         }
 
         _mm256_smax_epu16(max_scores)
