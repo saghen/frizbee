@@ -1,19 +1,14 @@
-#![feature(portable_simd)]
-#![feature(get_mut_unchecked)]
-
 use std::cmp::Ordering;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 mod r#const;
-mod incremental;
 mod one_shot;
 pub mod prefilter;
 pub mod smith_waterman;
 
-pub use incremental::IncrementalMatcher;
-pub use one_shot::{match_indices, match_list, match_list_parallel, matcher_v2};
+pub use one_shot::match_list;
 
 use r#const::*;
 
@@ -99,9 +94,6 @@ pub struct Scoring {
 
     /// Bonus for matching the first character of the haystack (e.g. "h" on "hello_world")
     pub prefix_bonus: u16,
-    /// Bonus for matching the second character of the haystack, if the first character is not a letter
-    /// (e.g. "h" on "_hello_world")
-    pub offset_prefix_bonus: u16,
     /// Bonus for matching a capital letter after a lowercase letter
     /// (e.g. "b" on "fooBar" will receive a bonus on "B")
     pub capitalization_bonus: u16,
@@ -126,7 +118,6 @@ impl Default for Scoring {
             gap_extend_penalty: GAP_EXTEND_PENALTY,
 
             prefix_bonus: PREFIX_BONUS,
-            offset_prefix_bonus: OFFSET_PREFIX_BONUS,
             capitalization_bonus: CAPITALIZATION_BONUS,
             matching_case_bonus: MATCHING_CASE_BONUS,
             exact_match_bonus: EXACT_MATCH_BONUS,
