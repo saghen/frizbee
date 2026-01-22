@@ -10,8 +10,7 @@ repository = "https://github.com/saghen/frizbee"
 lto = true
 
 [dev-dependencies]
-criterion = "0.6"
-iai-callgrind = "0.14.0"
+criterion = "0.8"
 nucleo = "0.5.0"
 rand = "0.9.1"
 rand_distr = "0.5.1"
@@ -22,10 +21,6 @@ harness = false
 
 [lib]
 bench = false
-
-# [[bench]]
-# name = "smith_waterman_iai"
-# harness = false
 
 [dependencies]
 multiversion = "0.8.0"

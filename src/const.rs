@@ -4,7 +4,6 @@ pub const GAP_OPEN_PENALTY: u16 = 5; // Penalty for opening a gap (deletion/inse
 pub const GAP_EXTEND_PENALTY: u16 = 1; // Penalty for extending a gap (deletion/insertion)
 
 pub const PREFIX_BONUS: u16 = 12; // Bonus for matching the first character of the haystack (e.g. "h" on "hello_world")
-pub const OFFSET_PREFIX_BONUS: u16 = 8; // Bonus for matching the second character of the haystack, if the first character is not a letter (e.g. "h" on "_hello_world")
 pub const DELIMITER_BONUS: u16 = 4; // Bonus for matching _after_ a delimiter character (e.g. "hw" on "hello_world", will give a bonus on "w")
 pub const CAPITALIZATION_BONUS: u16 = 4; // Bonus for matching a capital letter after a lowercase letter (e.g. "b" on "fooBar" will receive a bonus on "B")
 pub const MATCHING_CASE_BONUS: u16 = 4; // Bonus for matching the case of the needle (e.g. "WorLd" on "WoRld" will receive a bonus on "W", "o", "d")

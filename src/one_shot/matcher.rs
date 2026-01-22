@@ -1,9 +1,8 @@
 use super::Appendable;
-use super::bucket::FixedWidthBucket;
 
-use crate::one_shot::match_too_large;
 use crate::prefilter::Prefilter;
 use crate::smith_waterman::greedy::match_greedy;
+use crate::smith_waterman::x86_64;
 use crate::{Config, Match};
 
 /// Computes the Smith-Waterman score with affine gaps for a needle against a list of haystacks.
@@ -16,14 +15,34 @@ pub fn match_list<S1: AsRef<str>, S2: AsRef<str>>(
     haystacks: &[S2],
     config: &Config,
 ) -> Vec<Match> {
+    assert!(
+        haystacks.len() < (u32::MAX as usize),
+        "haystack index overflow"
+    );
+
+    // Guard against empty needle or empty haystacks
+    if needle.as_ref().is_empty() {
+        return (0..haystacks.len())
+            .map(|i| Match {
+                index: i as u32,
+                score: 0,
+                exact: false,
+            })
+            .collect();
+    }
+    if haystacks.is_empty() {
+        return vec![];
+    }
+
+    // Matching
     let mut matches = if config.max_typos.is_none() {
         Vec::with_capacity(haystacks.len())
     } else {
         vec![]
     };
+    match_list_impl(needle, haystacks, config, &mut matches);
 
-    match_list_impl(needle, haystacks, 0, config, &mut matches);
-
+    // Sorting
     if config.sort {
         #[cfg(feature = "parallel_sort")]
         {
@@ -40,46 +59,11 @@ pub fn match_list<S1: AsRef<str>, S2: AsRef<str>>(
 pub(crate) fn match_list_impl<S1: AsRef<str>, S2: AsRef<str>, M: Appendable<Match>>(
     needle: S1,
     haystacks: &[S2],
-    index_offset: u32,
     config: &Config,
     matches: &mut M,
 ) {
-    assert!(
-        (index_offset as usize) + haystacks.len() < (u32::MAX as usize),
-        "haystack index overflow"
-    );
-
-    let needle = needle.as_ref();
-    if needle.is_empty() {
-        for (i, _) in haystacks.iter().enumerate() {
-            matches.append(Match {
-                index: (i as u32) + index_offset,
-                score: 0,
-                exact: false,
-            });
-        }
-        return;
-    }
-
-    let prefilter = Prefilter::new(needle, config.max_typos.unwrap_or(0));
-
-    let mut bucket_size_4 = FixedWidthBucket::<4, M>::new(needle, &config);
-    let mut bucket_size_8 = FixedWidthBucket::<8, M>::new(needle, &config);
-    let mut bucket_size_12 = FixedWidthBucket::<12, M>::new(needle, &config);
-    let mut bucket_size_16 = FixedWidthBucket::<16, M>::new(needle, &config);
-    let mut bucket_size_20 = FixedWidthBucket::<20, M>::new(needle, &config);
-    let mut bucket_size_24 = FixedWidthBucket::<24, M>::new(needle, &config);
-    let mut bucket_size_32 = FixedWidthBucket::<32, M>::new(needle, &config);
-    let mut bucket_size_48 = FixedWidthBucket::<48, M>::new(needle, &config);
-    let mut bucket_size_64 = FixedWidthBucket::<64, M>::new(needle, &config);
-    let mut bucket_size_96 = FixedWidthBucket::<96, M>::new(needle, &config);
-    let mut bucket_size_128 = FixedWidthBucket::<128, M>::new(needle, &config);
-    let mut bucket_size_160 = FixedWidthBucket::<160, M>::new(needle, &config);
-    let mut bucket_size_192 = FixedWidthBucket::<192, M>::new(needle, &config);
-    let mut bucket_size_224 = FixedWidthBucket::<224, M>::new(needle, &config);
-    let mut bucket_size_256 = FixedWidthBucket::<256, M>::new(needle, &config);
-    let mut bucket_size_384 = FixedWidthBucket::<384, M>::new(needle, &config);
-    let mut bucket_size_512 = FixedWidthBucket::<512, M>::new(needle, &config);
+    let prefilter = Prefilter::new(needle.as_ref(), config.max_typos.unwrap_or(0));
+    let needle = needle.as_ref().as_bytes();
 
     // If max_typos is set, we can ignore any haystacks that are shorter than the needle
     // minus the max typos, since it's impossible for them to match
@@ -88,80 +72,69 @@ pub(crate) fn match_list_impl<S1: AsRef<str>, S2: AsRef<str>, M: Appendable<Matc
         .map(|max| needle.len().saturating_sub(max as usize))
         .unwrap_or(0);
 
-    for (i, haystack) in haystacks
+    // TODO: test if building the full matrix is faster than calculating the max length
+    let max_haystack_len = haystacks
         .iter()
-        .map(|h| h.as_ref())
+        .map(|h| h.as_ref().len())
+        .max()
+        .unwrap()
+        .min(512);
+
+    let mut score_matrix = x86_64::generate_score_matrix(needle.len(), max_haystack_len);
+
+    for (i, original_haystack, haystack) in haystacks
+        .iter()
+        .map(|h| h.as_ref().as_bytes())
         .enumerate()
         .filter(|(_, h)| h.len() >= min_haystack_len)
-        .filter(|(_, h)| {
-            config.max_typos.is_none()
-                || prefilter.match_haystack_unordered_insensitive(h.as_bytes())
+        // Prefiltering
+        .filter_map(|(i, haystack)| {
+            let (matched, skipped_chunks) = config.max_typos.map_or((true, 0), |_| {
+                prefilter.match_haystack_insensitive(haystack)
+            });
+            // Skip any chunks where we know the needle doesn't match
+            matched.then(|| (i, haystack, haystack[skipped_chunks * 16..].as_ref()))
         })
     {
-        let i = i as u32 + index_offset;
-
-        // fallback to greedy matching
-        if match_too_large(needle, haystack) {
-            let (score, _, exact) = match_greedy(needle, haystack, &config.scoring);
-            matches.append(Match {
-                index: i,
-                score,
-                exact,
-            });
-            continue;
-        }
-
-        // Pick the bucket to insert into based on the length of the haystack
-        match haystack.len() {
-            0..=4 => bucket_size_4.add_haystack(matches, haystack, i),
-            5..=8 => bucket_size_8.add_haystack(matches, haystack, i),
-            9..=12 => bucket_size_12.add_haystack(matches, haystack, i),
-            13..=16 => bucket_size_16.add_haystack(matches, haystack, i),
-            17..=20 => bucket_size_20.add_haystack(matches, haystack, i),
-            21..=24 => bucket_size_24.add_haystack(matches, haystack, i),
-            25..=32 => bucket_size_32.add_haystack(matches, haystack, i),
-            33..=48 => bucket_size_48.add_haystack(matches, haystack, i),
-            49..=64 => bucket_size_64.add_haystack(matches, haystack, i),
-            65..=96 => bucket_size_96.add_haystack(matches, haystack, i),
-            97..=128 => bucket_size_128.add_haystack(matches, haystack, i),
-            129..=160 => bucket_size_160.add_haystack(matches, haystack, i),
-            161..=192 => bucket_size_192.add_haystack(matches, haystack, i),
-            193..=224 => bucket_size_224.add_haystack(matches, haystack, i),
-            225..=256 => bucket_size_256.add_haystack(matches, haystack, i),
-            257..=384 => bucket_size_384.add_haystack(matches, haystack, i),
-            385..=512 => bucket_size_512.add_haystack(matches, haystack, i),
-
-            // fallback to greedy matching
-            _ => {
-                let (score, _, exact) = match_greedy(needle, haystack, &config.scoring);
-                matches.append(Match {
-                    index: i,
-                    score,
-                    exact,
-                });
+        // Haystack too large, fallback to greedy matching
+        let mut score = if haystack.len() > 512 {
+            let (score, _) = match_greedy(needle, haystack, &config.scoring);
+            if score == 0 {
                 continue;
             }
-        };
-    }
+            score
+        }
+        // Smith waterman matching
+        else {
+            let score = x86_64::smith_waterman(
+                &prefilter.needle_cased,
+                haystack,
+                &config.scoring,
+                &mut score_matrix,
+            );
 
-    // Run processing on remaining haystacks in the buckets
-    bucket_size_4.finalize(matches);
-    bucket_size_8.finalize(matches);
-    bucket_size_12.finalize(matches);
-    bucket_size_16.finalize(matches);
-    bucket_size_20.finalize(matches);
-    bucket_size_24.finalize(matches);
-    bucket_size_32.finalize(matches);
-    bucket_size_48.finalize(matches);
-    bucket_size_64.finalize(matches);
-    bucket_size_96.finalize(matches);
-    bucket_size_128.finalize(matches);
-    bucket_size_160.finalize(matches);
-    bucket_size_192.finalize(matches);
-    bucket_size_224.finalize(matches);
-    bucket_size_256.finalize(matches);
-    bucket_size_384.finalize(matches);
-    bucket_size_512.finalize(matches);
+            if let Some(max_typos) = config.max_typos
+                && x86_64::typos_from_score_matrix(&score_matrix, score, max_typos, haystack.len())
+                    > max_typos
+            {
+                continue;
+            }
+
+            score
+        };
+
+        // Exact match bonus
+        let exact = needle == original_haystack;
+        if exact {
+            score += config.scoring.exact_match_bonus;
+        }
+
+        matches.append(Match {
+            index: i as u32,
+            score,
+            exact,
+        });
+    }
 }
 
 #[cfg(test)]
@@ -179,6 +152,7 @@ mod tests {
         };
         let matches = match_list(needle, &haystack, &config);
 
+        println!("{:?}", matches);
         assert_eq!(matches.len(), 4);
         assert_eq!(matches[0].index, 3);
         assert_eq!(matches[1].index, 0);
