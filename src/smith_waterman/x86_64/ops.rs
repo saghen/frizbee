@@ -1,14 +1,19 @@
 use std::{arch::x86_64::*, mem::transmute};
 
-const MASK_BYTES: [u8; 32] = [
+#[repr(C, align(32))]
+pub struct Aligned32<T>(T);
+
+impl Aligned32<[u8; 32]> {
+    #[inline(always)]
+    pub fn as_m256i(&self) -> __m256i {
+        unsafe { transmute::<[u8; 32], __m256i>(self.0) }
+    }
+}
+
+pub const PREFIX_MASK: Aligned32<[u8; 32]> = Aligned32([
     0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-];
-
-#[inline(always)]
-pub unsafe fn get_prefix_mask() -> __m256i {
-    transmute::<[u8; 32], __m256i>(MASK_BYTES)
-}
+]);
 
 #[inline(always)]
 unsafe fn load_partial_safe(ptr: *const u8, len: usize) -> __m128i {
@@ -109,6 +114,11 @@ pub unsafe fn _mm_loadu(haystack: &[u8], start: usize, len: usize) -> __m128i {
 #[inline(always)]
 pub unsafe fn _mm256_not_epi16(v: __m256i) -> __m256i {
     _mm256_xor_si256(v, _mm256_set1_epi16(-1))
+}
+
+#[inline(always)]
+pub unsafe fn _mm_not_si128(v: __m128i) -> __m128i {
+    _mm_xor_si128(v, _mm_set1_epi32(-1))
 }
 
 #[inline(always)]
