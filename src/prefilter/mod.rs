@@ -11,6 +11,10 @@
 //!
 //! All algorithms, except scalar, assume that needle.len() > 0 && haystack.len() >= 8
 
+use std::arch::x86_64::__m256i;
+
+use crate::prefilter::x86_64::needle_to_insensitive_avx2;
+
 pub mod scalar;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
@@ -19,14 +23,18 @@ pub mod x86_64;
 pub struct Prefilter {
     pub needle: String,
     pub needle_cased: Vec<(u8, u8)>,
+    pub needle_cased_avx2: Vec<__m256i>,
     pub max_typos: u16,
 }
 
 impl Prefilter {
     pub fn new(needle: &str, max_typos: u16) -> Self {
+        let needle_cased = Self::case_needle(needle);
+        let needle_cased_avx2 = unsafe { needle_to_insensitive_avx2(&needle_cased) };
         Prefilter {
             needle: needle.to_string(),
-            needle_cased: Self::case_needle(needle),
+            needle_cased,
+            needle_cased_avx2,
             max_typos,
         }
     }
@@ -48,75 +56,60 @@ impl Prefilter {
             .collect()
     }
 
+    #[inline(always)]
     pub fn match_haystack_sensitive(&self, haystack: &[u8]) -> (bool, usize) {
-        self.match_haystack::<true, false>(haystack)
-    }
-
-    pub fn match_haystack_insensitive(&self, haystack: &[u8]) -> (bool, usize) {
-        self.match_haystack::<false, false>(haystack)
-    }
-
-    pub fn match_haystack_sensitive_typos(&self, haystack: &[u8]) -> (bool, usize) {
-        self.match_haystack::<true, true>(haystack)
-    }
-
-    pub fn match_haystack_insensitive_typos(&self, haystack: &[u8]) -> (bool, usize) {
-        self.match_haystack::<false, true>(haystack)
+        self.match_haystack::<true>(haystack)
     }
 
     #[inline(always)]
-    fn match_haystack<const CASE_SENSITIVE: bool, const TYPOS: bool>(
-        &self,
-        haystack: &[u8],
-    ) -> (bool, usize) {
+    pub fn match_haystack_insensitive(&self, haystack: &[u8]) -> (bool, usize) {
+        self.match_haystack::<false>(haystack)
+    }
+
+    #[inline(always)]
+    fn match_haystack<const CASE_SENSITIVE: bool>(&self, haystack: &[u8]) -> (bool, usize) {
         match haystack.len() {
             0 => (true, 0),
-            1..8 => (
-                self.match_haystack_scalar::<CASE_SENSITIVE, TYPOS>(haystack),
-                0,
-            ),
-            _ => unsafe { self.match_haystack_x86_64::<CASE_SENSITIVE, TYPOS>(haystack) },
+            1..8 => (self.match_haystack_scalar::<CASE_SENSITIVE>(haystack), 0),
+            _ => unsafe { self.match_haystack_x86_64::<CASE_SENSITIVE>(haystack) },
         }
     }
 
     #[inline(always)]
-    fn match_haystack_scalar<const CASE_SENSITIVE: bool, const TYPOS: bool>(
-        &self,
-        haystack: &[u8],
-    ) -> bool {
-        match (TYPOS, CASE_SENSITIVE) {
-            (true, true) => {
+    fn match_haystack_scalar<const CASE_SENSITIVE: bool>(&self, haystack: &[u8]) -> bool {
+        match (self.max_typos, CASE_SENSITIVE) {
+            (0, true) => scalar::match_haystack(self.needle.as_bytes(), haystack),
+            (0, false) => scalar::match_haystack_insensitive(&self.needle_cased, haystack),
+            (_, true) => {
                 scalar::match_haystack_typos(self.needle.as_bytes(), haystack, self.max_typos)
             }
-            (true, false) => scalar::match_haystack_typos_insensitive(
+            (_, false) => scalar::match_haystack_typos_insensitive(
                 &self.needle_cased,
                 haystack,
                 self.max_typos,
             ),
-            (false, true) => scalar::match_haystack(self.needle.as_bytes(), haystack),
-            (false, false) => scalar::match_haystack_insensitive(&self.needle_cased, haystack),
         }
     }
 
     #[cfg(target_arch = "x86_64")]
     #[inline(always)]
-    unsafe fn match_haystack_x86_64<const CASE_SENSITIVE: bool, const TYPOS: bool>(
+    unsafe fn match_haystack_x86_64<const CASE_SENSITIVE: bool>(
         &self,
         haystack: &[u8],
     ) -> (bool, usize) {
         unsafe {
-            match (CASE_SENSITIVE, TYPOS) {
-                (true, false) => x86_64::match_haystack_unordered(self.needle.as_bytes(), haystack),
-                (true, true) => x86_64::match_haystack_unordered_typos(
-                    self.needle.as_bytes(),
+            match (self.max_typos, CASE_SENSITIVE) {
+                (0, false) => {
+                    x86_64::match_haystack_unordered_insensitive(&self.needle_cased_avx2, haystack)
+                }
+                (0, true) => x86_64::match_haystack_unordered_insensitive_typos(
+                    &self.needle_cased_avx2,
                     haystack,
                     self.max_typos,
                 ),
-                (false, false) => {
-                    x86_64::match_haystack_unordered_insensitive(&self.needle_cased, haystack)
-                }
-                (false, true) => x86_64::match_haystack_unordered_typos_insensitive(
-                    &self.needle_cased,
+                (_, false) => x86_64::match_haystack_unordered(self.needle.as_bytes(), haystack),
+                (_, true) => x86_64::match_haystack_unordered_typos(
+                    self.needle.as_bytes(),
                     haystack,
                     self.max_typos,
                 ),
@@ -354,21 +347,6 @@ mod tests {
         let prefilter = Prefilter::new(needle, max_typos);
         let haystack = normalize_haystack(haystack);
         let haystack = haystack.as_bytes();
-
-        if max_typos > 0 {
-            return prefilter.match_haystack::<CASE_SENSITIVE, true>(haystack).0;
-        }
-
-        let result = prefilter
-            .match_haystack::<CASE_SENSITIVE, false>(haystack)
-            .0;
-
-        let typo_result = prefilter.match_haystack::<CASE_SENSITIVE, true>(haystack).0;
-        assert_eq!(
-            result, typo_result,
-            "regular and typos implementations (set to 0) produced different results"
-        );
-
-        result
+        prefilter.match_haystack::<CASE_SENSITIVE>(haystack).0
     }
 }

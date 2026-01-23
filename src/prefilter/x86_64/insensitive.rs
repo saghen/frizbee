@@ -11,30 +11,23 @@ use std::arch::x86_64::*;
 /// The caller must ensure the needle.len() > 0 and that SSE2 is available.
 #[inline(always)]
 pub unsafe fn match_haystack_unordered_insensitive(
-    needle: &[(u8, u8)],
+    needle: &[__m256i],
     haystack: &[u8],
 ) -> (bool, usize) {
     let len = haystack.len();
 
-    let mut can_skip_chunks = true;
     let mut skipped_chunks = 0;
+    let mut can_skip_chunks = true;
 
-    let mut needle_iter = needle
-        .iter()
-        .map(|&(c1, c2)| unsafe { (_mm_set1_epi8(c1 as i8), _mm_set1_epi8(c2 as i8)) });
-    let mut needle_char = needle_iter.next().unwrap();
+    let mut needle_iter = needle.iter();
+    let mut needle_char = *needle_iter.next().unwrap();
 
     for start in (0..len).step_by(16) {
         let haystack_chunk = unsafe { overlapping_load(haystack, start, len) };
-
+        let haystack_chunk = unsafe { _mm256_broadcastsi128_si256(haystack_chunk) };
         loop {
-            let mask = unsafe {
-                _mm_movemask_epi8(_mm_or_si128(
-                    _mm_cmpeq_epi8(needle_char.1, haystack_chunk),
-                    _mm_cmpeq_epi8(needle_char.0, haystack_chunk),
-                ))
-            };
-            if mask == 0 {
+            if unsafe { _mm256_movemask_epi8(_mm256_cmpeq_epi8(needle_char, haystack_chunk)) } == 0
+            {
                 // No match, advance to next chunk
                 break;
             }
@@ -45,7 +38,7 @@ pub unsafe fn match_haystack_unordered_insensitive(
                     skipped_chunks = start / 16;
                 }
                 can_skip_chunks = false;
-                needle_char = next_needle_char;
+                needle_char = *next_needle_char;
             } else {
                 return (true, skipped_chunks);
             }

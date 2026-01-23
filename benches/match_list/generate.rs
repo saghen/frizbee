@@ -52,7 +52,7 @@ pub fn generate_haystack(needle: &str, options: HaystackGenerationOptions) -> Ve
 
     // Create a normal distribution for the lengths
     let normal_dist = Normal::new(options.median_length as f64, options.std_dev_length as f64)
-        .expect("Failed to create normal distribution");
+        .expect("failed to create normal distribution");
 
     (0..options.num_samples)
         .map(|_| {
@@ -75,8 +75,11 @@ pub fn generate_haystack(needle: &str, options: HaystackGenerationOptions) -> Ve
                 // skipping any characters that are in the needle
                 MatchType::None => rng
                     .sample_iter(&Alphanumeric)
-                    .filter(|c| !needle.contains(&c.to_string()))
                     .map(char::from)
+                    .filter(|c| {
+                        !needle.contains(c.to_ascii_lowercase())
+                            && !needle.contains(c.to_ascii_uppercase())
+                    })
                     .take(length)
                     .collect(),
 
@@ -91,8 +94,15 @@ pub fn generate_haystack(needle: &str, options: HaystackGenerationOptions) -> Ve
                         .collect::<Vec<char>>();
 
                     // Get remaining characters to fill the remaining length randomly
-                    let remaining_chars = (match_count..length)
-                        .map(|_| rng.sample(Alphanumeric).into())
+                    let remaining_chars = rng
+                        .clone()
+                        .sample_iter(Alphanumeric)
+                        .map(char::from)
+                        .filter(|c| {
+                            !needle.contains(c.to_ascii_lowercase())
+                                && !needle.contains(c.to_ascii_uppercase())
+                        })
+                        .take(length - match_count)
                         .collect::<Vec<char>>();
 
                     join_randomly(&needle_chars, &remaining_chars, &mut rng)
