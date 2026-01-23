@@ -1,16 +1,14 @@
 # Frizbee
 
-Frizbee is a SIMD fuzzy string matcher written in Rust. The core of the algorithm uses Smith-Waterman with affine gaps, similar to FZF, but with many of the scoring bonuses from FZY. In the included benchmark, with typo resistance disabled, it outperforms [nucleo](https://github.com/helix-editor/nucleo) by ~2x and supports multithreading (WIP), see [benchmarks](./BENCHMARKS.md). It matches against bytes directly, ignoring unicode. Used by [blink.cmp](https://github.com/saghen/blink.cmp), [fff.nvim](https://github.com/dmtrKovalenko/fff.nvim) and eventually by [blink.pick](https://github.com/saghen/blink.pick).
-
-Special thank you to [stefanboca](https://github.com/stefanboca) and [ii14](https://github.com/ii14)!
+Frizbee is a SIMD fuzzy string matcher written in Rust. The core of the algorithm uses Smith-Waterman with affine gaps, similar to FZF, but with many of the scoring bonuses from FZY. In the included benchmark, with typo resistance disabled, it outperforms [nucleo](https://github.com/helix-editor/nucleo) by ~2x and supports multithreading (WIP), see [benchmarks](./BENCHMARKS.md). It matches against bytes directly, ignoring unicode. Used by [blink.cmp](https://github.com/saghen/blink.cmp), [fff.nvim](https://github.com/dmtrKovalenko/fff.nvim), [skim](https://github.com/helix-editor/nucleo). Special thank you to [stefanboca](https://github.com/stefanboca) and [ii14](https://github.com/ii14)!
 
 ## Usage
 
 ```rust
-use frizbee::*;
+use frizbee::{match_list, Options};
 
-let needle = "pri";
-let haystacks = ["print", "println", "prelude", "println!"];
+let needle = "fBr";
+let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
 
 let matches = match_list(needle, &haystacks, Options::default());
 ```
@@ -21,17 +19,21 @@ See [BENCHMARKS.md](./BENCHMARKS.md)
 
 ## Algorithm
 
-The core of the algorithm is Smith-Waterman with affine gaps and inter-sequence many-to-one parallelism via SIMD ([ref](https://pmc.ncbi.nlm.nih.gov/articles/PMC8419822/#Sec13)). Besides the parallelism, this is the basis of other popular fuzzy matching algorithms like FZF and Nucleo. The main properties of Smith-Waterman are:
+The core of the algorithm is Smith-Waterman with affine gaps and row-wise parallelism via SIMD. Besides the parallelism, this is the basis of other popular fuzzy matching algorithms like [FZF](https://github.com/junegunn/fzf) and [Nucleo](https://github.com/helix-editor/nucleo). The main properties of Smith-Waterman are:
 
 - Always finds the best alignment
 - Supports insertion, deletion and substitution
-- Does not support transposition (i.e. swapping two adjacent characters)
+- Does not support transposition (swapping two adjacent characters)
 
-Due to the inter-sequence parallelism, the algorithm groups items by length into buckets (8, 12, 16, ...). Then it processes 8, 16 or 32 (based on SIMD width) items from each bucket at a time. As a result, it's best to match on long lists, as the overhead ends up practically disappearing. See the [implementation](#implementation) section for more details.
+### Prefiltering
+
+### Smith Waterman
 
 The SIMD width will be chosen at runtime based on available instruction set extensions. Currently, only x86_64's AVX2 (256-bit) and AVX512 (512-bit) will be detected at runtime, falling back to 128-bit SIMD if neither is available.
 
 Nucleo and FZF use a prefiltering step that removes any haystacks that do not include all of the characters in the needle. Frizbee does this by default but supports disabling it to allow for typos. You may control the maximum number of typos with the `max_typos` property.
+
+### Scoring
 
 - `MATCH_SCORE`: Score for a match
 - `MISMATCH_PENALTY`: Penalty for a mismatch (substitution)

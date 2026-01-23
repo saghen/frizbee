@@ -6,7 +6,11 @@ use crate::Scoring;
 
 const DELIMITERS: [u8; 7] = [b' ', b'/', b'.', b',', b'_', b'-', b':'];
 
-pub fn match_greedy(needle: &[u8], haystack: &[u8], scoring: &Scoring) -> (u16, Vec<usize>) {
+pub fn match_greedy(
+    needle: &[u8],
+    haystack: &[u8],
+    scoring: &Scoring,
+) -> Option<(u16, Vec<usize>)> {
     let mut score = 0;
     let mut indices = vec![];
     let mut haystack_idx = 0;
@@ -84,10 +88,10 @@ pub fn match_greedy(needle: &[u8], haystack: &[u8], scoring: &Scoring) -> (u16, 
         }
 
         // didn't find a match
-        return (0, vec![]);
+        return None;
     }
 
-    (score, indices)
+    Some((score, indices))
 }
 
 #[cfg(test)]
@@ -98,7 +102,9 @@ mod tests {
     const CHAR_SCORE: u16 = MATCH_SCORE + MATCHING_CASE_BONUS;
 
     fn get_score(needle: &str, haystack: &str) -> u16 {
-        match_greedy(needle.as_bytes(), haystack.as_bytes(), &Scoring::default()).0
+        match_greedy(needle.as_bytes(), haystack.as_bytes(), &Scoring::default())
+            .map(|(score, _)| score)
+            .unwrap_or_default()
     }
 
     #[test]
