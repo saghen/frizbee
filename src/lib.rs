@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 use serde::{Deserialize, Serialize};
 
 mod r#const;
+mod incremental;
 mod one_shot;
 pub mod prefilter;
 pub mod smith_waterman;

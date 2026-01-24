@@ -2,7 +2,7 @@
 
 use std::arch::x86_64::*;
 
-use crate::{Scoring, prefilter::Prefilter};
+use crate::{Scoring, prefilter::case_needle};
 
 mod gaps;
 mod ops;
@@ -33,7 +33,7 @@ impl SmithWatermanMatcher {
     }
 
     fn broadcast_needle(needle: &str) -> Vec<(__m128i, __m128i)> {
-        let needle_cased = Prefilter::case_needle(needle);
+        let needle_cased = case_needle(needle);
         needle_cased
             .iter()
             .map(|(c1, c2)| unsafe { (_mm_set1_epi8(*c1 as i8), _mm_set1_epi8(*c2 as i8)) })
