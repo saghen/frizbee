@@ -1,3 +1,3 @@
 pub mod greedy;
 pub mod reference;
-pub mod simd;
+pub mod x86_64;

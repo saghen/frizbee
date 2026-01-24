@@ -29,7 +29,7 @@ pub fn match_list_generated_bench(
             std_dev_length: median_length / 4,
             num_samples: 100_000,
         };
-        let haystack_owned = generate_haystack(needle, options.clone());
+        let haystack_owned = generate_haystack(needle, options);
         let haystack = &haystack_owned
             .iter()
             .map(|x| x.as_str())
@@ -68,6 +68,11 @@ pub fn match_list_bench(c: &mut criterion::Criterion, name: &str, needle: &str, 
         |b, haystack| b.iter(|| match_list(needle, haystack, Some(0))),
     );
     group.bench_with_input(
+        BenchmarkId::new("Frizbee: Parallel", median_length),
+        haystack,
+        |b, haystack| b.iter(|| match_list_parallel(needle, haystack, Some(0))),
+    );
+    group.bench_with_input(
         BenchmarkId::new("Frizbee: All Scores", median_length),
         haystack,
         |b, haystack| b.iter(|| match_list(needle, haystack, None)),
@@ -76,18 +81,6 @@ pub fn match_list_bench(c: &mut criterion::Criterion, name: &str, needle: &str, 
         BenchmarkId::new("Frizbee: 1 Typo", median_length),
         haystack,
         |b, haystack| b.iter(|| match_list(needle, haystack, Some(1))),
-    );
-
-    // Parallel
-    group.bench_with_input(
-        BenchmarkId::new("Frizbee (Parallel)", median_length),
-        haystack,
-        |b, haystack| b.iter(|| match_list_parallel(needle, haystack, Some(0), 8)),
-    );
-    group.bench_with_input(
-        BenchmarkId::new("Frizbee: All Scores (Parallel)", median_length),
-        haystack,
-        |b, haystack| b.iter(|| match_list_parallel(needle, haystack, None, 8)),
     );
 }
 
@@ -106,15 +99,14 @@ fn match_list_parallel(
     needle: &str,
     haystack: &[&str],
     max_typos: Option<u16>,
-    num_threads: usize,
 ) -> Vec<frizbee::Match> {
     frizbee::match_list_parallel(
         black_box(needle),
         black_box(haystack),
-        &frizbee::Config {
+        black_box(&frizbee::Config {
             max_typos,
             ..Default::default()
-        },
-        num_threads,
+        }),
+        8,
     )
 }

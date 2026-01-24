@@ -1,8 +1,3 @@
-#![allow(stable_features)]
-#![feature(avx512_target_feature)]
-#![feature(portable_simd)]
-#![feature(get_mut_unchecked)]
-
 use std::cmp::Ordering;
 
 #[cfg(feature = "serde")]
@@ -14,8 +9,7 @@ mod one_shot;
 pub mod prefilter;
 pub mod smith_waterman;
 
-pub use incremental::IncrementalMatcher;
-pub use one_shot::{match_indices, match_list, match_list_parallel};
+pub use one_shot::{match_list, match_list_parallel};
 
 use r#const::*;
 
@@ -36,8 +30,8 @@ impl PartialOrd for Match {
 }
 impl Ord for Match {
     fn cmp(&self, other: &Self) -> Ordering {
-        self.score
-            .cmp(&other.score)
+        (self.score as u64)
+            .cmp(&(other.score as u64))
             .reverse()
             .then_with(|| self.index.cmp(&other.index))
     }
@@ -61,25 +55,20 @@ pub struct MatchIndices {
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Config {
-    /// May perform prefiltering, depending on haystack length and max number of typos,
-    /// which drastically improves performance when most of the haystack does not match
-    /// Automatically disabled when max_typos = None
-    pub prefilter: bool,
     /// The maximum number of characters missing from the needle, before an item in the
     /// haystack is filtered out
     pub max_typos: Option<u16>,
     /// Sort the results by score (descending)
     pub sort: bool,
-    /// Controls the scoring used by the smith waterman algorithm. You may tweak these pay close
-    /// attention to the documentation for each property, as small changes can lead to poor
-    /// matching.
+    /// Controls the scoring used by the smith waterman algorithm. You may tweak these but pay
+    /// close attention to the documentation for each property, as small changes can lead to
+    /// poor matching.
     pub scoring: Scoring,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
-            prefilter: true,
             max_typos: Some(0),
             sort: true,
             scoring: Scoring::default(),
@@ -101,9 +90,6 @@ pub struct Scoring {
 
     /// Bonus for matching the first character of the haystack (e.g. "h" on "hello_world")
     pub prefix_bonus: u16,
-    /// Bonus for matching the second character of the haystack, if the first character is not a letter
-    /// (e.g. "h" on "_hello_world")
-    pub offset_prefix_bonus: u16,
     /// Bonus for matching a capital letter after a lowercase letter
     /// (e.g. "b" on "fooBar" will receive a bonus on "B")
     pub capitalization_bonus: u16,
@@ -111,9 +97,6 @@ pub struct Scoring {
     pub matching_case_bonus: u16,
     /// Bonus for matching the exact needle (e.g. "foo" on "foo" will receive the bonus)
     pub exact_match_bonus: u16,
-
-    /// List of characters which are considered delimiters
-    pub delimiters: String,
     /// Bonus for matching _after_ a delimiter character (e.g. "hw" on "hello_world",
     /// will give a bonus on "w") if "_" is included in the delimiters string
     pub delimiter_bonus: u16,
@@ -128,12 +111,9 @@ impl Default for Scoring {
             gap_extend_penalty: GAP_EXTEND_PENALTY,
 
             prefix_bonus: PREFIX_BONUS,
-            offset_prefix_bonus: OFFSET_PREFIX_BONUS,
             capitalization_bonus: CAPITALIZATION_BONUS,
             matching_case_bonus: MATCHING_CASE_BONUS,
             exact_match_bonus: EXACT_MATCH_BONUS,
-
-            delimiters: " /.,_-:".to_string(),
             delimiter_bonus: DELIMITER_BONUS,
         }
     }

@@ -1,25 +1,36 @@
-pub mod bucket;
-mod indices;
+#[cfg(feature = "parallel_sort")]
+use rayon::prelude::*;
+
+use crate::{Config, Match};
+
 mod matcher;
 mod parallel;
 
-pub use indices::match_indices;
-pub use matcher::match_list;
+use matcher::Matcher;
 pub use parallel::match_list_parallel;
 
-pub trait Appendable<T> {
-    fn append(&mut self, value: T);
-}
+pub fn match_list<S1: AsRef<str>, S2: AsRef<str>>(
+    needle: S1,
+    haystacks: &[S2],
+    config: &Config,
+) -> Vec<Match> {
+    assert!(
+        haystacks.len() < (u32::MAX as usize),
+        "haystack index overflow"
+    );
 
-impl<T> Appendable<T> for Vec<T> {
-    fn append(&mut self, value: T) {
-        self.push(value);
+    // Matching
+    let mut matches = vec![];
+    let mut matcher = Matcher::new(needle.as_ref(), config);
+    matcher.match_list_impl(haystacks, 0, &mut matches);
+
+    // Sorting
+    if config.sort {
+        #[cfg(feature = "parallel_sort")]
+        matches.par_sort_unstable();
+        #[cfg(not(feature = "parallel_sort"))]
+        matches.sort_unstable();
     }
-}
 
-const MAX_MATRIX_BYTES: usize = 32 * 1024; // 32 KB
-#[inline(always)]
-pub(crate) fn match_too_large(needle: &str, haystack: &str) -> bool {
-    let max_haystack_len = MAX_MATRIX_BYTES / needle.len().max(1) / 2; // divide by 2 since we use u16
-    haystack.len() > max_haystack_len
+    matches
 }
