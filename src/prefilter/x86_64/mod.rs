@@ -1,31 +1,10 @@
 use std::arch::x86_64::*;
 
-mod insensitive;
-mod insensitive_typos;
-mod sensitive;
-mod sensitive_typos;
+mod avx2;
+mod sse;
 
-pub use insensitive::*;
-pub use insensitive_typos::*;
-pub use sensitive::*;
-pub use sensitive_typos::*;
-
-/// Loads the cased needle into a __m256i vector, where the first 16 bytes are the uppercase
-/// and the last 16 bytes are the lowercase version of the needle.
-///
-/// # Safety
-/// Caller must ensure that SSE2, AVX, and AVX2 are available at runtime
-#[target_feature(enable = "sse2,avx,avx2")]
-pub unsafe fn needle_to_insensitive_avx2(
-    needle_cased: &[(u8, u8)],
-) -> Vec<std::arch::x86_64::__m256i> {
-    needle_cased
-        .iter()
-        .map(|&(c1, c2)| unsafe {
-            _mm256_loadu2_m128i(&_mm_set1_epi8(c1 as i8), &_mm_set1_epi8(c2 as i8))
-        })
-        .collect::<Vec<_>>()
-}
+pub use avx2::*;
+pub use sse::*;
 
 /// Loads a chunk of 16 bytes from the haystack, with overlap when remaining bytes < 16,
 /// since it's dramatically faster than a memcpy.
@@ -38,8 +17,13 @@ pub unsafe fn needle_to_insensitive_avx2(
 ///
 /// # Safety
 /// Caller must ensure that haystack length >= 8
+/// If aligned is true, data must be aligned to 16 bytes and start must be a multiple of 16
 #[inline(always)]
-pub unsafe fn overlapping_load(haystack: &[u8], start: usize, len: usize) -> __m128i {
+pub unsafe fn overlapping_load<const ALIGNED: bool>(
+    haystack: &[u8],
+    start: usize,
+    len: usize,
+) -> __m128i {
     unsafe {
         match len {
             0..=7 => unreachable!(),
@@ -52,9 +36,13 @@ pub unsafe fn overlapping_load(haystack: &[u8], start: usize, len: usize) -> __m
                 let high = _mm_loadl_epi64(haystack[high_start..].as_ptr() as *const __m128i);
                 _mm_unpacklo_epi64(low, high)
             }
-            16 => _mm_loadu_si128(haystack.as_ptr() as *const __m128i),
+            16 if !ALIGNED => _mm_loadu_si128(haystack.as_ptr() as *const __m128i),
+            16 => _mm_load_si128(haystack.as_ptr() as *const __m128i),
             // Avoid reading past the end, instead re-read the last 16 bytes
-            _ => _mm_loadu_si128(haystack[start.min(len - 16)..].as_ptr() as *const __m128i),
+            _ if !ALIGNED => {
+                _mm_loadu_si128(haystack[start.min(len - 16)..].as_ptr() as *const __m128i)
+            }
+            _ => _mm_load_si128(haystack[start..].as_ptr() as *const __m128i),
         }
     }
 }

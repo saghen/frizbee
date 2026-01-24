@@ -4,10 +4,10 @@ use crate::smith_waterman::x86_64::SmithWatermanMatcher;
 use crate::{Config, Match};
 
 #[derive(Debug, Clone)]
-pub struct Matcher {
+pub(crate) struct Matcher {
     needle: String,
     config: Config,
-    prefilter: Prefilter,
+    prefilter: Prefilter<false>,
     smith_waterman: SmithWatermanMatcher,
 }
 
@@ -16,12 +16,12 @@ impl Matcher {
         Self {
             needle: needle.to_string(),
             config: config.clone(),
-            prefilter: Prefilter::new(needle, config.max_typos.unwrap_or(0)),
+            prefilter: Prefilter::new(needle),
             smith_waterman: SmithWatermanMatcher::new(needle, &config.scoring),
         }
     }
 
-    pub(crate) fn match_list_impl<S: AsRef<str>>(
+    pub fn match_list_impl<S: AsRef<str>>(
         &mut self,
         haystacks: &[S],
         index_offset: u32,
@@ -59,9 +59,10 @@ impl Matcher {
             .filter(|(_, h)| h.len() >= min_haystack_len)
             // Prefiltering
             .filter_map(|(i, haystack)| {
-                let (matched, skipped_chunks) = self.config.max_typos.map_or((true, 0), |_| {
-                    self.prefilter.match_haystack_insensitive(haystack)
-                });
+                let (matched, skipped_chunks) =
+                    self.config.max_typos.map_or((true, 0), |max_typos| {
+                        self.prefilter.match_haystack(haystack, max_typos)
+                    });
                 // Skip any chunks where we know the needle doesn't match
                 matched.then(|| (i, haystack[skipped_chunks * 16..].as_ref(), skipped_chunks))
             })
