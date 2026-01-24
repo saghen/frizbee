@@ -1,0 +1,162 @@
+use std::arch::x86_64::*;
+
+use super::overlapping_load;
+use crate::prefilter::{case_needle, scalar};
+
+#[derive(Debug, Clone)]
+pub struct PrefilterSSE<const ALIGNED: bool> {
+    needle: Vec<(u8, u8)>,
+}
+
+impl<const ALIGNED: bool> PrefilterSSE<ALIGNED> {
+    /// Creates a new prefilter algorithm for SSE
+    ///
+    /// # Safety
+    /// Caller must ensure that SSE2 is available at runtime
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub fn new(needle: &str) -> Self {
+        Self {
+            needle: case_needle(needle),
+        }
+    }
+
+    pub fn is_available() -> bool {
+        // TODO: these get converted to constants if compiling with -C target-cpu=x86-64-v3
+        is_x86_feature_detected!("sse2")
+    }
+
+    /// Checks if the needle is wholly contained in the haystack, ignoring the exact order of the
+    /// bytes. For example, if the needle is "test", the haystack "tset" will return true. However,
+    /// the order does matter across 16 byte boundaries. The needle chars must include both the
+    /// uppercase and lowercase variants of the character.
+    ///
+    /// # Safety
+    /// The caller must ensure that the minimum length of the haystack is >= 8.
+    /// The caller must ensure the needle.len() > 0 and that SSE2 is available.
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub unsafe fn match_haystack(&self, haystack: &[u8]) -> (bool, usize) {
+        let len = haystack.len();
+
+        match len {
+            0 => return (true, 0),
+            1..=7 => {
+                return (scalar::match_haystack(&self.needle, haystack), 0);
+            }
+            _ => {}
+        };
+
+        let mut can_skip_chunks = true;
+        let mut skipped_chunks = 0;
+
+        let mut needle_iter = self
+            .needle
+            .iter()
+            .map(|&(c1, c2)| (_mm_set1_epi8(c1 as i8), _mm_set1_epi8(c2 as i8)));
+        let mut needle_char = needle_iter.next().unwrap();
+
+        for start in (0..len).step_by(16) {
+            let haystack_chunk = unsafe { overlapping_load::<ALIGNED>(haystack, start, len) };
+
+            loop {
+                let mask = _mm_movemask_epi8(_mm_or_si128(
+                    _mm_cmpeq_epi8(needle_char.1, haystack_chunk),
+                    _mm_cmpeq_epi8(needle_char.0, haystack_chunk),
+                ));
+                if mask == 0 {
+                    // No match, advance to next chunk
+                    break;
+                }
+
+                // Progress to next needle char, if available
+                if let Some(next_needle_char) = needle_iter.next() {
+                    if can_skip_chunks {
+                        skipped_chunks = start / 16;
+                    }
+                    can_skip_chunks = false;
+                    needle_char = next_needle_char;
+                } else {
+                    return (true, skipped_chunks);
+                }
+            }
+        }
+
+        (false, skipped_chunks)
+    }
+
+    /// # Safety
+    /// The caller must ensure that the minimum length of the haystack is >= 8.
+    /// The caller must ensure the needle.len() > 0 and that SSE2 is available.
+    #[inline]
+    #[target_feature(enable = "sse2")]
+    pub unsafe fn match_haystack_typos(&self, haystack: &[u8], max_typos: u16) -> (bool, usize) {
+        let len = haystack.len();
+
+        match len {
+            0 => return (true, 0),
+            1..=7 => {
+                return (
+                    scalar::match_haystack_typos(&self.needle, haystack, max_typos),
+                    0,
+                );
+            }
+            _ => {}
+        };
+
+        let mut needle_iter = self
+            .needle
+            .iter()
+            .map(|&(c1, c2)| (_mm_set1_epi8(c1 as i8), _mm_set1_epi8(c2 as i8)));
+        let mut needle_char = needle_iter.next().unwrap();
+
+        let mut typos = 0;
+        loop {
+            let mut skipped_chunks = 0;
+            let mut can_skip_chunks = true;
+
+            if typos > max_typos as usize {
+                return (false, 0);
+            }
+
+            // TODO: this is slightly incorrect, because if we match on the third chunk,
+            // we would only scan from the third chunk onwards for the next needle. Technically,
+            // we should scan from the beginning of the haystack instead, but I believe the
+            // previous memchr implementation had the same bug.
+            for start in (0..len).step_by(16) {
+                let haystack_chunk = unsafe { overlapping_load::<ALIGNED>(haystack, start, len) };
+
+                loop {
+                    let mask = _mm_movemask_epi8(_mm_or_si128(
+                        _mm_cmpeq_epi8(needle_char.1, haystack_chunk),
+                        _mm_cmpeq_epi8(needle_char.0, haystack_chunk),
+                    ));
+                    if mask == 0 {
+                        // No match, advance to next chunk
+                        break;
+                    }
+
+                    // Progress to next needle char, if available
+                    if let Some(next_needle_char) = needle_iter.next() {
+                        if can_skip_chunks {
+                            skipped_chunks = start / 16;
+                        }
+                        can_skip_chunks = false;
+
+                        needle_char = next_needle_char;
+                    } else {
+                        return (true, skipped_chunks);
+                    }
+                }
+            }
+
+            typos += 1;
+
+            if let Some(next_needle_char) = needle_iter.next() {
+                needle_char = next_needle_char;
+            } else {
+                return (true, skipped_chunks);
+            }
+        }
+    }
+}
