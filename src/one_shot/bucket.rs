@@ -68,10 +68,7 @@ impl<'a, const W: usize, M: Appendable<Match>> FixedWidthBucket<'a, W, M> {
         }
     }
 
-    fn _finalize<const L: usize>(&mut self, matches: &mut M)
-    where
-        std::simd::LaneCount<L>: std::simd::SupportedLaneCount,
-    {
+    fn _finalize<const L: usize>(&mut self, matches: &mut M) {
         if self.length == 0 {
             return;
         }

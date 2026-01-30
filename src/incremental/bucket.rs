@@ -18,20 +18,14 @@ pub(crate) trait IncrementalBucketTrait {
     );
 }
 
-pub(crate) struct IncrementalBucket<const W: usize, const L: usize>
-where
-    std::simd::LaneCount<L>: std::simd::SupportedLaneCount,
-{
+pub(crate) struct IncrementalBucket<const W: usize, const L: usize> {
     pub length: usize,
     pub idxs: [u32; L],
     pub haystacks: [HaystackChar<L>; W],
     pub score_matrix: Vec<[Simd<u16, L>; W]>,
 }
 
-impl<const W: usize, const L: usize> IncrementalBucket<W, L>
-where
-    std::simd::LaneCount<L>: std::simd::SupportedLaneCount,
-{
+impl<const W: usize, const L: usize> IncrementalBucket<W, L> {
     pub fn new(haystacks: &[&str; L], idxs: [u32; L], length: usize) -> Self {
         Self {
             length,
@@ -42,10 +36,7 @@ where
     }
 }
 
-impl<const W: usize, const L: usize> IncrementalBucketTrait for IncrementalBucket<W, L>
-where
-    std::simd::LaneCount<L>: std::simd::SupportedLaneCount,
-{
+impl<const W: usize, const L: usize> IncrementalBucketTrait for IncrementalBucket<W, L> {
     #[inline]
     fn process(
         &mut self,

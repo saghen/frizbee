@@ -1,4 +1,4 @@
-use std::simd::{LaneCount, Simd, SupportedLaneCount};
+use std::simd::Simd;
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub mod avx2;
@@ -7,10 +7,7 @@ pub mod avx512;
 pub mod generic;
 
 #[inline(never)]
-pub fn interleave<const W: usize, const L: usize>(strs: [&str; L]) -> [Simd<u16, L>; W]
-where
-    LaneCount<L>: SupportedLaneCount,
-{
+pub fn interleave<const W: usize, const L: usize>(strs: [&str; L]) -> [Simd<u16, L>; W] {
     match L {
         #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
         32 if is_x86_feature_detected!("avx512f")

@@ -1,18 +1,12 @@
 use super::bucket::{IncrementalBucket, IncrementalBucketTrait};
 
-pub(crate) struct IncrementalBucketCollection<'a, const W: usize, const L: usize>
-where
-    std::simd::LaneCount<L>: std::simd::SupportedLaneCount,
-{
+pub(crate) struct IncrementalBucketCollection<'a, const W: usize, const L: usize> {
     length: usize,
     haystacks: [&'a str; L],
     idxs: [u32; L],
 }
 
-impl<'a, const W: usize, const L: usize> IncrementalBucketCollection<'a, W, L>
-where
-    std::simd::LaneCount<L>: std::simd::SupportedLaneCount,
-{
+impl<'a, const W: usize, const L: usize> IncrementalBucketCollection<'a, W, L> {
     pub fn new() -> Self {
         Self {
             length: 0,

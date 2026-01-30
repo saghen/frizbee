@@ -1,10 +1,7 @@
-use std::simd::{LaneCount, Simd, SupportedLaneCount, num::SimdUint};
+use std::simd::{Simd, num::SimdUint};
 
 #[inline(never)]
-pub fn interleave<const W: usize, const L: usize>(strs: [&str; L]) -> [Simd<u16, L>; W]
-where
-    LaneCount<L>: SupportedLaneCount,
-{
+pub fn interleave<const W: usize, const L: usize>(strs: [&str; L]) -> [Simd<u16, L>; W] {
     // Ensure the strings are all the length of W
     let strs = std::array::from_fn(|i| {
         let mut tmp = [0u8; W];
@@ -32,20 +29,14 @@ where
 }
 
 #[inline(always)]
-fn to_simd<const W: usize, const L: usize>(strs: [[u8; W]; L], offset: usize) -> [Simd<u16, L>; L]
-where
-    LaneCount<L>: SupportedLaneCount,
-{
+fn to_simd<const W: usize, const L: usize>(strs: [[u8; W]; L], offset: usize) -> [Simd<u16, L>; L] {
     std::array::from_fn(|i| {
         Simd::load_or_default(&strs[i][offset..(offset + L).min(W)]).cast::<u16>()
     })
 }
 
 #[inline(never)]
-pub fn interleave_chunk<const L: usize>(mut simds: [Simd<u16, L>; L]) -> [Simd<u16, L>; L]
-where
-    LaneCount<L>: SupportedLaneCount,
-{
+pub fn interleave_chunk<const L: usize>(mut simds: [Simd<u16, L>; L]) -> [Simd<u16, L>; L] {
     // Assert that L is a power of 2
     debug_assert!(L.is_power_of_two());
 
@@ -77,14 +68,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::simd::{LaneCount, Simd, SupportedLaneCount};
+    use std::simd::Simd;
 
     use super::interleave;
 
-    fn assert_matrix_eq<const L: usize, const W: usize>(a: [Simd<u16, L>; W], b: [[u8; L]; W])
-    where
-        LaneCount<L>: SupportedLaneCount,
-    {
+    fn assert_matrix_eq<const L: usize, const W: usize>(a: [Simd<u16, L>; W], b: [[u8; L]; W]) {
         let a = a.map(|a| {
             a.to_array()
                 .into_iter()
