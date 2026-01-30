@@ -1,5 +1,5 @@
 use std::simd::cmp::*;
-use std::simd::{Mask, Simd};
+use std::simd::{Mask, Select, Simd};
 
 use multiversion::multiversion;
 
@@ -14,10 +14,7 @@ use multiversion::multiversion;
 pub fn typos_from_score_matrix<const W: usize, const L: usize>(
     score_matrix: &[[Simd<u16, L>; W]],
     max_typos: u16,
-) -> [u16; L]
-where
-    std::simd::LaneCount<L>: std::simd::SupportedLaneCount,
-{
+) -> [u16; L] {
     let mut typo_count = [0u16; L];
     let mut scores = Simd::splat(0);
     let mut positions = Simd::splat(0);

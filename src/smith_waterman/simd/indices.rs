@@ -1,14 +1,11 @@
 use std::collections::HashSet;
-use std::simd::Simd;
 use std::simd::cmp::*;
+use std::simd::{Select, Simd};
 
 #[inline]
 pub fn char_indices_from_score_matrix<const W: usize, const L: usize>(
     score_matrices: &[[Simd<u16, L>; W]],
-) -> Vec<Vec<usize>>
-where
-    std::simd::LaneCount<L>: std::simd::SupportedLaneCount,
-{
+) -> Vec<Vec<usize>> {
     // Find the maximum score row/col for each haystack
     let mut max_scores = Simd::splat(0);
     let mut max_rows = Simd::splat(0);

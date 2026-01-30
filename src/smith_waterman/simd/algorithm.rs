@@ -2,7 +2,7 @@ use multiversion::multiversion;
 use std::ops::Not;
 use std::simd::cmp::*;
 use std::simd::num::SimdUint;
-use std::simd::{Mask, Simd};
+use std::simd::{Mask, Select, Simd};
 
 use super::{HaystackChar, NeedleChar, interleave};
 use crate::Scoring;
@@ -16,9 +16,7 @@ pub(crate) fn smith_waterman_inner<const L: usize>(
     prev_score_col: Option<&[Simd<u16, L>]>,
     curr_score_col: &mut [Simd<u16, L>],
     scoring: &Scoring,
-) where
-    std::simd::LaneCount<L>: std::simd::SupportedLaneCount,
-{
+) {
     let mut up_score_simd = Simd::splat(0);
     let mut up_gap_penalty_mask = Mask::splat(true);
     let mut left_gap_penalty_mask = Mask::splat(true);
@@ -131,10 +129,7 @@ pub fn smith_waterman<const W: usize, const L: usize>(
     haystack_strs: &[&str; L],
     max_typos: Option<u16>,
     scoring: &Scoring,
-) -> ([u16; L], Vec<[Simd<u16, L>; W]>, [bool; L])
-where
-    std::simd::LaneCount<L>: std::simd::SupportedLaneCount,
-{
+) -> ([u16; L], Vec<[Simd<u16, L>; W]>, [bool; L]) {
     let needle = needle_str.as_bytes();
     let haystacks = interleave::<W, L>(*haystack_strs).map(HaystackChar::new);
 

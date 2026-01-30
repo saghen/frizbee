@@ -1,5 +1,5 @@
-use std::simd::{LaneCount, SupportedLaneCount, cmp::*};
-use std::simd::{Mask, Simd};
+use std::simd::cmp::*;
+use std::simd::{Mask, Select, Simd};
 
 const CAPITAL_START: u16 = 65; // A
 const CAPITAL_END: u16 = 90; // Z
@@ -10,10 +10,7 @@ const TO_LOWERCASE_MASK: u16 = 0x20;
 #[inline(always)]
 pub(crate) fn simd_to_lowercase_with_mask<const L: usize>(
     data: Simd<u16, L>,
-) -> (Mask<i16, L>, Mask<i16, L>, Simd<u16, L>)
-where
-    LaneCount<L>: SupportedLaneCount,
-{
+) -> (Mask<i16, L>, Mask<i16, L>, Simd<u16, L>) {
     let is_capital_mask: Mask<i16, L> =
         data.simd_ge(Simd::splat(CAPITAL_START)) & data.simd_le(Simd::splat(CAPITAL_END));
     let is_lower_mask: Mask<i16, L> =
@@ -23,17 +20,11 @@ where
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct NeedleChar<const L: usize>
-where
-    LaneCount<L>: SupportedLaneCount,
-{
+pub(crate) struct NeedleChar<const L: usize> {
     pub(crate) lowercase: Simd<u16, L>,
     pub(crate) is_capital_mask: Mask<i16, L>,
 }
-impl<const L: usize> NeedleChar<L>
-where
-    LaneCount<L>: SupportedLaneCount,
-{
+impl<const L: usize> NeedleChar<L> {
     #[inline(always)]
     pub(crate) fn new(char: u16) -> Self {
         let (is_capital_mask, _, lowercase) = simd_to_lowercase_with_mask::<L>(Simd::splat(char));
@@ -45,19 +36,13 @@ where
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct HaystackChar<const L: usize>
-where
-    LaneCount<L>: SupportedLaneCount,
-{
+pub(crate) struct HaystackChar<const L: usize> {
     pub(crate) lowercase: Simd<u16, L>,
     pub(crate) is_lower_mask: Mask<i16, L>,
     pub(crate) is_capital_mask: Mask<i16, L>,
     pub(crate) is_delimiter_mask: Mask<i16, L>,
 }
-impl<const L: usize> HaystackChar<L>
-where
-    LaneCount<L>: SupportedLaneCount,
-{
+impl<const L: usize> HaystackChar<L> {
     #[inline(always)]
     pub(crate) fn new(chars: Simd<u16, L>) -> Self {
         let (is_capital_mask, is_lower_mask, lowercase) = simd_to_lowercase_with_mask::<L>(chars);
@@ -86,10 +71,7 @@ where
     }
 }
 
-impl<const L: usize> Default for HaystackChar<L>
-where
-    LaneCount<L>: SupportedLaneCount,
-{
+impl<const L: usize> Default for HaystackChar<L> {
     fn default() -> Self {
         Self {
             lowercase: Simd::splat(0),

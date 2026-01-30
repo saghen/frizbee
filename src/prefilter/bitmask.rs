@@ -1,6 +1,6 @@
 //! Kept for reference, but no longer used in the codebase due to poor performance without AVX512
 
-use std::simd::{Simd, cmp::SimdPartialOrd, num::SimdUint};
+use std::simd::{Select, Simd, cmp::SimdPartialOrd, num::SimdUint};
 
 const LANES: usize = 8;
 
