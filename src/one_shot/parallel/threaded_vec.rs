@@ -123,7 +123,14 @@ impl<T> ThreadedVec<T> {
 
 impl<T> Appendable<T> for Arc<ThreadedVec<T>> {
     fn append(&mut self, value: T) {
-        unsafe { Arc::get_mut_unchecked(self).push(value) };
+        #[cfg(feature = "simd")]
+        unsafe {
+            Arc::get_mut_unchecked(self).push(value)
+        };
+        #[cfg(not(feature = "simd"))]
+        Arc::get_mut(self)
+            .expect("Failed to acquire the threaded vec")
+            .push(value);
     }
 }
 
