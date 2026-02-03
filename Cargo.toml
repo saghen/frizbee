@@ -2,7 +2,7 @@
 name = "frizbee"
 description = "Fast fuzzy matching via SIMD smith waterman, similar algorithm to FZF/FZY"
 license = "MIT"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 repository = "https://github.com/saghen/frizbee"
 
