@@ -1,5 +1,3 @@
-#![allow(unsafe_op_in_unsafe_fn)]
-
 use std::arch::x86_64::*;
 
 use crate::{Scoring, prefilter::case_needle};
@@ -15,24 +13,24 @@ pub use typos::typos_from_score_matrix;
 const MAX_HAYSTACK_LEN: usize = 512;
 
 #[derive(Debug, Clone)]
-pub struct SmithWatermanMatcher {
+pub struct SmithWatermanMatcher<const ALIGNED: bool> {
+    #[cfg(test)]
     pub needle: String,
     pub needle_simd: Vec<(__m128i, __m128i)>,
-    pub score_matrix: Vec<Vec<__m256i>>,
     pub scoring: Scoring,
 }
 
-impl SmithWatermanMatcher {
-    pub fn new(needle: &str, scoring: &Scoring) -> Self {
+impl<const ALIGNED: bool> SmithWatermanMatcher<ALIGNED> {
+    pub fn new(needle: &[u8], scoring: &Scoring) -> Self {
         Self {
-            needle: needle.to_string(),
+            #[cfg(test)]
+            needle: String::from_utf8_lossy(needle).to_string(),
             needle_simd: Self::broadcast_needle(needle),
-            score_matrix: Self::generate_score_matrix(needle.len()),
             scoring: scoring.clone(),
         }
     }
 
-    fn broadcast_needle(needle: &str) -> Vec<(__m128i, __m128i)> {
+    fn broadcast_needle(needle: &[u8]) -> Vec<(__m128i, __m128i)> {
         let needle_cased = case_needle(needle);
         needle_cased
             .iter()
@@ -40,21 +38,25 @@ impl SmithWatermanMatcher {
             .collect()
     }
 
-    fn generate_score_matrix(needle_len: usize) -> Vec<Vec<__m256i>> {
-        (0..=(MAX_HAYSTACK_LEN / 16 + 1))
-            .map(|_| {
-                (0..=needle_len)
-                    .map(|_| unsafe { _mm256_setzero_si256() })
-                    .collect()
-            })
+    pub fn generate_score_matrix(needle_len: usize, haystack_len: usize) -> Vec<__m256i> {
+        (0..((needle_len + 1) * (haystack_len.div_ceil(16) + 1)))
+            .map(|_| unsafe { _mm256_setzero_si256() })
             .collect::<Vec<_>>()
     }
 
-    pub fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
-        let score = self.score_haystack(haystack);
+    pub fn generate_generic_score_matrix(needle_len: usize) -> Vec<__m256i> {
+        Self::generate_score_matrix(needle_len, MAX_HAYSTACK_LEN)
+    }
+
+    pub fn match_haystack(
+        &mut self,
+        haystack: &[u8],
+        max_typos: Option<u16>,
+        score_matrix: &mut [__m256i],
+    ) -> Option<u16> {
+        let score = self.score_haystack(haystack, score_matrix);
         if let Some(max_typos) = max_typos {
-            let typos =
-                typos_from_score_matrix(&self.score_matrix, score, max_typos, haystack.len());
+            let typos = typos_from_score_matrix(score_matrix, score, max_typos, haystack.len());
             if typos > max_typos {
                 return None;
             }
@@ -62,7 +64,8 @@ impl SmithWatermanMatcher {
         Some(score)
     }
 
-    pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
+    pub fn score_haystack(&self, haystack: &[u8], score_matrix: &mut [__m256i]) -> u16 {
+        let haystack_chunks = haystack.len().div_ceil(16);
         let scoring = &self.scoring;
         unsafe {
             // TODO: have prefix bonus scale based on distance
@@ -85,8 +88,12 @@ impl SmithWatermanMatcher {
             let mut prefix_mask = PREFIX_MASK.as_m256i();
             let mut max_scores = _mm256_setzero_si256();
 
-            for mut col_idx in 0..(haystack.len().div_ceil(16)) {
-                let haystack = _mm_loadu(haystack, col_idx * 16, haystack.len());
+            for mut col_idx in 0..haystack_chunks {
+                let haystack = if ALIGNED {
+                    _mm_load_si128(haystack.as_ptr().add(col_idx * 16) as *const __m128i)
+                } else {
+                    _mm_loadu(haystack, col_idx * 16, haystack.len())
+                };
                 col_idx += 1;
 
                 // Bonus for matching a capital letter after a lowercase letter
@@ -133,7 +140,7 @@ impl SmithWatermanMatcher {
                 prev_chunk_char_is_delimiter_mask = char_is_delimiter_mask;
 
                 let mut up_gap_mask = _mm256_setzero_si256();
-                let mut prev_row_scores = _mm256_setzero_si256();
+                let mut prev_row_scores = score_matrix[col_idx];
                 let mut row_scores = _mm256_setzero_si256();
 
                 for (row_idx, (needle_char, flipped_case_needle_char)) in
@@ -151,7 +158,7 @@ impl SmithWatermanMatcher {
                     let diag_scores = {
                         let diag = _mm256_shift_right_padded_epi16(
                             prev_row_scores,
-                            self.score_matrix[col_idx - 1][row_idx - 1],
+                            score_matrix[(row_idx - 1) * haystack_chunks + col_idx - 1],
                         );
 
                         // Add match score (+ mismatch penalty) for matches, avoiding blendv
@@ -197,15 +204,15 @@ impl SmithWatermanMatcher {
 
                     // Max of diagonal, up and left (after gap extension)
                     row_scores = propagate_horizontal_gaps(
-                        self.score_matrix[col_idx - 1][row_idx],
-                        _mm256_max_epu16(diag_scores, up_scores),
+                        score_matrix[row_idx * haystack_chunks + col_idx - 1], // Left
+                        _mm256_max_epu16(diag_scores, up_scores),              // Current
                         match_mask,
                         scoring.gap_open_penalty,
                         scoring.gap_extend_penalty,
                     );
 
                     // Store results
-                    self.score_matrix[col_idx][row_idx] = row_scores;
+                    score_matrix[row_idx * haystack_chunks + col_idx] = row_scores;
                     prev_row_scores = row_scores;
                     up_gap_mask = match_mask;
                 }
@@ -219,10 +226,10 @@ impl SmithWatermanMatcher {
         }
     }
 
-    pub fn print_score_matrix(&self, haystack: &str) {
-        let score_matrix = unsafe {
-            std::mem::transmute::<&[Vec<__m256i>], &[Vec<[u16; 16]>]>(&self.score_matrix)
-        };
+    #[cfg(test)]
+    pub fn print_score_matrix(&self, haystack: &str, score_matrix: &[__m256i]) {
+        let haystack_chunks = haystack.len().div_ceil(16) + 1;
+        let score_matrix = unsafe { std::mem::transmute::<&[__m256i], &[[u16; 16]]>(score_matrix) };
 
         print!("     ");
         for char in haystack.chars() {
@@ -230,19 +237,18 @@ impl SmithWatermanMatcher {
         }
         println!();
 
-        for (i, col_chunk) in score_matrix[0..=(haystack.len() / 16 + 1)]
-            .iter()
-            .skip(1)
+        for (i, row) in score_matrix
+            .chunks_exact(haystack_chunks)
             .enumerate()
+            .skip(1)
         {
-            for (j, row) in col_chunk.iter().skip(1).enumerate() {
-                print!("{:>3}  ", self.needle.chars().nth(j).unwrap());
-                for col in row[0..(haystack.len().saturating_sub(i * 16))].iter() {
-                    print!("{:<4} ", col);
-                }
-                println!();
+            print!("{:<4} ", self.needle.chars().nth(i - 1).unwrap_or(' '));
+            for col in row.iter().skip(1).flatten() {
+                print!("{:<4} ", col);
             }
+            println!();
         }
+        println!();
     }
 }
 
@@ -254,9 +260,11 @@ mod tests {
     const CHAR_SCORE: u16 = MATCH_SCORE + MATCHING_CASE_BONUS;
 
     fn get_score(needle: &str, haystack: &str) -> u16 {
-        let mut matcher = SmithWatermanMatcher::new(needle, &Scoring::default());
-        let score = matcher.score_haystack(haystack.as_bytes());
-        matcher.print_score_matrix(haystack);
+        let mut score_matrix =
+            SmithWatermanMatcher::<false>::generate_score_matrix(needle.len(), haystack.len());
+        let matcher = SmithWatermanMatcher::<false>::new(needle.as_bytes(), &Scoring::default());
+        let score = matcher.score_haystack(haystack.as_bytes(), &mut score_matrix);
+        matcher.print_score_matrix(haystack, &score_matrix);
         score
     }
 

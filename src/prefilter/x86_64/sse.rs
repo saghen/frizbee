@@ -15,7 +15,7 @@ impl<const ALIGNED: bool> PrefilterSSE<ALIGNED> {
     /// Caller must ensure that SSE2 is available at runtime
     #[inline]
     #[target_feature(enable = "sse2")]
-    pub fn new(needle: &str) -> Self {
+    pub fn new(needle: &[u8]) -> Self {
         Self {
             needle: case_needle(needle),
         }

@@ -25,6 +25,10 @@ pub unsafe fn overlapping_load<const ALIGNED: bool>(
     len: usize,
 ) -> __m128i {
     unsafe {
+        if ALIGNED {
+            return _mm_load_si128(haystack[start..].as_ptr() as *const __m128i);
+        }
+
         match len {
             0..=7 => unreachable!(),
             8 => _mm_loadl_epi64(haystack.as_ptr() as *const __m128i),
@@ -36,13 +40,9 @@ pub unsafe fn overlapping_load<const ALIGNED: bool>(
                 let high = _mm_loadl_epi64(haystack[high_start..].as_ptr() as *const __m128i);
                 _mm_unpacklo_epi64(low, high)
             }
-            16 if !ALIGNED => _mm_loadu_si128(haystack.as_ptr() as *const __m128i),
-            16 => _mm_load_si128(haystack.as_ptr() as *const __m128i),
+            16 => _mm_loadu_si128(haystack.as_ptr() as *const __m128i),
             // Avoid reading past the end, instead re-read the last 16 bytes
-            _ if !ALIGNED => {
-                _mm_loadu_si128(haystack[start.min(len - 16)..].as_ptr() as *const __m128i)
-            }
-            _ => _mm_load_si128(haystack[start..].as_ptr() as *const __m128i),
+            _ => _mm_loadu_si128(haystack[start.min(len - 16)..].as_ptr() as *const __m128i),
         }
     }
 }

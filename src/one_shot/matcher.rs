@@ -8,7 +8,7 @@ pub(crate) struct Matcher {
     needle: String,
     config: Config,
     prefilter: Prefilter<false>,
-    smith_waterman: SmithWatermanMatcher,
+    smith_waterman: SmithWatermanMatcher<false>,
 }
 
 impl Matcher {
@@ -16,8 +16,8 @@ impl Matcher {
         Self {
             needle: needle.to_string(),
             config: config.clone(),
-            prefilter: Prefilter::new(needle),
-            smith_waterman: SmithWatermanMatcher::new(needle, &config.scoring),
+            prefilter: Prefilter::new(needle.as_bytes()),
+            smith_waterman: SmithWatermanMatcher::new(needle.as_bytes(), &config.scoring),
         }
     }
 
@@ -52,6 +52,9 @@ impl Matcher {
             .map(|max| needle.len() - (max as usize))
             .unwrap_or(0);
 
+        let mut score_matrix =
+            SmithWatermanMatcher::<false>::generate_generic_score_matrix(needle.len());
+
         for (i, haystack, skipped_chunks) in haystacks
             .iter()
             .map(|h| h.as_ref().as_bytes())
@@ -73,8 +76,11 @@ impl Matcher {
             }
             // Smith waterman matching
             else {
-                self.smith_waterman
-                    .match_haystack(haystack, self.config.max_typos)
+                self.smith_waterman.match_haystack(
+                    haystack,
+                    self.config.max_typos,
+                    &mut score_matrix,
+                )
             };
 
             if let Some(mut score) = match_score {
@@ -96,6 +102,7 @@ impl Matcher {
 
 #[cfg(test)]
 mod tests {
+    use super::super::match_list;
     use super::*;
 
     #[test]
