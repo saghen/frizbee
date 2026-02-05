@@ -1,4 +1,5 @@
 use criterion::BenchmarkId;
+use frizbee::IncrementalMatcher;
 use std::hint::black_box;
 
 use nucleo::{
@@ -66,6 +67,18 @@ pub fn match_list_bench(c: &mut criterion::Criterion, name: &str, needle: &str, 
         BenchmarkId::new("Frizbee", median_length),
         haystack,
         |b, haystack| b.iter(|| match_list(needle, haystack, Some(0))),
+    );
+    group.bench_with_input(
+        BenchmarkId::new("Frizbee: Incremental", median_length),
+        haystack,
+        |b, haystack| {
+            let mut matcher = IncrementalMatcher::new(Default::default());
+            matcher.add_haystacks(haystack);
+            b.iter(|| {
+                let matches = matcher.match_list(black_box(needle));
+                drop(matches);
+            })
+        },
     );
     group.bench_with_input(
         BenchmarkId::new("Frizbee: Parallel", median_length),
