@@ -1,3 +1,5 @@
+#![allow(unsafe_op_in_unsafe_fn)]
+
 use std::cmp::Ordering;
 
 #[cfg(feature = "serde")]
@@ -9,6 +11,7 @@ mod one_shot;
 pub mod prefilter;
 pub mod smith_waterman;
 
+pub use incremental::IncrementalMatcher;
 pub use one_shot::{match_list, match_list_parallel};
 
 use r#const::*;

@@ -1,4 +1,4 @@
-use crate::prefilter::{PrefilterMatcher, case_needle, scalar};
+use crate::prefilter::{case_needle, scalar};
 
 use super::overlapping_load;
 use std::arch::x86_64::*;
@@ -16,7 +16,7 @@ impl<const ALIGNED: bool> PrefilterAVX2<ALIGNED> {
     /// Caller must ensure that AVX2 is available at runtime
     #[inline]
     #[target_feature(enable = "avx")]
-    pub unsafe fn new(needle: &str) -> Self {
+    pub unsafe fn new(needle: &[u8]) -> Self {
         let cased_needle = case_needle(needle);
         let needle = unsafe { cased_needle_to_avx2(&cased_needle) };
         Self {

@@ -15,9 +15,8 @@ pub mod scalar;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 
-pub(crate) fn case_needle(needle: &str) -> Vec<(u8, u8)> {
+pub(crate) fn case_needle(needle: &[u8]) -> Vec<(u8, u8)> {
     needle
-        .as_bytes()
         .iter()
         .map(|&c| {
             (
@@ -32,11 +31,6 @@ pub(crate) fn case_needle(needle: &str) -> Vec<(u8, u8)> {
         .collect()
 }
 
-trait PrefilterMatcher<const ALIGNED: bool> {
-    unsafe fn match_haystack(&self, haystack: &[u8]) -> (bool, usize);
-    unsafe fn match_haystack_typos(&self, haystack: &[u8], max_typos: u16) -> (bool, usize);
-}
-
 #[derive(Debug, Clone)]
 pub enum Prefilter<const ALIGNED: bool> {
     AVX2(x86_64::PrefilterAVX2<ALIGNED>),
@@ -44,12 +38,12 @@ pub enum Prefilter<const ALIGNED: bool> {
 }
 
 impl<const ALIGNED: bool> Prefilter<ALIGNED> {
-    pub fn new(needle: &str) -> Self {
+    pub fn new(needle: &[u8]) -> Self {
         #[cfg(target_arch = "x86_64")]
         if x86_64::PrefilterAVX2::<ALIGNED>::is_available() {
-            Prefilter::AVX2(unsafe { x86_64::PrefilterAVX2::new(needle) })
+            Prefilter::AVX2(unsafe { x86_64::PrefilterAVX2::<ALIGNED>::new(needle) })
         } else if x86_64::PrefilterSSE::<ALIGNED>::is_available() {
-            Prefilter::SSE(unsafe { x86_64::PrefilterSSE::new(needle) })
+            Prefilter::SSE(unsafe { x86_64::PrefilterSSE::<ALIGNED>::new(needle) })
         } else {
             panic!("no prefilter algorithm available due to missing SSE2 support");
         }
@@ -68,23 +62,16 @@ impl<const ALIGNED: bool> Prefilter<ALIGNED> {
 
 #[cfg(test)]
 mod tests {
+    use crate::incremental::AlignedBytes;
+
     use super::Prefilter;
 
-    /// Ensures both the ordered and unordered implementations return the same result
     fn match_haystack(needle: &str, haystack: &str) -> bool {
-        match_haystack_generic::<true>(needle, haystack, 0)
-    }
-
-    fn match_haystack_insensitive(needle: &str, haystack: &str) -> bool {
-        match_haystack_generic::<false>(needle, haystack, 0)
+        match_haystack_generic(needle, haystack, 0)
     }
 
     fn match_haystack_typos(needle: &str, haystack: &str, max_typos: u16) -> bool {
-        match_haystack_generic::<true>(needle, haystack, max_typos)
-    }
-
-    fn match_haystack_typos_insensitive(needle: &str, haystack: &str, max_typos: u16) -> bool {
-        match_haystack_generic::<false>(needle, haystack, max_typos)
+        match_haystack_generic(needle, haystack, max_typos)
     }
 
     #[test]
@@ -111,15 +98,10 @@ mod tests {
     }
 
     #[test]
-    fn test_case_sensitivity() {
-        assert!(!match_haystack("foo", "FOO"));
-        assert!(match_haystack_insensitive("foo", "FOO"));
-
-        assert!(!match_haystack("Foo", "foo"));
-        assert!(match_haystack_insensitive("Foo", "foo"));
-
-        assert!(!match_haystack("ABC", "abc"));
-        assert!(match_haystack_insensitive("ABC", "abc"));
+    fn test_case_insensitivity() {
+        assert!(match_haystack("foo", "FOO"));
+        assert!(match_haystack("Foo", "foo"));
+        assert!(match_haystack("ABC", "abc"));
     }
 
     #[test]
@@ -246,10 +228,10 @@ mod tests {
     #[test]
     fn test_typos_case_insensitive() {
         // Case insensitive with typos
-        assert!(match_haystack_typos_insensitive("BAR", "ba", 1));
-        assert!(match_haystack_typos_insensitive("Hello", "HLL", 2));
-        assert!(match_haystack_typos_insensitive("TeSt", "ES", 2));
-        assert!(!match_haystack_typos_insensitive("TeSt", "ES", 1));
+        assert!(match_haystack_typos("BAR", "ba", 1));
+        assert!(match_haystack_typos("Hello", "HLL", 2));
+        assert!(match_haystack_typos("TeSt", "ES", 2));
+        assert!(!match_haystack_typos("TeSt", "ES", 1));
     }
 
     #[test]
@@ -287,14 +269,19 @@ mod tests {
         }
     }
 
-    fn match_haystack_generic<const CASE_SENSITIVE: bool>(
-        needle: &str,
-        haystack: &str,
-        max_typos: u16,
-    ) -> bool {
-        let prefilter = Prefilter::new(needle);
+    fn match_haystack_generic(needle: &str, haystack: &str, max_typos: u16) -> bool {
         let haystack = normalize_haystack(haystack);
         let haystack = haystack.as_bytes();
-        unsafe { prefilter.match_haystack(haystack, max_typos).0 }
+
+        let prefilter = Prefilter::<false>::new(needle.as_bytes());
+        let unaligned_result = prefilter.match_haystack(haystack, max_typos).0;
+
+        let prefilter = Prefilter::<true>::new(needle.as_bytes());
+        let haystack = AlignedBytes::new(haystack);
+        let aligned_result = prefilter.match_haystack(haystack.as_slice(), max_typos).0;
+
+        assert_eq!(unaligned_result, aligned_result);
+
+        unaligned_result
     }
 }
