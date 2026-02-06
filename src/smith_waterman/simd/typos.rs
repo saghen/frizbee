@@ -1,9 +1,7 @@
-use std::arch::x86_64::*;
+use crate::simd::Vector256;
 
-use super::ops::_mm256_idx_epu16;
-
-pub fn typos_from_score_matrix(
-    score_matrix: &[__m256i],
+pub fn typos_from_score_matrix<Simd256: Vector256>(
+    score_matrix: &[Simd256],
     max_score: u16,
     max_typos: u16,
     haystack_len: usize,
@@ -12,17 +10,13 @@ pub fn typos_from_score_matrix(
     let mut row_idx = score_matrix.len() / haystack_chunks - 1;
     let mut col_idx = (1..haystack_chunks)
         .find_map(|chunk_idx| {
-            let index = unsafe {
-                _mm256_idx_epu16(
-                    score_matrix[row_idx * haystack_chunks + chunk_idx],
-                    max_score,
-                )
-            };
+            let index =
+                unsafe { score_matrix[row_idx * haystack_chunks + chunk_idx].idx_u16(max_score) };
             (index != 8).then(|| chunk_idx * 16 + index)
         })
         .expect("could not find max score in score matrix final row");
 
-    let score_matrix = unsafe { std::mem::transmute::<&[__m256i], &[[u16; 16]]>(score_matrix) };
+    let score_matrix = unsafe { std::mem::transmute::<&[Simd256], &[[u16; 16]]>(score_matrix) };
 
     let mut typo_count = 0;
     let mut score = max_score;
