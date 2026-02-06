@@ -9,6 +9,7 @@ mod r#const;
 mod incremental;
 mod one_shot;
 pub mod prefilter;
+mod simd;
 pub mod smith_waterman;
 
 pub use incremental::IncrementalMatcher;

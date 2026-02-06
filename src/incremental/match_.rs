@@ -1,9 +1,11 @@
-use std::{arch::x86_64::__m256i, cmp::Ordering};
+use std::cmp::Ordering;
 
 use bumpalo::collections::Vec;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
+
+use crate::simd::AVXVector;
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -14,7 +16,7 @@ pub struct IncrementalMatch<'a> {
     /** Matched the needle exactly (i.e. "foo" on "foo") */
     pub exact: bool,
     #[cfg_attr(feature = "serde", serde(skip))]
-    pub(crate) score_matrix: Vec<'a, __m256i>,
+    pub(crate) score_matrix: Vec<'a, AVXVector>,
 }
 
 // TODO: drop when switching to a thread safe bump allocator
