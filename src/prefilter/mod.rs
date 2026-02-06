@@ -11,8 +11,10 @@
 //!
 //! All algorithms, except scalar, assume that needle.len() > 0 && haystack.len() >= 8
 
+#[cfg(feature = "simd")]
 pub mod bitmask;
 pub mod scalar;
+#[cfg(feature = "simd")]
 pub mod simd;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
@@ -115,7 +117,10 @@ impl Prefilter {
             (_, true) => unsafe {
                 self.match_haystack_sse2::<ORDERED, CASE_SENSITIVE, TYPOS>(haystack)
             },
+            #[cfg(feature = "simd")]
             _ => self.match_haystack_simd::<ORDERED, CASE_SENSITIVE, TYPOS>(haystack),
+            #[cfg(not(feature = "simd"))]
+            _ => self.match_haystack_scalar::<ORDERED, CASE_SENSITIVE, TYPOS>(haystack),
         }
     }
 
@@ -139,6 +144,7 @@ impl Prefilter {
     }
 
     #[inline(always)]
+    #[cfg(feature = "simd")]
     fn match_haystack_simd<const ORDERED: bool, const CASE_SENSITIVE: bool, const TYPOS: bool>(
         &self,
         haystack: &[u8],

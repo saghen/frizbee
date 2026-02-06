@@ -1,3 +1,4 @@
+#[cfg(feature = "simd")]
 pub mod bucket;
 mod indices;
 mod matcher;
