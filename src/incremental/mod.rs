@@ -4,7 +4,8 @@ use rayon::prelude::*;
 use crate::{
     Config,
     prefilter::Prefilter,
-    smith_waterman::{greedy::match_greedy, x86_64::SmithWatermanMatcher},
+    simd::{AVXVector, SSEVector},
+    smith_waterman::{greedy::match_greedy, simd::SmithWatermanMatcher},
 };
 
 mod aligned_string;
@@ -67,7 +68,8 @@ impl IncrementalMatcher {
 
         let mut matches = vec![];
         let prefilter = Prefilter::<true>::new(needle);
-        let mut smith_waterman = SmithWatermanMatcher::<true>::new(needle, &self.config.scoring);
+        let mut smith_waterman =
+            SmithWatermanMatcher::<SSEVector, AVXVector, true>::new(needle, &self.config.scoring);
 
         for (i, haystack, skipped_chunks) in self
             .haystacks

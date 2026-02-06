@@ -1,6 +1,7 @@
 use crate::prefilter::Prefilter;
+use crate::simd::{AVXVector, SSEVector};
 use crate::smith_waterman::greedy::match_greedy;
-use crate::smith_waterman::x86_64::SmithWatermanMatcher;
+use crate::smith_waterman::simd::SmithWatermanMatcher;
 use crate::{Config, Match};
 
 #[derive(Debug, Clone)]
@@ -8,7 +9,7 @@ pub(crate) struct Matcher {
     needle: String,
     config: Config,
     prefilter: Prefilter<false>,
-    smith_waterman: SmithWatermanMatcher<false>,
+    smith_waterman: SmithWatermanMatcher<SSEVector, AVXVector, false>,
 }
 
 impl Matcher {
@@ -53,7 +54,9 @@ impl Matcher {
             .unwrap_or(0);
 
         let mut score_matrix =
-            SmithWatermanMatcher::<false>::generate_generic_score_matrix(needle.len());
+            SmithWatermanMatcher::<SSEVector, AVXVector, false>::generate_generic_score_matrix(
+                needle.len(),
+            );
 
         for (i, haystack, skipped_chunks) in haystacks
             .iter()
