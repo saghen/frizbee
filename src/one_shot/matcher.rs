@@ -85,7 +85,7 @@ pub(crate) fn match_list_impl<S1: AsRef<str>, S2: AsRef<str>, M: Appendable<Matc
     // minus the max typos, since it's impossible for them to match
     let min_haystack_len = config
         .max_typos
-        .map(|max| needle.len() - (max as usize))
+        .map(|max| needle.len().saturating_sub(max as usize))
         .unwrap_or(0);
 
     for (i, haystack) in haystacks
@@ -237,5 +237,14 @@ mod tests {
         for m in &exact_matches {
             assert_eq!(haystack[m.index as usize], needle)
         }
+    }
+    #[test]
+    fn test_small_needle() {
+        let mut config = Config::default();
+        config.max_typos = Some(2);  // max_typos longer than needle
+        let matches = match_list("1", &["1"], &config);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].index, 0);
+        assert_eq!(matches[0].exact, true);
     }
 }
