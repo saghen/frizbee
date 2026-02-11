@@ -66,7 +66,7 @@ impl<Simd128: Vector128<Expanded = Simd256>, Simd256: Vector256, const ALIGNED: 
     }
 
     pub fn match_haystack(
-        &mut self,
+        &self,
         haystack: &[u8],
         max_typos: Option<u16>,
         score_matrix: &mut [Simd256],
@@ -196,8 +196,8 @@ impl<Simd128: Vector128<Expanded = Simd256>, Simd256: Vector256, const ALIGNED: 
 
                     // Max of diagonal, up and left (after gap extension)
                     row_scores = propagate_horizontal_gaps::<Simd256>(
-                        score_matrix[row_idx * haystack_chunks + col_idx - 1], // Left
                         diag_scores.max_u16(up_scores),                        // Current
+                        score_matrix[row_idx * haystack_chunks + col_idx - 1], // Left
                         match_mask,
                         scoring.gap_open_penalty,
                         scoring.gap_extend_penalty,

@@ -2,8 +2,8 @@ use crate::simd::Vector256;
 
 #[inline(always)]
 pub unsafe fn propagate_horizontal_gaps<Simd256: Vector256>(
-    adjacent_row: Simd256,
     row: Simd256,
+    adjacent_row: Simd256,
     match_mask: Simd256,
     gap_open_penalty: u16,
     gap_extend_penalty: u16,
