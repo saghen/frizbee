@@ -19,6 +19,16 @@ pub struct IncrementalMatch<'a> {
     pub(crate) score_matrix: Vec<'a, AVXVector>,
 }
 
+impl From<&IncrementalMatch<'_>> for crate::Match {
+    fn from(match_: &IncrementalMatch) -> Self {
+        Self {
+            score: match_.score,
+            index: match_.index,
+            exact: match_.exact,
+        }
+    }
+}
+
 // TODO: drop when switching to a thread safe bump allocator
 unsafe impl<'a> Send for IncrementalMatch<'a> {}
 
@@ -47,15 +57,14 @@ impl<'a> IncrementalMatch<'a> {
         let haystack_chunk = haystack_len.div_ceil(16) + 1;
         let capacity = len * haystack_chunk;
         self.score_matrix.reserve(capacity);
+        let len = self.score_matrix.len() + capacity;
         unsafe {
-            std::ptr::write_bytes(
-                self.score_matrix
-                    .as_mut_ptr()
-                    .add(self.score_matrix.len() - capacity),
-                0,
-                capacity,
-            );
-            self.score_matrix.set_len(capacity);
+            // std::ptr::write_bytes(
+            //     self.score_matrix.as_mut_ptr().add(len - capacity),
+            //     0,
+            //     capacity,
+            // );
+            self.score_matrix.set_len(len);
         }
     }
 
