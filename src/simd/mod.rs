@@ -69,13 +69,19 @@ pub trait Vector128: Vector {
     /// Expands the vector from 128-bit to 256-bit by expanding each byte
     unsafe fn cast_i8_to_i16(self) -> Self::Expanded;
 
-    /// _mm_alignr_epi8
+    /// Shift `self` right by `L` bytes, filling in the low bytes with the right most values in
+    /// `other`
     unsafe fn shift_right_padded_u8<const L: i32>(self, other: Self) -> Self;
 }
 
 pub trait Vector256: Vector {
+    /// Extract the value at the given index from the vector
     unsafe fn idx_u16(self, search: u16) -> usize;
+    /// Load the vector via transmute since alinment is guaranteed
     unsafe fn from_aligned(data: Aligned32<[u8; 32]>) -> Self;
+    /// Uses a mask to blend the values of `self` and `other` where `00` means `self` and `FF` means
+    /// `other`
     unsafe fn blendv(self, other: Self, mask: Self) -> Self;
+    /// Shift `self` right by `N` bytes, filling in the low bytes with zeros
     unsafe fn shift_right_u16<const N: i32>(self) -> Self;
 }
