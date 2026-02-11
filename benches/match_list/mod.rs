@@ -64,34 +64,77 @@ pub fn match_list_bench(c: &mut criterion::Criterion, name: &str, needle: &str, 
         },
     );
     group.bench_with_input(
-        BenchmarkId::new("Frizbee", median_length),
+        BenchmarkId::new("One Shot", median_length),
         haystack,
         |b, haystack| b.iter(|| match_list(needle, haystack, Some(0))),
     );
     group.bench_with_input(
-        BenchmarkId::new("Frizbee: Incremental", median_length),
+        BenchmarkId::new("Incremental", median_length),
         haystack,
         |b, haystack| {
             let mut matcher = IncrementalMatcher::new(Default::default());
             matcher.add_haystacks(haystack);
             b.iter(|| {
-                let matches = matcher.match_list(black_box(needle));
-                drop(matches);
+                matcher.reset();
+                matcher.match_list(black_box(needle));
             })
         },
     );
     group.bench_with_input(
-        BenchmarkId::new("Frizbee: Parallel", median_length),
+        BenchmarkId::new("Nucleo Cumulative", median_length),
+        haystack,
+        |b, haystack| {
+            let mut matcher = NucleoMatcher::new(NucleoConfig::DEFAULT);
+            b.iter(|| {
+                for i in 0..needle.len() {
+                    let atom = Atom::new(
+                        &needle[0..i],
+                        CaseMatching::Ignore,
+                        Normalization::Never,
+                        AtomKind::Fuzzy,
+                        false,
+                    );
+                    atom.match_list(black_box(haystack.iter()), &mut matcher);
+                }
+            })
+        },
+    );
+    group.bench_with_input(
+        BenchmarkId::new("One Shot Cumulative", median_length),
+        haystack,
+        |b, haystack| {
+            b.iter(|| {
+                for i in 0..needle.len() {
+                    match_list(&needle[0..i], haystack, Some(0));
+                }
+            })
+        },
+    );
+    group.bench_with_input(
+        BenchmarkId::new("Incremental Cumulative", median_length),
+        haystack,
+        |b, haystack| {
+            let mut matcher = IncrementalMatcher::new(Default::default());
+            matcher.add_haystacks(haystack);
+            b.iter(|| {
+                for i in 0..needle.len() {
+                    matcher.match_list(black_box(&needle[0..i]));
+                }
+            })
+        },
+    );
+    group.bench_with_input(
+        BenchmarkId::new("Parallel", median_length),
         haystack,
         |b, haystack| b.iter(|| match_list_parallel(needle, haystack, Some(0))),
     );
     group.bench_with_input(
-        BenchmarkId::new("Frizbee: All Scores", median_length),
+        BenchmarkId::new("All Scores", median_length),
         haystack,
         |b, haystack| b.iter(|| match_list(needle, haystack, None)),
     );
     group.bench_with_input(
-        BenchmarkId::new("Frizbee: 1 Typo", median_length),
+        BenchmarkId::new("1 Typo", median_length),
         haystack,
         |b, haystack| b.iter(|| match_list(needle, haystack, Some(1))),
     );
