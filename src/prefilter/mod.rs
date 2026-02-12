@@ -32,18 +32,18 @@ pub(crate) fn case_needle(needle: &[u8]) -> Vec<(u8, u8)> {
 }
 
 #[derive(Debug, Clone)]
-pub enum Prefilter<const ALIGNED: bool> {
-    AVX2(x86_64::PrefilterAVX2<ALIGNED>),
-    SSE(x86_64::PrefilterSSE<ALIGNED>),
+pub enum Prefilter {
+    AVX2(x86_64::PrefilterAVX2),
+    SSE(x86_64::PrefilterSSE),
 }
 
-impl<const ALIGNED: bool> Prefilter<ALIGNED> {
+impl Prefilter {
     pub fn new(needle: &[u8]) -> Self {
         #[cfg(target_arch = "x86_64")]
-        if x86_64::PrefilterAVX2::<ALIGNED>::is_available() {
-            Prefilter::AVX2(unsafe { x86_64::PrefilterAVX2::<ALIGNED>::new(needle) })
-        } else if x86_64::PrefilterSSE::<ALIGNED>::is_available() {
-            Prefilter::SSE(unsafe { x86_64::PrefilterSSE::<ALIGNED>::new(needle) })
+        if x86_64::PrefilterAVX2::is_available() {
+            Prefilter::AVX2(unsafe { x86_64::PrefilterAVX2::new(needle) })
+        } else if x86_64::PrefilterSSE::is_available() {
+            Prefilter::SSE(unsafe { x86_64::PrefilterSSE::new(needle) })
         } else {
             panic!("no prefilter algorithm available due to missing SSE2 support");
         }
@@ -273,15 +273,7 @@ mod tests {
         let haystack = normalize_haystack(haystack);
         let haystack = haystack.as_bytes();
 
-        let prefilter = Prefilter::<false>::new(needle.as_bytes());
-        let unaligned_result = prefilter.match_haystack(haystack, max_typos).0;
-
-        let prefilter = Prefilter::<true>::new(needle.as_bytes());
-        let haystack = AlignedBytes::new(haystack);
-        let aligned_result = prefilter.match_haystack(haystack.as_slice(), max_typos).0;
-
-        assert_eq!(unaligned_result, aligned_result);
-
-        unaligned_result
+        let prefilter = Prefilter::new(needle.as_bytes());
+        prefilter.match_haystack(haystack, max_typos).0
     }
 }

@@ -6,13 +6,11 @@ use std::cmp::Ordering;
 use serde::{Deserialize, Serialize};
 
 mod r#const;
-mod incremental;
 mod one_shot;
 pub mod prefilter;
 mod simd;
 pub mod smith_waterman;
 
-pub use incremental::IncrementalMatcher;
 pub use one_shot::{match_list, match_list_parallel};
 
 use r#const::*;

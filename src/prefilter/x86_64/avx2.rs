@@ -4,12 +4,12 @@ use super::overlapping_load;
 use std::arch::x86_64::*;
 
 #[derive(Debug, Clone)]
-pub struct PrefilterAVX2<const ALIGNED: bool> {
+pub struct PrefilterAVX2 {
     cased_needle: Vec<(u8, u8)>,
     needle: Vec<__m256i>,
 }
 
-impl<const ALIGNED: bool> PrefilterAVX2<ALIGNED> {
+impl PrefilterAVX2 {
     /// Creates a new prefilter algorithm for AVX2
     ///
     /// # Safety
@@ -59,7 +59,7 @@ impl<const ALIGNED: bool> PrefilterAVX2<ALIGNED> {
         let mut needle_char = *needle_iter.next().unwrap();
 
         for start in (0..len).step_by(16) {
-            let haystack_chunk = unsafe { overlapping_load::<ALIGNED>(haystack, start, len) };
+            let haystack_chunk = unsafe { overlapping_load(haystack, start, len) };
             let haystack_chunk = _mm256_broadcastsi128_si256(haystack_chunk);
             loop {
                 if _mm256_movemask_epi8(_mm256_cmpeq_epi8(needle_char, haystack_chunk)) == 0 {
@@ -124,7 +124,7 @@ impl<const ALIGNED: bool> PrefilterAVX2<ALIGNED> {
             // we should scan from the beginning of the haystack instead, but I believe the
             // previous memchr implementation had the same bug.
             for start in (0..len).step_by(16) {
-                let haystack_chunk = unsafe { overlapping_load::<ALIGNED>(haystack, start, len) };
+                let haystack_chunk = unsafe { overlapping_load(haystack, start, len) };
                 let haystack_chunk = _mm256_broadcastsi128_si256(haystack_chunk);
 
                 // For AVX2, we store the uppercase in the first 16 bytes, and the lowercase in the

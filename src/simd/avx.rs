@@ -1,11 +1,19 @@
 use std::arch::x86_64::*;
 
+use raw_cpuid::{CpuId, CpuIdReader};
+
 use crate::simd::Aligned32;
 
 #[derive(Debug, Clone, Copy)]
 pub struct AVXVector(pub __m256i);
 
 impl super::Vector for AVXVector {
+    fn is_available<R: CpuIdReader>(cpuid: &CpuId<R>) -> bool {
+        cpuid
+            .get_extended_feature_info()
+            .is_some_and(|info| info.has_avx2())
+    }
+
     #[inline(always)]
     unsafe fn zero() -> Self {
         Self(_mm256_setzero_si256())

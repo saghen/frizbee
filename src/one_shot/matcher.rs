@@ -1,5 +1,4 @@
 use crate::prefilter::Prefilter;
-use crate::simd::{AVXVector, SSEVector};
 use crate::smith_waterman::greedy::match_greedy;
 use crate::smith_waterman::simd::SmithWatermanMatcher;
 use crate::{Config, Match};
@@ -8,8 +7,8 @@ use crate::{Config, Match};
 pub(crate) struct Matcher {
     needle: String,
     config: Config,
-    prefilter: Prefilter<false>,
-    smith_waterman: SmithWatermanMatcher<SSEVector, AVXVector, false>,
+    prefilter: Prefilter,
+    smith_waterman: SmithWatermanMatcher,
 }
 
 impl Matcher {
@@ -50,13 +49,8 @@ impl Matcher {
         let min_haystack_len = self
             .config
             .max_typos
-            .map(|max| needle.len() - (max as usize))
+            .map(|max| needle.len().saturating_sub(max as usize))
             .unwrap_or(0);
-
-        let mut score_matrix =
-            SmithWatermanMatcher::<SSEVector, AVXVector, false>::generate_generic_score_matrix(
-                needle.len(),
-            );
 
         for (i, haystack, skipped_chunks) in haystacks
             .iter()
@@ -70,7 +64,7 @@ impl Matcher {
                         self.prefilter.match_haystack(haystack, max_typos)
                     });
                 // Skip any chunks where we know the needle doesn't match
-                matched.then(|| (i, haystack[skipped_chunks * 16..].as_ref(), skipped_chunks))
+                matched.then(|| (i, &haystack[skipped_chunks * 16..], skipped_chunks))
             })
         {
             // Haystack too large, fallback to greedy matching
@@ -79,11 +73,8 @@ impl Matcher {
             }
             // Smith waterman matching
             else {
-                self.smith_waterman.match_haystack(
-                    haystack,
-                    self.config.max_typos,
-                    &mut score_matrix,
-                )
+                self.smith_waterman
+                    .match_haystack(haystack, self.config.max_typos)
             };
 
             if let Some(mut score) = match_score {
