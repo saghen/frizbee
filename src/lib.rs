@@ -27,6 +27,8 @@ pub struct Match {
     pub index: u32,
     /** Matched the needle exactly (i.e. "foo" on "foo") */
     pub exact: bool,
+    /** The index of the first matched character in the haystack (i.e. the start of the match) */
+    pub match_start_index: u16,
 }
 
 impl PartialOrd for Match {

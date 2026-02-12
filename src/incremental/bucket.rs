@@ -3,7 +3,8 @@ use std::simd::{Simd, cmp::SimdOrd};
 use crate::{
     Match, Scoring,
     smith_waterman::simd::{
-        HaystackChar, NeedleChar, smith_waterman_inner, typos_from_score_matrix,
+        HaystackChar, NeedleChar, smith_waterman_inner,
+        typos_and_match_start_from_score_matrix,
     },
 };
 
@@ -92,8 +93,16 @@ impl<const W: usize, const L: usize> IncrementalBucketTrait for IncrementalBucke
         let scores: [u16; L] = all_time_max_score.to_array();
 
         // TODO: typos
-        let typos = max_typos
-            .map(|max_typos| typos_from_score_matrix::<W, L>(&self.score_matrix, max_typos));
+        let (typos, match_starts) = match max_typos {
+            Some(max_typos) => {
+                let result = typos_and_match_start_from_score_matrix::<W, L>(
+                    &self.score_matrix,
+                    max_typos,
+                );
+                (Some(result.typos), Some(result.match_starts))
+            }
+            None => (None, None),
+        };
 
         #[allow(clippy::needless_range_loop)]
         for idx in 0..self.length {
@@ -108,6 +117,7 @@ impl<const W: usize, const L: usize> IncrementalBucketTrait for IncrementalBucke
                 index: score_idx,
                 score: scores[idx],
                 exact: false,
+                match_start_index: match_starts.map_or(u16::MAX, |s| s[idx]),
             });
         }
     }
