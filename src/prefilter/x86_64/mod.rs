@@ -19,16 +19,8 @@ pub use sse::*;
 /// Caller must ensure that haystack length >= 8
 /// If aligned is true, data must be aligned to 16 bytes and start must be a multiple of 16
 #[inline(always)]
-pub unsafe fn overlapping_load<const ALIGNED: bool>(
-    haystack: &[u8],
-    start: usize,
-    len: usize,
-) -> __m128i {
+pub unsafe fn overlapping_load(haystack: &[u8], start: usize, len: usize) -> __m128i {
     unsafe {
-        if ALIGNED {
-            return _mm_load_si128(haystack[start..].as_ptr() as *const __m128i);
-        }
-
         match len {
             0..=7 => unreachable!(),
             8 => _mm_loadl_epi64(haystack.as_ptr() as *const __m128i),

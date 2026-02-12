@@ -1,13 +1,22 @@
+use raw_cpuid::CpuId;
+use raw_cpuid::CpuIdReader;
+
 mod avx;
 mod sse;
+mod sse_256;
 
 pub use avx::AVXVector;
 pub use sse::SSEVector;
+pub use sse_256::SSE256Vector;
 
 #[repr(C, align(32))]
 pub struct Aligned32<T>(pub T);
 
 pub trait Vector: Copy + core::fmt::Debug {
+    /// Checks available vector extensions at runtime and returns whether the vector implementation
+    /// may be safely used.
+    fn is_available<R: CpuIdReader>(cpuid: &CpuId<R>) -> bool;
+
     /// Create a vector with zeros in all lanes.
     unsafe fn zero() -> Self;
     /// Create a vector with 8-bit lanes with the given byte repeated into each
@@ -55,9 +64,6 @@ pub trait Vector: Copy + core::fmt::Debug {
 }
 
 pub trait Vector128: Vector {
-    /// The 256-bit vector type that this 128-bit vector expands to
-    type Expanded: Vector256;
-
     /// Loads from the given pointer, where the number of remaining bytes may be less than
     /// the vector size. The pointer does not need to be aligned.
     ///
@@ -66,12 +72,14 @@ pub trait Vector128: Vector {
     /// Callers must guarantee that the pointer contains `len` bytes and `start < len`.
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self;
 
-    /// Expands the vector from 128-bit to 256-bit by expanding each byte
-    unsafe fn cast_i8_to_i16(self) -> Self::Expanded;
-
     /// Shift `self` right by `L` bytes, filling in the low bytes with the right most values in
     /// `other`
     unsafe fn shift_right_padded_u8<const L: i32>(self, other: Self) -> Self;
+}
+
+pub trait Vector128Expansion<Expanded: Vector256>: Vector128 {
+    /// Expands the vector from 128-bit to 256-bit by expanding each byte
+    unsafe fn cast_i8_to_i16(self) -> Expanded;
 }
 
 pub trait Vector256: Vector {

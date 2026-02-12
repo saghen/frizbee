@@ -1,6 +1,8 @@
 use std::arch::x86_64::*;
 
-use crate::simd::AVXVector;
+use raw_cpuid::{CpuId, CpuIdReader};
+
+use crate::simd::{AVXVector, SSE256Vector};
 
 #[derive(Debug, Clone, Copy)]
 pub struct SSEVector(__m128i);
@@ -50,6 +52,13 @@ impl SSEVector {
 }
 
 impl super::Vector for SSEVector {
+    #[inline]
+    fn is_available<R: CpuIdReader>(cpuid: &CpuId<R>) -> bool {
+        cpuid
+            .get_feature_info()
+            .is_some_and(|info| info.has_sse41())
+    }
+
     #[inline(always)]
     unsafe fn zero() -> Self {
         Self(_mm_setzero_si128())
@@ -145,8 +154,6 @@ impl super::Vector for SSEVector {
 }
 
 impl super::Vector128 for SSEVector {
-    type Expanded = AVXVector;
-
     #[inline(always)]
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         Self(match len {
@@ -201,12 +208,27 @@ impl super::Vector128 for SSEVector {
     }
 
     #[inline(always)]
+    unsafe fn shift_right_padded_u8<const L: i32>(self, other: Self) -> Self {
+        Self(_mm_alignr_epi8::<L>(self.0, other.0))
+    }
+}
+
+impl super::Vector128Expansion<AVXVector> for SSEVector {
+    #[inline(always)]
     unsafe fn cast_i8_to_i16(self) -> AVXVector {
         AVXVector(_mm256_cvtepi8_epi16(self.0))
     }
+}
 
+impl super::Vector128Expansion<SSE256Vector> for SSEVector {
     #[inline(always)]
-    unsafe fn shift_right_padded_u8<const L: i32>(self, other: Self) -> Self {
-        Self(_mm_alignr_epi8::<L>(self.0, other.0))
+    unsafe fn cast_i8_to_i16(self) -> SSE256Vector {
+        // Lower 8 bytes → 8 x i16
+        let lo = _mm_cvtepi8_epi16(self.0);
+
+        // Shift upper 8 bytes to lower position, then expand
+        let hi = _mm_cvtepi8_epi16(_mm_srli_si128(self.0, 8));
+
+        SSE256Vector((lo, hi))
     }
 }

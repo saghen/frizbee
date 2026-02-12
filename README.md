@@ -66,7 +66,3 @@ Nucleo and FZF use a prefiltering step that removes any haystacks that do not in
 - [ ] Experiment with u8 for math, converting to u16 for score
 - [x] Drop u8 based scoring and double scoring to support longer fuzzy matches
   - Currently, alignment can be lost on longer matches causing us to mark them as having typos
-- [x] Incremental matching
-  - [ ] Runtime instruction selection (512-bit and 256-bit SIMD)
-  - [ ] Prefiltering
-  - [ ] Exact match bonus

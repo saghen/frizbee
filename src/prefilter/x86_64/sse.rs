@@ -4,11 +4,11 @@ use super::overlapping_load;
 use crate::prefilter::{case_needle, scalar};
 
 #[derive(Debug, Clone)]
-pub struct PrefilterSSE<const ALIGNED: bool> {
+pub struct PrefilterSSE {
     needle: Vec<(u8, u8)>,
 }
 
-impl<const ALIGNED: bool> PrefilterSSE<ALIGNED> {
+impl PrefilterSSE {
     /// Creates a new prefilter algorithm for SSE
     ///
     /// # Safety
@@ -57,7 +57,7 @@ impl<const ALIGNED: bool> PrefilterSSE<ALIGNED> {
         let mut needle_char = needle_iter.next().unwrap();
 
         for start in (0..len).step_by(16) {
-            let haystack_chunk = unsafe { overlapping_load::<ALIGNED>(haystack, start, len) };
+            let haystack_chunk = unsafe { overlapping_load(haystack, start, len) };
 
             loop {
                 let mask = _mm_movemask_epi8(_mm_or_si128(
@@ -124,7 +124,7 @@ impl<const ALIGNED: bool> PrefilterSSE<ALIGNED> {
             // we should scan from the beginning of the haystack instead, but I believe the
             // previous memchr implementation had the same bug.
             for start in (0..len).step_by(16) {
-                let haystack_chunk = unsafe { overlapping_load::<ALIGNED>(haystack, start, len) };
+                let haystack_chunk = unsafe { overlapping_load(haystack, start, len) };
 
                 loop {
                     let mask = _mm_movemask_epi8(_mm_or_si128(
