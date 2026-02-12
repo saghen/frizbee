@@ -97,10 +97,10 @@ impl<const W: usize, const L: usize> IncrementalBucketTrait for IncrementalBucke
 
         #[allow(clippy::needless_range_loop)]
         for idx in 0..self.length {
-            if let Some(max_typos) = max_typos {
-                if typos.is_some_and(|typos| typos[idx] > max_typos) {
-                    continue;
-                }
+            if let Some(max_typos) = max_typos
+                && typos.is_some_and(|typos| typos[idx] > max_typos)
+            {
+                continue;
             }
 
             let score_idx = self.idxs[idx];

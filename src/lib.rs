@@ -58,7 +58,7 @@ pub struct MatchIndices {
     pub exact: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Config {
     /// May perform prefiltering, depending on haystack length and max number of typos,
@@ -87,7 +87,7 @@ impl Default for Config {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Scoring {
     /// Score for a matching character between needle and haystack
@@ -113,7 +113,7 @@ pub struct Scoring {
     pub exact_match_bonus: u16,
 
     /// List of characters which are considered delimiters
-    pub delimiters: String,
+    pub delimiters: &'static str,
     /// Bonus for matching _after_ a delimiter character (e.g. "hw" on "hello_world",
     /// will give a bonus on "w") if "_" is included in the delimiters string
     pub delimiter_bonus: u16,
@@ -133,7 +133,7 @@ impl Default for Scoring {
             matching_case_bonus: MATCHING_CASE_BONUS,
             exact_match_bonus: EXACT_MATCH_BONUS,
 
-            delimiters: " /.,_-:".to_string(),
+            delimiters: " /.,_-:",
             delimiter_bonus: DELIMITER_BONUS,
         }
     }

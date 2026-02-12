@@ -73,7 +73,7 @@ fn match_list_parallel_fixed<S1: AsRef<str>, S2: AsRef<str> + Sync + Send>(
 
             let needle = needle.as_ref().to_owned();
             let mut thread_slice = ThreadSlice::new(matches_slice);
-            let opts = config.clone();
+            let opts = *config;
             s.spawn(move || {
                 match_list_impl(
                     needle,
@@ -112,7 +112,7 @@ fn match_list_parallel_expandable<S1: AsRef<str>, S2: AsRef<str> + Sync + Send>(
 
             let needle = needle.as_ref().to_owned();
             let mut matches = matches.clone();
-            let opts = config.clone();
+            let opts = *config;
             s.spawn(move || {
                 match_list_impl(
                     needle,
