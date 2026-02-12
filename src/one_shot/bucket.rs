@@ -41,7 +41,7 @@ impl<'a, const W: usize, M: Appendable<Match>> FixedWidthBucket<'a, W, M> {
             idxs: [0; 32],
 
             max_typos: config.max_typos,
-            scoring: config.scoring.clone(),
+            scoring: config.scoring,
 
             _phantom: PhantomData,
         }

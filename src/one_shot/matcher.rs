@@ -1,5 +1,5 @@
-use super::Appendable;
 use super::bucket::FixedWidthBucket;
+use super::Appendable;
 
 use crate::one_shot::match_too_large;
 use crate::prefilter::Prefilter;
@@ -63,23 +63,23 @@ pub(crate) fn match_list_impl<S1: AsRef<str>, S2: AsRef<str>, M: Appendable<Matc
 
     let prefilter = Prefilter::new(needle, config.max_typos.unwrap_or(0));
 
-    let mut bucket_size_4 = FixedWidthBucket::<4, M>::new(needle, &config);
-    let mut bucket_size_8 = FixedWidthBucket::<8, M>::new(needle, &config);
-    let mut bucket_size_12 = FixedWidthBucket::<12, M>::new(needle, &config);
-    let mut bucket_size_16 = FixedWidthBucket::<16, M>::new(needle, &config);
-    let mut bucket_size_20 = FixedWidthBucket::<20, M>::new(needle, &config);
-    let mut bucket_size_24 = FixedWidthBucket::<24, M>::new(needle, &config);
-    let mut bucket_size_32 = FixedWidthBucket::<32, M>::new(needle, &config);
-    let mut bucket_size_48 = FixedWidthBucket::<48, M>::new(needle, &config);
-    let mut bucket_size_64 = FixedWidthBucket::<64, M>::new(needle, &config);
-    let mut bucket_size_96 = FixedWidthBucket::<96, M>::new(needle, &config);
-    let mut bucket_size_128 = FixedWidthBucket::<128, M>::new(needle, &config);
-    let mut bucket_size_160 = FixedWidthBucket::<160, M>::new(needle, &config);
-    let mut bucket_size_192 = FixedWidthBucket::<192, M>::new(needle, &config);
-    let mut bucket_size_224 = FixedWidthBucket::<224, M>::new(needle, &config);
-    let mut bucket_size_256 = FixedWidthBucket::<256, M>::new(needle, &config);
-    let mut bucket_size_384 = FixedWidthBucket::<384, M>::new(needle, &config);
-    let mut bucket_size_512 = FixedWidthBucket::<512, M>::new(needle, &config);
+    let mut bucket_size_4 = FixedWidthBucket::<4, M>::new(needle, config);
+    let mut bucket_size_8 = FixedWidthBucket::<8, M>::new(needle, config);
+    let mut bucket_size_12 = FixedWidthBucket::<12, M>::new(needle, config);
+    let mut bucket_size_16 = FixedWidthBucket::<16, M>::new(needle, config);
+    let mut bucket_size_20 = FixedWidthBucket::<20, M>::new(needle, config);
+    let mut bucket_size_24 = FixedWidthBucket::<24, M>::new(needle, config);
+    let mut bucket_size_32 = FixedWidthBucket::<32, M>::new(needle, config);
+    let mut bucket_size_48 = FixedWidthBucket::<48, M>::new(needle, config);
+    let mut bucket_size_64 = FixedWidthBucket::<64, M>::new(needle, config);
+    let mut bucket_size_96 = FixedWidthBucket::<96, M>::new(needle, config);
+    let mut bucket_size_128 = FixedWidthBucket::<128, M>::new(needle, config);
+    let mut bucket_size_160 = FixedWidthBucket::<160, M>::new(needle, config);
+    let mut bucket_size_192 = FixedWidthBucket::<192, M>::new(needle, config);
+    let mut bucket_size_224 = FixedWidthBucket::<224, M>::new(needle, config);
+    let mut bucket_size_256 = FixedWidthBucket::<256, M>::new(needle, config);
+    let mut bucket_size_384 = FixedWidthBucket::<384, M>::new(needle, config);
+    let mut bucket_size_512 = FixedWidthBucket::<512, M>::new(needle, config);
 
     // If max_typos is set, we can ignore any haystacks that are shorter than the needle
     // minus the max typos, since it's impossible for them to match

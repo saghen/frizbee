@@ -107,7 +107,7 @@ impl IncrementalMatcher {
             })
             .unwrap_or(0);
 
-        self.process(common_prefix_len, needle, &mut matches, &config);
+        self.process(common_prefix_len, needle, &mut matches, config);
         self.needle = Some(needle.to_owned());
 
         if config.sort {
