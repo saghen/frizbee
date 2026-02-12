@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::smith_waterman::simd::{smith_waterman, typos_from_score_matrix};
+use crate::smith_waterman::simd::{smith_waterman, typos_and_match_start_from_score_matrix};
 use crate::{Config, Match, Scoring};
 
 use super::Appendable;
@@ -80,9 +80,19 @@ impl<'a, const W: usize, M: Appendable<Match>> FixedWidthBucket<'a, W, M> {
             &self.scoring,
         );
 
-        let typos = self
-            .max_typos
-            .map(|max_typos| typos_from_score_matrix::<W, L>(&score_matrix, max_typos));
+        let (typos, match_starts) = match self.max_typos {
+            Some(max_typos) => {
+                // Combined traceback: compute typos and match_start in a single pass
+                let result = typos_and_match_start_from_score_matrix::<W, L>(
+                    &score_matrix,
+                    max_typos,
+                );
+                (Some(result.typos), Some(result.match_starts))
+            }
+            // When max_typos is None, we skip the traceback entirely for performance.
+            // match_start_index will be u16::MAX (unknown) in this mode.
+            None => (None, None),
+        };
 
         for idx in 0..self.length {
             if let Some(max_typos) = self.max_typos
@@ -96,6 +106,7 @@ impl<'a, const W: usize, M: Appendable<Match>> FixedWidthBucket<'a, W, M> {
                 index: score_idx,
                 score: scores[idx],
                 exact: exact_matches[idx],
+                match_start_index: match_starts.map_or(u16::MAX, |s| s[idx]),
             });
         }
 

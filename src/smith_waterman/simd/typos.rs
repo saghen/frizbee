@@ -3,6 +3,14 @@ use std::simd::{Mask, Select, Simd};
 
 use multiversion::multiversion;
 
+/// Result of the combined typos + match_start traceback.
+/// `typos[i]` is the number of typos for lane `i`.
+/// `match_starts[i]` is the index of the first matched character in the haystack for lane `i`.
+pub struct TyposAndMatchStart<const L: usize> {
+    pub typos: [u16; L],
+    pub match_starts: [u16; L],
+}
+
 #[multiversion(targets(
     // x86-64-v4 without lahfsahf
     "x86_64+avx512f+avx512bw+avx512cd+avx512dq+avx512vl+avx+avx2+bmi1+bmi2+cmpxchg16b+f16c+fma+fxsr+lzcnt+movbe+popcnt+sse+sse2+sse3+sse4.1+sse4.2+ssse3+xsave",
@@ -15,7 +23,23 @@ pub fn typos_from_score_matrix<const W: usize, const L: usize>(
     score_matrix: &[[Simd<u16, L>; W]],
     max_typos: u16,
 ) -> [u16; L] {
+    typos_and_match_start_from_score_matrix(score_matrix, max_typos).typos
+}
+
+#[multiversion(targets(
+    // x86-64-v4 without lahfsahf
+    "x86_64+avx512f+avx512bw+avx512cd+avx512dq+avx512vl+avx+avx2+bmi1+bmi2+cmpxchg16b+f16c+fma+fxsr+lzcnt+movbe+popcnt+sse+sse2+sse3+sse4.1+sse4.2+ssse3+xsave",
+    // x86-64-v3 without lahfsahf
+    "x86_64+avx+avx2+bmi1+bmi2+cmpxchg16b+f16c+fma+fxsr+lzcnt+movbe+popcnt+sse+sse2+sse3+sse4.1+sse4.2+ssse3+xsave",
+    // x86-64-v2 without lahfsahf
+    "x86_64+cmpxchg16b+fxsr+popcnt+sse+sse2+sse3+sse4.1+sse4.2+ssse3",
+))]
+pub fn typos_and_match_start_from_score_matrix<const W: usize, const L: usize>(
+    score_matrix: &[[Simd<u16, L>; W]],
+    max_typos: u16,
+) -> TyposAndMatchStart<L> {
     let mut typo_count = [0u16; L];
+    let mut match_starts = [u16::MAX; L];
     let mut scores = Simd::splat(0);
     let mut positions = Simd::splat(0);
 
@@ -57,6 +81,9 @@ pub fn typos_from_score_matrix<const W: usize, const L: usize>(
                 // Must be a mismatch
                 if diag >= score {
                     typo_count[idx] += 1;
+                } else {
+                    // This is a match  track the earliest matched position
+                    match_starts[idx] = row_idx as u16;
                 }
                 row_idx -= 1;
                 col_idx -= 1;
@@ -77,15 +104,23 @@ pub fn typos_from_score_matrix<const W: usize, const L: usize>(
         if col_idx == 0 && score == 0 {
             typo_count[idx] += 1;
         }
+
+        // If col_idx == 0 and score > 0 there was a match at row_idx
+        if col_idx == 0 && score > 0 {
+            match_starts[idx] = row_idx as u16;
+        }
     }
 
-    typo_count
+    TyposAndMatchStart {
+        typos: typo_count,
+        match_starts,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Scoring, smith_waterman::simd::smith_waterman};
+    use crate::{smith_waterman::simd::smith_waterman, Scoring};
 
     fn get_typos(needle: &str, haystack: &str) -> u16 {
         typos_from_score_matrix(

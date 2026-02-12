@@ -56,6 +56,7 @@ pub(crate) fn match_list_impl<S1: AsRef<str>, S2: AsRef<str>, M: Appendable<Matc
                 index: (i as u32) + index_offset,
                 score: 0,
                 exact: false,
+                match_start_index: 0,
             });
         }
         return;
@@ -102,11 +103,12 @@ pub(crate) fn match_list_impl<S1: AsRef<str>, S2: AsRef<str>, M: Appendable<Matc
 
         // fallback to greedy matching
         if match_too_large(needle, haystack) {
-            let (score, _, exact) = match_greedy(needle, haystack, &config.scoring);
+            let (score, indices, exact) = match_greedy(needle, haystack, &config.scoring);
             matches.append(Match {
                 index: i,
                 score,
                 exact,
+                match_start_index: indices.first().copied().unwrap_or(0) as u16,
             });
             continue;
         }
@@ -133,11 +135,12 @@ pub(crate) fn match_list_impl<S1: AsRef<str>, S2: AsRef<str>, M: Appendable<Matc
 
             // fallback to greedy matching
             _ => {
-                let (score, _, exact) = match_greedy(needle, haystack, &config.scoring);
+                let (score, indices, exact) = match_greedy(needle, haystack, &config.scoring);
                 matches.append(Match {
                     index: i,
                     score,
                     exact,
+                    match_start_index: indices.first().copied().unwrap_or(0) as u16,
                 });
                 continue;
             }
@@ -241,10 +244,44 @@ mod tests {
     #[test]
     fn test_small_needle() {
         let mut config = Config::default();
-        config.max_typos = Some(2);  // max_typos longer than needle
+        config.max_typos = Some(2); // max_typos longer than needle
         let matches = match_list("1", &["1"], &config);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].index, 0);
         assert_eq!(matches[0].exact, true);
+    }
+
+    #[test]
+    fn test_match_start() {
+        let needle = "main";
+        let haystacks = vec!["src/main.rs", "main.rs", "lib/foo/main_test.rs"];
+
+        let config = Config {
+            max_typos: Some(2),
+            ..Config::default()
+        };
+        let matches = match_list(needle, &haystacks, &config);
+
+        // Find match for "main.rs" (index 1) - should start at 0
+        let main_rs = matches.iter().find(|m| m.index == 1).unwrap();
+        assert_eq!(main_rs.match_start_index, 0);
+
+        // Find match for "src/main.rs" (index 0) - should start at 4
+        let src_main = matches.iter().find(|m| m.index == 0).unwrap();
+        assert_eq!(src_main.match_start_index, 4);
+    }
+
+    #[test]
+    fn test_match_start_without_typos() {
+        // When max_typos is None, match_start_index is u16::MAX (not computed)
+        let needle = "main";
+        let haystacks = vec!["src/main.rs"];
+
+        let config = Config {
+            max_typos: None,
+            ..Config::default()
+        };
+        let matches = match_list(needle, &haystacks, &config);
+        assert_eq!(matches[0].match_start_index, u16::MAX);
     }
 }
