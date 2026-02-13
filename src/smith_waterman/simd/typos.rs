@@ -4,15 +4,16 @@ pub fn typos_from_score_matrix<Simd256: Vector256>(
     score_matrix: &[Simd256],
     max_score: u16,
     max_typos: u16,
+    needle_len: usize,
     haystack_len: usize,
 ) -> u16 {
     let haystack_chunks = haystack_len.div_ceil(16) + 1;
-    let mut row_idx = score_matrix.len() / haystack_chunks - 1;
+    let mut row_idx = needle_len;
     let mut col_idx = (1..haystack_chunks)
         .find_map(|chunk_idx| {
             let index =
                 unsafe { score_matrix[row_idx * haystack_chunks + chunk_idx].idx_u16(max_score) };
-            (index != 8).then(|| chunk_idx * 16 + index)
+            (index != 16).then(|| chunk_idx * 16 + index)
         })
         .expect("could not find max score in score matrix final row");
 

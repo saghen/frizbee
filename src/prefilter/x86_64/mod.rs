@@ -17,7 +17,6 @@ pub use sse::*;
 ///
 /// # Safety
 /// Caller must ensure that haystack length >= 8
-/// If aligned is true, data must be aligned to 16 bytes and start must be a multiple of 16
 #[inline(always)]
 pub unsafe fn overlapping_load(haystack: &[u8], start: usize, len: usize) -> __m128i {
     unsafe {

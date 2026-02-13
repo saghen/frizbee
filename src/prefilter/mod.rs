@@ -11,6 +11,8 @@
 //!
 //! All algorithms, except scalar, assume that needle.len() > 0 && haystack.len() >= 8
 
+#[cfg(target_arch = "aarch64")]
+pub mod aarch64;
 pub mod scalar;
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
@@ -33,37 +35,50 @@ pub(crate) fn case_needle(needle: &[u8]) -> Vec<(u8, u8)> {
 
 #[derive(Debug, Clone)]
 pub enum Prefilter {
-    AVX2(x86_64::PrefilterAVX2),
+    #[cfg(target_arch = "x86_64")]
+    AVX(x86_64::PrefilterAVX),
+    #[cfg(target_arch = "x86_64")]
     SSE(x86_64::PrefilterSSE),
+    #[cfg(target_arch = "aarch64")]
+    NEON(aarch64::PrefilterNEON),
 }
 
 impl Prefilter {
     pub fn new(needle: &[u8]) -> Self {
         #[cfg(target_arch = "x86_64")]
-        if x86_64::PrefilterAVX2::is_available() {
-            Prefilter::AVX2(unsafe { x86_64::PrefilterAVX2::new(needle) })
+        if x86_64::PrefilterAVX::is_available() {
+            Prefilter::AVX(unsafe { x86_64::PrefilterAVX::new(needle) })
         } else if x86_64::PrefilterSSE::is_available() {
             Prefilter::SSE(unsafe { x86_64::PrefilterSSE::new(needle) })
         } else {
             panic!("no prefilter algorithm available due to missing SSE2 support");
         }
+
+        #[cfg(target_arch = "aarch64")]
+        Prefilter::NEON(aarch64::PrefilterNEON::new(needle))
     }
 
     #[inline]
     pub fn match_haystack(&self, haystack: &[u8], max_typos: u16) -> (bool, usize) {
         match (self, max_typos) {
-            (Prefilter::AVX2(p), 0) => unsafe { p.match_haystack(haystack) },
-            (Prefilter::AVX2(p), _) => unsafe { p.match_haystack_typos(haystack, max_typos) },
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::AVX(p), 0) => unsafe { p.match_haystack(haystack) },
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::AVX(p), _) => unsafe { p.match_haystack_typos(haystack, max_typos) },
+            #[cfg(target_arch = "x86_64")]
             (Prefilter::SSE(p), 0) => unsafe { p.match_haystack(haystack) },
+            #[cfg(target_arch = "x86_64")]
             (Prefilter::SSE(p), _) => unsafe { p.match_haystack_typos(haystack, max_typos) },
+            #[cfg(target_arch = "aarch64")]
+            (Prefilter::NEON(p), 0) => unsafe { p.match_haystack(haystack) },
+            #[cfg(target_arch = "aarch64")]
+            (Prefilter::NEON(p), _) => unsafe { p.match_haystack_typos(haystack, max_typos) },
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Prefilter;
-
     fn match_haystack(needle: &str, haystack: &str) -> bool {
         match_haystack_generic(needle, haystack, 0)
     }
@@ -271,7 +286,46 @@ mod tests {
         let haystack = normalize_haystack(haystack);
         let haystack = haystack.as_bytes();
 
-        let prefilter = Prefilter::new(needle.as_bytes());
-        prefilter.match_haystack(haystack, max_typos).0
+        #[cfg(target_arch = "x86_64")]
+        return {
+            use crate::prefilter::x86_64::{PrefilterAVX, PrefilterSSE};
+
+            let avx_result = unsafe {
+                let prefilter = PrefilterAVX::new(needle.as_bytes());
+                if max_typos > 0 {
+                    prefilter.match_haystack_typos(haystack, max_typos).0
+                } else {
+                    prefilter.match_haystack(haystack).0
+                }
+            };
+            let sse_result = unsafe {
+                let prefilter = PrefilterSSE::new(needle.as_bytes());
+                if max_typos > 0 {
+                    prefilter.match_haystack_typos(haystack, max_typos).0
+                } else {
+                    prefilter.match_haystack(haystack).0
+                }
+            };
+            assert_eq!(
+                avx_result, sse_result,
+                "avx and sse results should be the same"
+            );
+            avx_result
+        };
+
+        #[cfg(target_arch = "aarch64")]
+        return unsafe {
+            use crate::prefilter::aarch64::PrefilterNEON;
+
+            if max_typos > 0 {
+                PrefilterNEON::new(needle.as_bytes())
+                    .match_haystack_typos(haystack, max_typos)
+                    .0
+            } else {
+                PrefilterNEON::new(needle.as_bytes())
+                    .match_haystack(haystack)
+                    .0
+            }
+        };
     }
 }

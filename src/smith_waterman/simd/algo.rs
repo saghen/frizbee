@@ -63,8 +63,13 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
 
         let score = self.score_haystack(haystack);
         if let Some(max_typos) = max_typos {
-            let typos =
-                typos_from_score_matrix(&self.score_matrix, score, max_typos, haystack.len());
+            let typos = typos_from_score_matrix(
+                &self.score_matrix,
+                score,
+                max_typos,
+                self.needle.len(),
+                haystack.len(),
+            );
             if typos > max_typos {
                 return None;
             }
@@ -75,7 +80,7 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
     #[inline(always)]
     pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
         let score_matrix = &mut self.score_matrix;
-        let haystack_chunks = haystack.len().div_ceil(16);
+        let haystack_chunks = haystack.len().div_ceil(16) + 1;
         let scoring = &self.scoring;
         unsafe {
             // TODO: have prefix bonus scale based on distance
@@ -97,7 +102,7 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
             let mut prefix_mask = Simd256::from_aligned(PREFIX_MASK);
             let mut max_scores = Simd256::zero();
 
-            for (col_idx, haystack) in (0..haystack_chunks).map(|col_idx| {
+            for (col_idx, haystack) in (0..(haystack_chunks - 1)).map(|col_idx| {
                 let haystack =
                     Simd128::load_partial(haystack.as_ptr(), col_idx * 16, haystack.len());
                 (col_idx + 1, haystack)

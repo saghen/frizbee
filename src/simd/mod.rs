@@ -1,10 +1,9 @@
-use raw_cpuid::CpuId;
-use raw_cpuid::CpuIdReader;
-
 #[cfg(target_arch = "x86_64")]
 mod avx;
 #[cfg(target_arch = "aarch64")]
 mod neon;
+#[cfg(target_arch = "aarch64")]
+mod neon_256;
 #[cfg(target_arch = "x86_64")]
 mod sse;
 #[cfg(target_arch = "x86_64")]
@@ -13,7 +12,9 @@ mod sse_256;
 #[cfg(target_arch = "x86_64")]
 pub use avx::AVXVector;
 #[cfg(target_arch = "aarch64")]
-pub use neon::NeonVector;
+pub use neon::NEONVector;
+#[cfg(target_arch = "aarch64")]
+pub use neon_256::NEON256Vector;
 #[cfg(target_arch = "x86_64")]
 pub use sse::SSEVector;
 #[cfg(target_arch = "x86_64")]
@@ -27,7 +28,7 @@ pub trait Vector: Copy + core::fmt::Debug {
     /// may be safely used.
     /// We use `raw_cpuid` instead of the `is_x86_feature_detected` macro because the latter
     /// compiles to a constant when compiled with `RUSTFLAGS="-C target-cpu=x86-64-v3"`
-    fn is_available<R: CpuIdReader>(cpuid: &CpuId<R>) -> bool;
+    fn is_available() -> bool;
 
     /// Create a vector with zeros in all lanes.
     unsafe fn zero() -> Self;
@@ -54,9 +55,7 @@ pub trait Vector: Copy + core::fmt::Debug {
     unsafe fn not(self) -> Self;
 
     unsafe fn shift_right_padded_u16<const N: i32>(self, other: Self) -> Self;
-}
 
-pub trait Vector128: Vector {
     #[cfg(test)]
     fn from_array(arr: [u8; 16]) -> Self;
     #[cfg(test)]
@@ -65,7 +64,9 @@ pub trait Vector128: Vector {
     fn from_array_u16(arr: [u16; 8]) -> Self;
     #[cfg(test)]
     fn to_array_u16(self) -> [u16; 8];
+}
 
+pub trait Vector128: Vector {
     /// Loads from the given pointer, where the number of remaining bytes may be less than
     /// the vector size. The pointer does not need to be aligned.
     ///
@@ -86,13 +87,13 @@ pub trait Vector128Expansion<Expanded: Vector256>: Vector128 {
 
 pub trait Vector256: Vector {
     #[cfg(test)]
-    fn from_array(arr: [u8; 32]) -> Self;
+    fn from_array_256(arr: [u8; 32]) -> Self;
     #[cfg(test)]
-    fn to_array(self) -> [u8; 32];
+    fn to_array_256(self) -> [u8; 32];
     #[cfg(test)]
-    fn from_array_u16(arr: [u16; 16]) -> Self;
+    fn from_array_256_u16(arr: [u16; 16]) -> Self;
     #[cfg(test)]
-    fn to_array_u16(self) -> [u16; 16];
+    fn to_array_256_u16(self) -> [u16; 16];
 
     /// Extract the value at the given index from the vector
     unsafe fn idx_u16(self, search: u16) -> usize;
@@ -109,7 +110,7 @@ pub trait Vector256: Vector {
 mod tests {
     use super::*;
 
-    trait Vector128Tests: Vector128 {
+    trait VectorTests: Vector {
         unsafe fn test_zero() {
             assert_eq!(Self::zero().to_array(), [0u8; 16]);
         }
@@ -259,7 +260,11 @@ mod tests {
                 get_expected(7)
             );
         }
+    }
 
+    impl<T: Vector> VectorTests for T {}
+
+    pub trait Vector128Tests: Vector128 {
         unsafe fn test_load_partial() {
             let data = (1..=32).collect::<Vec<_>>();
 
@@ -337,14 +342,33 @@ mod tests {
         #[cfg(test)]
         unsafe fn test_cast_i8_to_i16() {
             let a = Self::splat_u8(0x00);
-            assert_eq!(a.cast_i8_to_i16().to_array_u16(), [0x0000; 16]);
+            assert_eq!(a.cast_i8_to_i16().to_array_256_u16(), [0x0000; 16]);
 
             let b = Self::splat_u8(0xFF);
-            assert_eq!(b.cast_i8_to_i16().to_array_u16(), [0xFFFF; 16]);
+            assert_eq!(b.cast_i8_to_i16().to_array_256_u16(), [0xFFFF; 16]);
         }
     }
 
     impl<T: Vector128Expansion<Expanded>, Expanded: Vector256> Vector128ExpansionTests<Expanded> for T {}
+
+    macro_rules! simd_test {
+        ($name:ident) => {
+            #[test]
+            fn $name() {
+                #[cfg(target_arch = "x86_64")]
+                unsafe {
+                    SSEVector::$name();
+                    AVXVector::$name();
+                    SSE256Vector::$name();
+                };
+                #[cfg(target_arch = "aarch64")]
+                unsafe {
+                    NEONVector::$name();
+                    NEON256Vector::$name();
+                };
+            }
+        };
+    }
 
     macro_rules! simd128_test {
         ($name:ident) => {
@@ -352,28 +376,28 @@ mod tests {
             fn $name() {
                 #[cfg(target_arch = "x86_64")]
                 unsafe {
-                    SSEVector::$name()
+                    SSEVector::$name();
                 };
                 #[cfg(target_arch = "aarch64")]
                 unsafe {
-                    NeonVector::$name()
+                    NEONVector::$name();
                 };
             }
         };
     }
 
-    simd128_test!(test_zero);
-    simd128_test!(test_splat_u8);
-    simd128_test!(test_eq_u8);
-    simd128_test!(test_gt_u8);
-    simd128_test!(test_max_u16);
-    simd128_test!(test_smax_u16);
-    simd128_test!(test_add_u16);
-    simd128_test!(test_subs_u16);
-    simd128_test!(test_and);
-    simd128_test!(test_or);
-    simd128_test!(test_not);
-    simd128_test!(test_shift_right_padded_u16);
+    simd_test!(test_zero);
+    simd_test!(test_splat_u8);
+    simd_test!(test_eq_u8);
+    simd_test!(test_gt_u8);
+    simd_test!(test_max_u16);
+    simd_test!(test_smax_u16);
+    simd_test!(test_add_u16);
+    simd_test!(test_subs_u16);
+    simd_test!(test_and);
+    simd_test!(test_or);
+    simd_test!(test_not);
+    simd_test!(test_shift_right_padded_u16);
     simd128_test!(test_load_partial);
     simd128_test!(test_shift_right_padded_u8);
 
@@ -386,7 +410,7 @@ mod tests {
         };
         #[cfg(target_arch = "aarch64")]
         unsafe {
-            <NeonVector as Vector128ExpansionTests<Neon256Vector>>::test_cast_i8_to_i16()
+            <NEONVector as Vector128ExpansionTests<NEON256Vector>>::test_cast_i8_to_i16()
         };
     }
 }

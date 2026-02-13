@@ -1,7 +1,8 @@
-use crate::{
-    Scoring,
-    simd::{AVXVector, SSE256Vector, SSEVector, Vector},
-};
+#[cfg(target_arch = "x86_64")]
+use crate::simd::{AVXVector, SSE256Vector, SSEVector};
+#[cfg(target_arch = "aarch64")]
+use crate::simd::{NEON256Vector, NEONVector};
+use crate::{Scoring, simd::Vector};
 
 mod algo;
 mod gaps;
@@ -11,40 +12,62 @@ use algo::SmithWatermanMatcherInternal;
 
 #[derive(Debug, Clone)]
 pub enum SmithWatermanMatcher {
+    #[cfg(target_arch = "x86_64")]
     AVX2(SmithWatermanMatcherAVX2),
+    #[cfg(target_arch = "x86_64")]
     SSE(SmithWatermanMatcherSSE),
+    #[cfg(target_arch = "aarch64")]
+    NEON(SmithWatermanMatcherNEON),
 }
 
 impl SmithWatermanMatcher {
     pub fn new(needle: &[u8], scoring: &Scoring) -> Self {
+        #[cfg(target_arch = "x86_64")]
         if SmithWatermanMatcherAVX2::is_available() {
-            Self::AVX2(unsafe { SmithWatermanMatcherAVX2::new(needle, scoring) })
-        } else if SmithWatermanMatcherSSE::is_available() {
-            Self::SSE(unsafe { SmithWatermanMatcherSSE::new(needle, scoring) })
-        } else {
-            panic!("frizbee requires SSE4.1 at minimum which your CPU does not support");
+            return Self::AVX2(unsafe { SmithWatermanMatcherAVX2::new(needle, scoring) });
         }
+        #[cfg(target_arch = "x86_64")]
+        if SmithWatermanMatcherSSE::is_available() {
+            return Self::SSE(unsafe { SmithWatermanMatcherSSE::new(needle, scoring) });
+        }
+        #[cfg(target_arch = "x86_64")]
+        panic!("no smith waterman implementation available due to missing SSE4.1 support");
+
+        #[cfg(target_arch = "aarch64")]
+        return Self::NEON(unsafe { SmithWatermanMatcherNEON::new(needle, scoring) });
     }
 
     pub fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
         match self {
+            #[cfg(target_arch = "x86_64")]
             Self::AVX2(matcher) => unsafe { matcher.match_haystack(haystack, max_typos) },
+            #[cfg(target_arch = "x86_64")]
             Self::SSE(matcher) => unsafe { matcher.match_haystack(haystack, max_typos) },
+            #[cfg(target_arch = "aarch64")]
+            Self::NEON(matcher) => unsafe { matcher.match_haystack(haystack, max_typos) },
         }
     }
 
     pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
         match self {
+            #[cfg(target_arch = "x86_64")]
             Self::AVX2(matcher) => unsafe { matcher.score_haystack(haystack) },
+            #[cfg(target_arch = "x86_64")]
             Self::SSE(matcher) => unsafe { matcher.score_haystack(haystack) },
+            #[cfg(target_arch = "aarch64")]
+            Self::NEON(matcher) => unsafe { matcher.score_haystack(haystack) },
         }
     }
 
     #[cfg(test)]
     pub fn print_score_matrix(&self, haystack: &str) {
         match self {
+            #[cfg(target_arch = "x86_64")]
             Self::AVX2(matcher) => unsafe { matcher.print_score_matrix(haystack) },
+            #[cfg(target_arch = "x86_64")]
             Self::SSE(matcher) => unsafe { matcher.print_score_matrix(haystack) },
+            #[cfg(target_arch = "aarch64")]
+            Self::NEON(matcher) => unsafe { matcher.print_score_matrix(haystack) },
         }
     }
 }
@@ -55,7 +78,7 @@ macro_rules! define_matcher {
         small = $small:ty,
         large = $large:ty,
         target_feature = $feature:literal,
-        available = |$cpu:ident| $available:expr
+        available = $available:expr
     ) => {
         #[derive(Debug, Clone)]
         pub struct $name(SmithWatermanMatcherInternal<$small, $large>);
@@ -68,7 +91,6 @@ macro_rules! define_matcher {
             }
 
             pub fn is_available() -> bool {
-                let $cpu = raw_cpuid::CpuId::new();
                 $available
             }
 
@@ -106,20 +128,31 @@ macro_rules! define_matcher {
     };
 }
 
+#[cfg(target_arch = "x86_64")]
 define_matcher!(
     SmithWatermanMatcherAVX2,
     small = SSEVector,
     large = AVXVector,
     target_feature = "avx2",
-    available = |cpu| AVXVector::is_available(&cpu) && SSEVector::is_available(&cpu)
+    available = AVXVector::is_available() && SSEVector::is_available()
 );
 
+#[cfg(target_arch = "x86_64")]
 define_matcher!(
     SmithWatermanMatcherSSE,
     small = SSEVector,
     large = SSE256Vector,
     target_feature = "ssse3,sse4.1",
-    available = |cpu| SSEVector::is_available(&cpu) && SSE256Vector::is_available(&cpu)
+    available = SSEVector::is_available() && SSE256Vector::is_available()
+);
+
+#[cfg(target_arch = "aarch64")]
+define_matcher!(
+    SmithWatermanMatcherNEON,
+    small = NEONVector,
+    large = NEON256Vector,
+    target_feature = "neon",
+    available = NEONVector::is_available() && NEON256Vector::is_available()
 );
 
 #[cfg(test)]
@@ -132,7 +165,7 @@ mod tests {
     fn get_score(needle: &str, haystack: &str) -> u16 {
         let mut matcher = SmithWatermanMatcher::new(needle.as_bytes(), &Scoring::default());
         let score = matcher.score_haystack(haystack.as_bytes());
-        matcher.print_score_matrix(haystack);
+        // matcher.print_score_matrix(haystack);
         score
     }
 
