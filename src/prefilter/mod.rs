@@ -62,8 +62,6 @@ impl Prefilter {
 
 #[cfg(test)]
 mod tests {
-    use crate::incremental::AlignedBytes;
-
     use super::Prefilter;
 
     fn match_haystack(needle: &str, haystack: &str) -> bool {

@@ -30,28 +30,24 @@ impl super::Vector for AVXVector {
     }
 
     #[inline(always)]
-    unsafe fn load_aligned(data: *const u8) -> Self {
-        Self(_mm256_load_si256(data as *const __m256i))
-    }
-
-    #[inline(always)]
-    unsafe fn load_unaligned(data: *const u8) -> Self {
-        Self(_mm256_loadu_si256(data as *const __m256i))
-    }
-
-    #[inline(always)]
     unsafe fn eq_u8(self, other: Self) -> Self {
         Self(_mm256_cmpeq_epi8(self.0, other.0))
     }
 
     #[inline(always)]
     unsafe fn gt_u8(self, other: Self) -> Self {
-        Self(_mm256_cmpgt_epi8(self.0, other.0))
+        let sign_bit = _mm256_set1_epi8(-128i8);
+        let a_flipped = _mm256_xor_si256(self.0, sign_bit);
+        let b_flipped = _mm256_xor_si256(other.0, sign_bit);
+        Self(_mm256_cmpgt_epi8(a_flipped, b_flipped))
     }
 
     #[inline(always)]
     unsafe fn lt_u8(self, other: Self) -> Self {
-        Self(_mm256_cmpgt_epi8(self.0, other.0))
+        let sign_bit = _mm256_set1_epi8(-128i8);
+        let a_flipped = _mm256_xor_si256(self.0, sign_bit);
+        let b_flipped = _mm256_xor_si256(other.0, sign_bit);
+        Self(_mm256_cmpgt_epi8(b_flipped, a_flipped))
     }
 
     #[inline(always)]
@@ -93,11 +89,6 @@ impl super::Vector for AVXVector {
     }
 
     #[inline(always)]
-    unsafe fn xor(self, other: Self) -> Self {
-        Self(_mm256_xor_si256(self.0, other.0))
-    }
-
-    #[inline(always)]
     unsafe fn not(self) -> Self {
         Self(_mm256_xor_si256(self.0, _mm256_set1_epi32(-1)))
     }
@@ -125,6 +116,27 @@ impl super::Vector for AVXVector {
 }
 
 impl super::Vector256 for AVXVector {
+    #[cfg(test)]
+    fn from_array(arr: [u8; 32]) -> Self {
+        Self(unsafe { _mm256_loadu_si256(arr.as_ptr() as *const __m256i) })
+    }
+    #[cfg(test)]
+    fn to_array(self) -> [u8; 32] {
+        let mut arr = [0u8; 32];
+        unsafe { _mm256_storeu_si256(arr.as_mut_ptr() as *mut __m256i, self.0) };
+        arr
+    }
+    #[cfg(test)]
+    fn from_array_u16(arr: [u16; 16]) -> Self {
+        Self(unsafe { _mm256_loadu_si256(arr.as_ptr() as *const __m256i) })
+    }
+    #[cfg(test)]
+    fn to_array_u16(self) -> [u16; 16] {
+        let mut arr = [0u16; 16];
+        unsafe { _mm256_storeu_si256(arr.as_mut_ptr() as *mut __m256i, self.0) };
+        arr
+    }
+
     #[inline(always)]
     unsafe fn idx_u16(self, search: u16) -> usize {
         // compare all elements with max, get mask
