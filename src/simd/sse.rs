@@ -75,27 +75,24 @@ impl super::Vector for SSEVector {
     }
 
     #[inline(always)]
-    unsafe fn load_aligned(data: *const u8) -> Self {
-        Self(_mm_load_si128(data as *const __m128i))
-    }
-
-    #[inline(always)]
-    unsafe fn load_unaligned(data: *const u8) -> Self {
-        Self(_mm_loadu_si128(data as *const __m128i))
-    }
-    #[inline(always)]
     unsafe fn eq_u8(self, other: Self) -> Self {
         Self(_mm_cmpeq_epi8(self.0, other.0))
     }
 
     #[inline(always)]
     unsafe fn gt_u8(self, other: Self) -> Self {
-        Self(_mm_cmpgt_epi8(self.0, other.0))
+        let sign_bit = _mm_set1_epi8(-128i8);
+        let a_flipped = _mm_xor_si128(self.0, sign_bit);
+        let b_flipped = _mm_xor_si128(other.0, sign_bit);
+        Self(_mm_cmpgt_epi8(a_flipped, b_flipped))
     }
 
     #[inline(always)]
     unsafe fn lt_u8(self, other: Self) -> Self {
-        Self(_mm_cmplt_epi8(self.0, other.0))
+        let sign_bit = _mm_set1_epi8(-128i8);
+        let a_flipped = _mm_xor_si128(self.0, sign_bit);
+        let b_flipped = _mm_xor_si128(other.0, sign_bit);
+        Self(_mm_cmplt_epi8(a_flipped, b_flipped))
     }
 
     #[inline(always)]
@@ -138,22 +135,48 @@ impl super::Vector for SSEVector {
     }
 
     #[inline(always)]
-    unsafe fn xor(self, other: Self) -> Self {
-        Self(_mm_xor_si128(self.0, other.0))
-    }
-
-    #[inline(always)]
     unsafe fn not(self) -> Self {
         Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1)))
     }
 
     #[inline(always)]
     unsafe fn shift_right_padded_u16<const L: i32>(self, other: Self) -> Self {
-        Self(_mm_alignr_epi8::<L>(self.0, other.0))
+        match L {
+            0 => self,
+            1 => Self(_mm_alignr_epi8::<14>(self.0, other.0)),
+            2 => Self(_mm_alignr_epi8::<12>(self.0, other.0)),
+            3 => Self(_mm_alignr_epi8::<10>(self.0, other.0)),
+            4 => Self(_mm_alignr_epi8::<8>(self.0, other.0)),
+            5 => Self(_mm_alignr_epi8::<6>(self.0, other.0)),
+            6 => Self(_mm_alignr_epi8::<4>(self.0, other.0)),
+            7 => Self(_mm_alignr_epi8::<2>(self.0, other.0)),
+            _ => unreachable!(),
+        }
     }
 }
 
 impl super::Vector128 for SSEVector {
+    #[cfg(test)]
+    fn from_array(arr: [u8; 16]) -> Self {
+        Self(unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) })
+    }
+    #[cfg(test)]
+    fn to_array(self) -> [u8; 16] {
+        let mut arr = [0u8; 16];
+        unsafe { _mm_storeu_si128(arr.as_mut_ptr() as *mut __m128i, self.0) };
+        arr
+    }
+    #[cfg(test)]
+    fn from_array_u16(arr: [u16; 8]) -> Self {
+        Self(unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) })
+    }
+    #[cfg(test)]
+    fn to_array_u16(self) -> [u16; 8] {
+        let mut arr = [0u16; 8];
+        unsafe { _mm_storeu_si128(arr.as_mut_ptr() as *mut __m128i, self.0) };
+        arr
+    }
+
     #[inline(always)]
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         Self(match len {
@@ -162,20 +185,28 @@ impl super::Vector128 for SSEVector {
             16 => _mm_loadu_si128(data as *const __m128i),
 
             1..=7 if Self::can_overread_8(data) => {
-                let low = _mm_loadl_epi64(data as *const __m128i);
+                let lo = _mm_loadl_epi64(data as *const __m128i);
                 let mask = _mm_set_epi64x(0, (1i64 << (len * 8)) - 1);
-                _mm_and_si128(low, mask)
+                _mm_and_si128(lo, mask)
             }
             1..=7 => Self::load_partial_safe(data, len),
             9..=15 => {
                 let lo = _mm_loadl_epi64(data as *const __m128i);
 
-                let high_start = len - 8;
-                let high = _mm_loadl_epi64(data.add(high_start) as *const __m128i);
-                let mask = _mm_set_epi64x(0, (1i64 << ((len - 8) * 8)) - 1);
-                let high = _mm_and_si128(high, mask);
+                let hi_start = len - 8;
+                let hi = _mm_loadl_epi64(data.add(hi_start) as *const __m128i);
+                let hi = match 16 - len {
+                    1 => _mm_srli_si128(hi, 1),
+                    2 => _mm_srli_si128(hi, 2),
+                    3 => _mm_srli_si128(hi, 3),
+                    4 => _mm_srli_si128(hi, 4),
+                    5 => _mm_srli_si128(hi, 5),
+                    6 => _mm_srli_si128(hi, 6),
+                    7 => _mm_srli_si128(hi, 7),
+                    _ => unreachable!(),
+                };
 
-                _mm_unpacklo_epi64(lo, high)
+                _mm_unpacklo_epi64(lo, hi)
             }
 
             _ if start + 16 <= len => _mm_loadu_si128(data.add(start) as *const __m128i),
@@ -186,21 +217,21 @@ impl super::Vector128 for SSEVector {
                 // Shift left by 'overlap' bytes to align data to start position
                 // This zeros out the rightmost 'overlap' bytes and shifts content left
                 match overlap {
-                    1 => _mm_slli_si128(data, 1),
-                    2 => _mm_slli_si128(data, 2),
-                    3 => _mm_slli_si128(data, 3),
-                    4 => _mm_slli_si128(data, 4),
-                    5 => _mm_slli_si128(data, 5),
-                    6 => _mm_slli_si128(data, 6),
-                    7 => _mm_slli_si128(data, 7),
-                    8 => _mm_slli_si128(data, 8),
-                    9 => _mm_slli_si128(data, 9),
-                    10 => _mm_slli_si128(data, 10),
-                    11 => _mm_slli_si128(data, 11),
-                    12 => _mm_slli_si128(data, 12),
-                    13 => _mm_slli_si128(data, 13),
-                    14 => _mm_slli_si128(data, 14),
-                    15 => _mm_slli_si128(data, 15),
+                    1 => _mm_srli_si128(data, 1),
+                    2 => _mm_srli_si128(data, 2),
+                    3 => _mm_srli_si128(data, 3),
+                    4 => _mm_srli_si128(data, 4),
+                    5 => _mm_srli_si128(data, 5),
+                    6 => _mm_srli_si128(data, 6),
+                    7 => _mm_srli_si128(data, 7),
+                    8 => _mm_srli_si128(data, 8),
+                    9 => _mm_srli_si128(data, 9),
+                    10 => _mm_srli_si128(data, 10),
+                    11 => _mm_srli_si128(data, 11),
+                    12 => _mm_srli_si128(data, 12),
+                    13 => _mm_srli_si128(data, 13),
+                    14 => _mm_srli_si128(data, 14),
+                    15 => _mm_srli_si128(data, 15),
                     _ => _mm_setzero_si128(),
                 }
             }
@@ -209,7 +240,25 @@ impl super::Vector128 for SSEVector {
 
     #[inline(always)]
     unsafe fn shift_right_padded_u8<const L: i32>(self, other: Self) -> Self {
-        Self(_mm_alignr_epi8::<L>(self.0, other.0))
+        match L {
+            0 => self,
+            1 => Self(_mm_alignr_epi8::<15>(self.0, other.0)),
+            2 => Self(_mm_alignr_epi8::<14>(self.0, other.0)),
+            3 => Self(_mm_alignr_epi8::<13>(self.0, other.0)),
+            4 => Self(_mm_alignr_epi8::<12>(self.0, other.0)),
+            5 => Self(_mm_alignr_epi8::<11>(self.0, other.0)),
+            6 => Self(_mm_alignr_epi8::<10>(self.0, other.0)),
+            7 => Self(_mm_alignr_epi8::<9>(self.0, other.0)),
+            8 => Self(_mm_alignr_epi8::<8>(self.0, other.0)),
+            9 => Self(_mm_alignr_epi8::<7>(self.0, other.0)),
+            10 => Self(_mm_alignr_epi8::<6>(self.0, other.0)),
+            11 => Self(_mm_alignr_epi8::<5>(self.0, other.0)),
+            12 => Self(_mm_alignr_epi8::<4>(self.0, other.0)),
+            13 => Self(_mm_alignr_epi8::<3>(self.0, other.0)),
+            14 => Self(_mm_alignr_epi8::<2>(self.0, other.0)),
+            15 => Self(_mm_alignr_epi8::<1>(self.0, other.0)),
+            _ => unreachable!(),
+        }
     }
 }
 

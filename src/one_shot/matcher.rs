@@ -13,6 +13,20 @@ pub(crate) struct Matcher {
 
 impl Matcher {
     pub fn new(needle: &str, config: &Config) -> Self {
+        let scoring = &config.scoring;
+        let max_per_char_score = scoring.match_score
+            + scoring.capitalization_bonus / 2
+            + scoring.delimiter_bonus / 2
+            + scoring.matching_case_bonus;
+        let max_needle_len =
+            (u16::MAX - scoring.prefix_bonus - scoring.exact_match_bonus) / max_per_char_score;
+        assert!(
+            needle.len() <= max_needle_len as usize,
+            "needle too long and could overflow the u16 score: {} > {}",
+            needle.len(),
+            max_needle_len
+        );
+
         Self {
             needle: needle.to_string(),
             config: config.clone(),
@@ -27,6 +41,13 @@ impl Matcher {
         index_offset: u32,
         matches: &mut Vec<Match>,
     ) {
+        assert!(
+            haystacks.len() <= (u32::MAX as usize),
+            "too many haystack which will overflow the u32 index: {} > {}",
+            haystacks.len(),
+            u32::MAX
+        );
+
         // Guard against empty needle or empty haystacks
         if self.needle.is_empty() {
             for index in (0..haystacks.len()).map(|i| i as u32 + index_offset) {

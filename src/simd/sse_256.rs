@@ -4,6 +4,7 @@ use raw_cpuid::{CpuId, CpuIdReader};
 
 use crate::simd::Aligned32;
 
+/// 256-bit vector using SSE instructions via 2 internal 128-bit vectors
 #[derive(Debug, Clone, Copy)]
 pub struct SSE256Vector(pub(crate) (__m128i, __m128i));
 
@@ -30,21 +31,6 @@ impl super::Vector for SSE256Vector {
     }
 
     #[inline(always)]
-    unsafe fn load_aligned(data: *const u8) -> Self {
-        Self((
-            _mm_load_si128(data as *const __m128i),
-            _mm_load_si128(data as *const __m128i),
-        ))
-    }
-
-    #[inline(always)]
-    unsafe fn load_unaligned(data: *const u8) -> Self {
-        Self((
-            _mm_loadu_si128(data as *const __m128i),
-            _mm_loadu_si128(data as *const __m128i),
-        ))
-    }
-    #[inline(always)]
     unsafe fn eq_u8(self, other: Self) -> Self {
         Self((
             _mm_cmpeq_epi8(self.0.0, other.0.0),
@@ -54,17 +40,29 @@ impl super::Vector for SSE256Vector {
 
     #[inline(always)]
     unsafe fn gt_u8(self, other: Self) -> Self {
+        let sign_bit = _mm_set1_epi8(-128i8);
+        let a_0_flipped = _mm_xor_si128(self.0.0, sign_bit);
+        let b_0_flipped = _mm_xor_si128(other.0.0, sign_bit);
+        let a_1_flipped = _mm_xor_si128(self.0.1, sign_bit);
+        let b_1_flipped = _mm_xor_si128(other.0.1, sign_bit);
+
         Self((
-            _mm_cmpgt_epi8(self.0.0, other.0.0),
-            _mm_cmpgt_epi8(self.0.1, other.0.1),
+            _mm_cmpgt_epi8(a_0_flipped, b_0_flipped),
+            _mm_cmpgt_epi8(a_1_flipped, b_1_flipped),
         ))
     }
 
     #[inline(always)]
     unsafe fn lt_u8(self, other: Self) -> Self {
+        let sign_bit = _mm_set1_epi8(-128i8);
+        let a_0_flipped = _mm_xor_si128(self.0.0, sign_bit);
+        let b_0_flipped = _mm_xor_si128(other.0.0, sign_bit);
+        let a_1_flipped = _mm_xor_si128(self.0.1, sign_bit);
+        let b_1_flipped = _mm_xor_si128(other.0.1, sign_bit);
+
         Self((
-            _mm_cmplt_epi8(self.0.0, other.0.0),
-            _mm_cmplt_epi8(self.0.1, other.0.1),
+            _mm_cmplt_epi8(a_0_flipped, b_0_flipped),
+            _mm_cmplt_epi8(a_1_flipped, b_1_flipped),
         ))
     }
 
@@ -127,14 +125,6 @@ impl super::Vector for SSE256Vector {
     }
 
     #[inline(always)]
-    unsafe fn xor(self, other: Self) -> Self {
-        Self((
-            _mm_xor_si128(self.0.0, other.0.0),
-            _mm_xor_si128(self.0.1, other.0.1),
-        ))
-    }
-
-    #[inline(always)]
     unsafe fn not(self) -> Self {
         Self((
             _mm_xor_si128(self.0.0, _mm_set1_epi32(-1)),
@@ -171,6 +161,35 @@ impl super::Vector for SSE256Vector {
 }
 
 impl super::Vector256 for SSE256Vector {
+    #[cfg(test)]
+    fn from_array(arr: [u8; 32]) -> Self {
+        Self((
+            unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) },
+            unsafe { _mm_loadu_si128(arr.as_ptr().add(16) as *const __m128i) },
+        ))
+    }
+    #[cfg(test)]
+    fn to_array(self) -> [u8; 32] {
+        let mut arr = [0u8; 32];
+        unsafe { _mm_storeu_si128(arr.as_mut_ptr() as *mut __m128i, self.0.0) };
+        unsafe { _mm_storeu_si128(arr.as_mut_ptr().add(16) as *mut __m128i, self.0.1) };
+        arr
+    }
+    #[cfg(test)]
+    fn from_array_u16(arr: [u16; 16]) -> Self {
+        Self((
+            unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) },
+            unsafe { _mm_loadu_si128(arr.as_ptr().add(8) as *const __m128i) },
+        ))
+    }
+    #[cfg(test)]
+    fn to_array_u16(self) -> [u16; 16] {
+        let mut arr = [0u16; 16];
+        unsafe { _mm_storeu_si128(arr.as_mut_ptr() as *mut __m128i, self.0.0) };
+        unsafe { _mm_storeu_si128(arr.as_mut_ptr().add(8) as *mut __m128i, self.0.1) };
+        arr
+    }
+
     #[inline(always)]
     unsafe fn idx_u16(self, search: u16) -> usize {
         // compare all elements with max, get mask

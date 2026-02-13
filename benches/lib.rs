@@ -19,9 +19,9 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     // Bench on synthetic data
     for (name, (match_percentage, partial_match_percentage)) in [
-        ("Partial Match", (0.2, 0.05)),
+        ("Partial Match", (0.05, 0.2)),
         ("All Match", (1.0, 0.0)),
-        ("No Match with Partial", (0.15, 0.)),
+        ("No Match with Partial", (0.0, 0.15)),
         ("No Match", (0.0, 0.0)),
     ] {
         match_list_generated_bench(c, name, match_percentage, partial_match_percentage);
