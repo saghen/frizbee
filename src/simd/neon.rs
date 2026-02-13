@@ -1,11 +1,11 @@
 use std::arch::aarch64::*;
 
-use raw_cpuid::{CpuId, CpuIdReader};
+use super::NEON256Vector;
 
 #[derive(Debug, Clone, Copy)]
-pub struct NeonVector(uint8x16_t);
+pub struct NEONVector(uint8x16_t);
 
-impl NeonVector {
+impl NEONVector {
     #[inline(always)]
     unsafe fn load_partial_safe(ptr: *const u8, len: usize) -> uint8x16_t {
         debug_assert!(len < 8);
@@ -47,10 +47,10 @@ impl NeonVector {
     }
 }
 
-impl super::Vector for NeonVector {
+impl super::Vector for NEONVector {
     #[inline]
-    fn is_available<R: CpuIdReader>(_cpuid: &CpuId<R>) -> bool {
-        // NEON is mandatory on AArch64
+    fn is_available() -> bool {
+        // NEON is mandatory on aarch64
         cfg!(target_arch = "aarch64")
     }
 
@@ -130,11 +130,21 @@ impl super::Vector for NeonVector {
 
     #[inline(always)]
     unsafe fn shift_right_padded_u16<const L: i32>(self, other: Self) -> Self {
-        Self(vextq_u8(other.0, self.0, L as u32))
+        assert!(L >= 0 && L <= 8);
+        match L {
+            0 => self,
+            1 => Self(vextq_u8(other.0, self.0, 14)),
+            2 => Self(vextq_u8(other.0, self.0, 12)),
+            3 => Self(vextq_u8(other.0, self.0, 10)),
+            4 => Self(vextq_u8(other.0, self.0, 8)),
+            5 => Self(vextq_u8(other.0, self.0, 6)),
+            6 => Self(vextq_u8(other.0, self.0, 4)),
+            7 => Self(vextq_u8(other.0, self.0, 2)),
+            8 => Self(other.0),
+            _ => unreachable!(),
+        }
     }
-}
 
-impl super::Vector128 for NeonVector {
     #[cfg(test)]
     fn from_array(arr: [u8; 16]) -> Self {
         Self(unsafe { vld1q_u8(arr.as_ptr()) })
@@ -145,7 +155,19 @@ impl super::Vector128 for NeonVector {
         unsafe { vst1q_u8(arr.as_mut_ptr(), self.0) };
         arr
     }
+    #[cfg(test)]
+    fn from_array_u16(arr: [u16; 8]) -> Self {
+        Self(unsafe { vld1q_u8(arr.as_ptr() as *const u8) })
+    }
+    #[cfg(test)]
+    fn to_array_u16(self) -> [u16; 8] {
+        let mut arr = [0u16; 8];
+        unsafe { vst1q_u16(arr.as_mut_ptr(), vreinterpretq_u16_u8(self.0)) };
+        arr
+    }
+}
 
+impl super::Vector128 for NEONVector {
     #[inline(always)]
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         Self(match len {
@@ -176,23 +198,19 @@ impl super::Vector128 for NeonVector {
             1..=7 => Self::load_partial_safe(data, len),
             9..=15 => {
                 let lo = vld1_u8(data);
-                let high_start = len - 8;
-                let hi_raw = vld1_u8(data.add(high_start));
 
-                // Mask high part
-                let hi_len = len - 8;
-                let mask_vals: [u8; 8] = [
-                    if 0 < hi_len { 0xFF } else { 0 },
-                    if 1 < hi_len { 0xFF } else { 0 },
-                    if 2 < hi_len { 0xFF } else { 0 },
-                    if 3 < hi_len { 0xFF } else { 0 },
-                    if 4 < hi_len { 0xFF } else { 0 },
-                    if 5 < hi_len { 0xFF } else { 0 },
-                    if 6 < hi_len { 0xFF } else { 0 },
-                    if 7 < hi_len { 0xFF } else { 0 },
-                ];
-                let mask = vld1_u8(mask_vals.as_ptr());
-                let hi = vand_u8(hi_raw, mask);
+                let hi_start = len - 8;
+                let hi = vld1_u8(data.add(hi_start));
+                let hi = match 16 - len {
+                    1 => vext_u8(hi, vdup_n_u8(0), 1),
+                    2 => vext_u8(hi, vdup_n_u8(0), 2),
+                    3 => vext_u8(hi, vdup_n_u8(0), 3),
+                    4 => vext_u8(hi, vdup_n_u8(0), 4),
+                    5 => vext_u8(hi, vdup_n_u8(0), 5),
+                    6 => vext_u8(hi, vdup_n_u8(0), 6),
+                    7 => vext_u8(hi, vdup_n_u8(0), 7),
+                    _ => unreachable!(),
+                };
 
                 vcombine_u8(lo, hi)
             }
@@ -204,21 +222,21 @@ impl super::Vector128 for NeonVector {
 
                 // Shift left by 'overlap' bytes (zeros enter from the right)
                 match overlap {
-                    1 => vextq_u8(vdupq_n_u8(0), loaded, 16 - 1),
-                    2 => vextq_u8(vdupq_n_u8(0), loaded, 16 - 2),
-                    3 => vextq_u8(vdupq_n_u8(0), loaded, 16 - 3),
-                    4 => vextq_u8(vdupq_n_u8(0), loaded, 16 - 4),
-                    5 => vextq_u8(vdupq_n_u8(0), loaded, 16 - 5),
-                    6 => vextq_u8(vdupq_n_u8(0), loaded, 16 - 6),
-                    7 => vextq_u8(vdupq_n_u8(0), loaded, 16 - 7),
-                    8 => vextq_u8(vdupq_n_u8(0), loaded, 16 - 8),
-                    9 => vextq_u8(vdupq_n_u8(0), loaded, 16 - 9),
-                    10 => vextq_u8(vdupq_n_u8(0), loaded, 16 - 10),
-                    11 => vextq_u8(vdupq_n_u8(0), loaded, 16 - 11),
-                    12 => vextq_u8(vdupq_n_u8(0), loaded, 16 - 12),
-                    13 => vextq_u8(vdupq_n_u8(0), loaded, 16 - 13),
-                    14 => vextq_u8(vdupq_n_u8(0), loaded, 16 - 14),
-                    15 => vextq_u8(vdupq_n_u8(0), loaded, 16 - 15),
+                    1 => vextq_u8(loaded, vdupq_n_u8(0), 1),
+                    2 => vextq_u8(loaded, vdupq_n_u8(0), 2),
+                    3 => vextq_u8(loaded, vdupq_n_u8(0), 3),
+                    4 => vextq_u8(loaded, vdupq_n_u8(0), 4),
+                    5 => vextq_u8(loaded, vdupq_n_u8(0), 5),
+                    6 => vextq_u8(loaded, vdupq_n_u8(0), 6),
+                    7 => vextq_u8(loaded, vdupq_n_u8(0), 7),
+                    8 => vextq_u8(loaded, vdupq_n_u8(0), 8),
+                    9 => vextq_u8(loaded, vdupq_n_u8(0), 9),
+                    10 => vextq_u8(loaded, vdupq_n_u8(0), 10),
+                    11 => vextq_u8(loaded, vdupq_n_u8(0), 11),
+                    12 => vextq_u8(loaded, vdupq_n_u8(0), 12),
+                    13 => vextq_u8(loaded, vdupq_n_u8(0), 13),
+                    14 => vextq_u8(loaded, vdupq_n_u8(0), 14),
+                    15 => vextq_u8(loaded, vdupq_n_u8(0), 15),
                     _ => vdupq_n_u8(0),
                 }
             }
@@ -227,6 +245,35 @@ impl super::Vector128 for NeonVector {
 
     #[inline(always)]
     unsafe fn shift_right_padded_u8<const L: i32>(self, other: Self) -> Self {
-        Self(vextq_u8(other.0, self.0, L as u32))
+        assert!(L >= 0 && L <= 15);
+        match L {
+            0 => self,
+            1 => Self(vextq_u8(other.0, self.0, 15)),
+            2 => Self(vextq_u8(other.0, self.0, 14)),
+            3 => Self(vextq_u8(other.0, self.0, 13)),
+            4 => Self(vextq_u8(other.0, self.0, 12)),
+            5 => Self(vextq_u8(other.0, self.0, 11)),
+            6 => Self(vextq_u8(other.0, self.0, 10)),
+            7 => Self(vextq_u8(other.0, self.0, 9)),
+            8 => Self(vextq_u8(other.0, self.0, 8)),
+            9 => Self(vextq_u8(other.0, self.0, 7)),
+            10 => Self(vextq_u8(other.0, self.0, 6)),
+            11 => Self(vextq_u8(other.0, self.0, 5)),
+            12 => Self(vextq_u8(other.0, self.0, 4)),
+            13 => Self(vextq_u8(other.0, self.0, 3)),
+            14 => Self(vextq_u8(other.0, self.0, 2)),
+            15 => Self(vextq_u8(other.0, self.0, 1)),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl super::Vector128Expansion<NEON256Vector> for NEONVector {
+    #[inline(always)]
+    unsafe fn cast_i8_to_i16(self) -> NEON256Vector {
+        NEON256Vector((
+            vreinterpretq_u8_s16(vmovl_s8(vget_low_s8(vreinterpretq_s8_u8(self.0)))),
+            vreinterpretq_u8_s16(vmovl_high_s8(vreinterpretq_s8_u8(self.0))),
+        ))
     }
 }

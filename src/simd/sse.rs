@@ -1,7 +1,5 @@
 use std::arch::x86_64::*;
 
-use raw_cpuid::{CpuId, CpuIdReader};
-
 use crate::simd::{AVXVector, SSE256Vector};
 
 #[derive(Debug, Clone, Copy)]
@@ -53,8 +51,8 @@ impl SSEVector {
 
 impl super::Vector for SSEVector {
     #[inline]
-    fn is_available<R: CpuIdReader>(cpuid: &CpuId<R>) -> bool {
-        cpuid
+    fn is_available() -> bool {
+        raw_cpuid::CpuId::new()
             .get_feature_info()
             .is_some_and(|info| info.has_sse41())
     }
@@ -153,9 +151,7 @@ impl super::Vector for SSEVector {
             _ => unreachable!(),
         }
     }
-}
 
-impl super::Vector128 for SSEVector {
     #[cfg(test)]
     fn from_array(arr: [u8; 16]) -> Self {
         Self(unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) })
@@ -176,7 +172,9 @@ impl super::Vector128 for SSEVector {
         unsafe { _mm_storeu_si128(arr.as_mut_ptr() as *mut __m128i, self.0) };
         arr
     }
+}
 
+impl super::Vector128 for SSEVector {
     #[inline(always)]
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         Self(match len {
