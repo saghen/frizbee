@@ -94,8 +94,7 @@ pub fn generate_haystack(needle: &str, options: HaystackGenerationOptions) -> Ve
                         .collect::<Vec<char>>();
 
                     // Get remaining characters to fill the remaining length randomly
-                    let remaining_chars = rng
-                        .clone()
+                    let remaining_chars = StdRng::seed_from_u64(rng.random())
                         .sample_iter(Alphanumeric)
                         .map(char::from)
                         .filter(|c| {

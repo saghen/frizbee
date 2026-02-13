@@ -12,8 +12,8 @@ lto = true
 [dev-dependencies]
 criterion = "0.8"
 nucleo = "0.5.0"
-rand = "0.9.1"
-rand_distr = "0.5.1"
+rand = "0.10"
+rand_distr = "0.6"
 
 [[bench]]
 name = "lib"
@@ -23,12 +23,9 @@ harness = false
 bench = false
 
 [dependencies]
-itertools = "0.14.0"
-raw-cpuid = "11.6.0"
-rayon = { version = "1.10.0", optional = true }
-serde = { version = "1.0.219", features = ["derive"], optional = true }
+itertools = "0.14" # k-way merge
+raw-cpuid = "11.6" # runtime feature detection
+serde = { version = "1.0", features = ["derive"], optional = true }
 
 [features]
-default = ["parallel_sort"]
 serde = ["dep:serde"]
-parallel_sort = ["dep:rayon"]
