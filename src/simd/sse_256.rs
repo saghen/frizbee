@@ -1,7 +1,5 @@
 use std::arch::x86_64::*;
 
-use raw_cpuid::{CpuId, CpuIdReader};
-
 use crate::simd::Aligned32;
 
 /// 256-bit vector using SSE instructions via 2 internal 128-bit vectors
@@ -9,8 +7,8 @@ use crate::simd::Aligned32;
 pub struct SSE256Vector(pub(crate) (__m128i, __m128i));
 
 impl super::Vector for SSE256Vector {
-    fn is_available<R: CpuIdReader>(cpuid: &CpuId<R>) -> bool {
-        cpuid
+    fn is_available() -> bool {
+        raw_cpuid::CpuId::new()
             .get_feature_info()
             .is_some_and(|info| info.has_sse41())
     }
@@ -139,8 +137,8 @@ impl super::Vector for SSE256Vector {
         macro_rules! impl_shift {
             ($l:expr) => {
                 Self((
-                    _mm_alignr_epi8::<{ $l * 2 }>(self.0.0, other.0.1),
-                    _mm_alignr_epi8::<{ $l * 2 }>(self.0.1, self.0.0),
+                    _mm_alignr_epi8::<{ 16 - $l * 2 }>(self.0.0, other.0.1),
+                    _mm_alignr_epi8::<{ 16 - $l * 2 }>(self.0.1, self.0.0),
                 ))
             };
         }
@@ -158,32 +156,59 @@ impl super::Vector for SSE256Vector {
             _ => unreachable!(),
         }
     }
+
+    #[cfg(test)]
+    fn from_array(arr: [u8; 16]) -> Self {
+        Self((
+            unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) },
+            unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) },
+        ))
+    }
+    #[cfg(test)]
+    fn to_array(self) -> [u8; 16] {
+        let mut arr = [0u8; 16];
+        unsafe { _mm_storeu_si128(arr.as_mut_ptr() as *mut __m128i, self.0.0) };
+        arr
+    }
+    #[cfg(test)]
+    fn from_array_u16(arr: [u16; 8]) -> Self {
+        Self((
+            unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) },
+            unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) },
+        ))
+    }
+    #[cfg(test)]
+    fn to_array_u16(self) -> [u16; 8] {
+        let mut arr = [0u16; 8];
+        unsafe { _mm_storeu_si128(arr.as_mut_ptr() as *mut __m128i, self.0.0) };
+        arr
+    }
 }
 
 impl super::Vector256 for SSE256Vector {
     #[cfg(test)]
-    fn from_array(arr: [u8; 32]) -> Self {
+    fn from_array_256(arr: [u8; 32]) -> Self {
         Self((
             unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) },
             unsafe { _mm_loadu_si128(arr.as_ptr().add(16) as *const __m128i) },
         ))
     }
     #[cfg(test)]
-    fn to_array(self) -> [u8; 32] {
+    fn to_array_256(self) -> [u8; 32] {
         let mut arr = [0u8; 32];
         unsafe { _mm_storeu_si128(arr.as_mut_ptr() as *mut __m128i, self.0.0) };
         unsafe { _mm_storeu_si128(arr.as_mut_ptr().add(16) as *mut __m128i, self.0.1) };
         arr
     }
     #[cfg(test)]
-    fn from_array_u16(arr: [u16; 16]) -> Self {
+    fn from_array_256_u16(arr: [u16; 16]) -> Self {
         Self((
             unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) },
             unsafe { _mm_loadu_si128(arr.as_ptr().add(8) as *const __m128i) },
         ))
     }
     #[cfg(test)]
-    fn to_array_u16(self) -> [u16; 16] {
+    fn to_array_256_u16(self) -> [u16; 16] {
         let mut arr = [0u16; 16];
         unsafe { _mm_storeu_si128(arr.as_mut_ptr() as *mut __m128i, self.0.0) };
         unsafe { _mm_storeu_si128(arr.as_mut_ptr().add(8) as *mut __m128i, self.0.1) };
@@ -205,7 +230,7 @@ impl super::Vector256 for SSE256Vector {
         // find first set bit
         // divide by 2 to get element index (since u16 = 2 bytes)
         let low_trailing = mask_low.trailing_zeros() as usize / 2;
-        let high_trailing = mask_high.trailing_zeros() as usize / 2 + 16;
+        let high_trailing = mask_high.trailing_zeros() as usize / 2 + 8;
         low_trailing.min(high_trailing)
     }
 
@@ -256,6 +281,7 @@ impl super::Vector256 for SSE256Vector {
                 _mm_srli_si128(self.0.0, 14),
                 _mm_alignr_epi8(self.0.1, self.0.0, 14),
             ),
+            8 => (_mm_setzero_si128(), self.0.0),
             _ => unreachable!(),
         })
     }

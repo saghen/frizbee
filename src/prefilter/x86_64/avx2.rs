@@ -4,32 +4,30 @@ use super::overlapping_load;
 use std::arch::x86_64::*;
 
 #[derive(Debug, Clone)]
-pub struct PrefilterAVX2 {
-    cased_needle: Vec<(u8, u8)>,
-    needle: Vec<__m256i>,
+pub struct PrefilterAVX {
+    needle_scalar: Vec<(u8, u8)>,
+    /// Lowercase in low 128-bits, uppercase in high 128-bits
+    needle_simd: Vec<__m256i>,
 }
 
-impl PrefilterAVX2 {
-    /// Creates a new prefilter algorithm for AVX2
-    ///
+impl PrefilterAVX {
     /// # Safety
     /// Caller must ensure that AVX2 is available at runtime
     #[inline]
     #[target_feature(enable = "avx")]
     pub unsafe fn new(needle: &[u8]) -> Self {
-        let cased_needle = case_needle(needle);
-        let needle = unsafe { cased_needle_to_avx2(&cased_needle) };
+        let needle_scalar = case_needle(needle);
+        let needle_simd = unsafe { cased_needle_to_avx2(&needle_scalar) };
         Self {
-            cased_needle,
-            needle,
+            needle_scalar,
+            needle_simd,
         }
     }
 
     pub fn is_available() -> bool {
-        // TODO: these get converted to constants if compiling with -C target-cpu=x86-64-v3
-        is_x86_feature_detected!("sse2")
-            && is_x86_feature_detected!("avx")
-            && is_x86_feature_detected!("avx2")
+        raw_cpuid::CpuId::new()
+            .get_extended_feature_info()
+            .is_some_and(|info| info.has_avx2())
     }
 
     /// Checks if the needle is wholly contained in the haystack, ignoring the exact order of the
@@ -47,7 +45,7 @@ impl PrefilterAVX2 {
         match len {
             0 => return (true, 0),
             1..=7 => {
-                return (scalar::match_haystack(&self.cased_needle, haystack), 0);
+                return (scalar::match_haystack(&self.needle_scalar, haystack), 0);
             }
             _ => {}
         };
@@ -55,7 +53,7 @@ impl PrefilterAVX2 {
         let mut skipped_chunks = 0;
         let mut can_skip_chunks = true;
 
-        let mut needle_iter = self.needle.iter();
+        let mut needle_iter = self.needle_simd.iter();
         let mut needle_char = *needle_iter.next().unwrap();
 
         for start in (0..len).step_by(16) {
@@ -89,8 +87,7 @@ impl PrefilterAVX2 {
     /// uppercase and lowercase variants of the character.
     ///
     /// # Safety
-    /// The caller must ensure that the minimum length of the haystack is >= 8.
-    /// The caller must ensure the needle.len() > 0 and that AVX2 is available.
+    /// The caller must ensure that AVX2 is available.
     #[inline]
     #[target_feature(enable = "avx2")]
     pub unsafe fn match_haystack_typos(&self, haystack: &[u8], max_typos: u16) -> (bool, usize) {
@@ -100,24 +97,20 @@ impl PrefilterAVX2 {
             0 => return (true, 0),
             1..=7 => {
                 return (
-                    scalar::match_haystack_typos(&self.cased_needle, haystack, max_typos),
+                    scalar::match_haystack_typos(&self.needle_scalar, haystack, max_typos),
                     0,
                 );
             }
             _ => {}
         };
 
-        let mut needle_iter = self.needle.iter();
+        let mut needle_iter = self.needle_simd.iter();
         let mut needle_char = *needle_iter.next().unwrap();
 
         let mut typos = 0;
         loop {
             let mut skipped_chunks = 0;
             let mut can_skip_chunks = true;
-
-            if typos > max_typos as usize {
-                return (false, 0);
-            }
 
             // TODO: this is slightly incorrect, because if we match on the third chunk,
             // we would only scan from the third chunk onwards for the next needle. Technically,

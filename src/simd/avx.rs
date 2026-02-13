@@ -1,15 +1,13 @@
 use std::arch::x86_64::*;
 
-use raw_cpuid::{CpuId, CpuIdReader};
-
 use crate::simd::Aligned32;
 
 #[derive(Debug, Clone, Copy)]
 pub struct AVXVector(pub __m256i);
 
 impl super::Vector for AVXVector {
-    fn is_available<R: CpuIdReader>(cpuid: &CpuId<R>) -> bool {
-        cpuid
+    fn is_available() -> bool {
+        raw_cpuid::CpuId::new()
             .get_extended_feature_info()
             .is_some_and(|info| info.has_avx2())
     }
@@ -105,33 +103,58 @@ impl super::Vector for AVXVector {
         Self(match N {
             1 => _mm256_alignr_epi8(self.0, shifted_lanes, 14),
             2 => _mm256_alignr_epi8(self.0, shifted_lanes, 12),
-            3 => _mm256_alignr_epi8(self.0, shifted_lanes, 8),
-            4 => _mm256_alignr_epi8(self.0, shifted_lanes, 6),
-            5 => _mm256_alignr_epi8(self.0, shifted_lanes, 4),
-            6 => _mm256_alignr_epi8(self.0, shifted_lanes, 2),
-            7 => _mm256_alignr_epi8(self.0, shifted_lanes, 0),
+            3 => _mm256_alignr_epi8(self.0, shifted_lanes, 10),
+            4 => _mm256_alignr_epi8(self.0, shifted_lanes, 8),
+            5 => _mm256_alignr_epi8(self.0, shifted_lanes, 6),
+            6 => _mm256_alignr_epi8(self.0, shifted_lanes, 4),
+            7 => _mm256_alignr_epi8(self.0, shifted_lanes, 2),
             _ => unreachable!(),
         })
+    }
+
+    #[cfg(test)]
+    fn from_array(arr: [u8; 16]) -> Self {
+        Self(unsafe {
+            _mm256_broadcastsi128_si256(_mm_loadu_si128(arr.as_ptr() as *const __m128i))
+        })
+    }
+    #[cfg(test)]
+    fn to_array(self) -> [u8; 16] {
+        let mut arr = [0u8; 32];
+        unsafe { _mm256_storeu_si256(arr.as_mut_ptr() as *mut __m256i, self.0) };
+        arr[0..16].try_into().unwrap()
+    }
+    #[cfg(test)]
+    fn from_array_u16(arr: [u16; 8]) -> Self {
+        Self(unsafe {
+            _mm256_broadcastsi128_si256(_mm_loadu_si128(arr.as_ptr() as *const __m128i))
+        })
+    }
+    #[cfg(test)]
+    fn to_array_u16(self) -> [u16; 8] {
+        let mut arr = [0u16; 16];
+        unsafe { _mm256_storeu_si256(arr.as_mut_ptr() as *mut __m256i, self.0) };
+        arr[0..8].try_into().unwrap()
     }
 }
 
 impl super::Vector256 for AVXVector {
     #[cfg(test)]
-    fn from_array(arr: [u8; 32]) -> Self {
+    fn from_array_256(arr: [u8; 32]) -> Self {
         Self(unsafe { _mm256_loadu_si256(arr.as_ptr() as *const __m256i) })
     }
     #[cfg(test)]
-    fn to_array(self) -> [u8; 32] {
+    fn to_array_256(self) -> [u8; 32] {
         let mut arr = [0u8; 32];
         unsafe { _mm256_storeu_si256(arr.as_mut_ptr() as *mut __m256i, self.0) };
         arr
     }
     #[cfg(test)]
-    fn from_array_u16(arr: [u16; 16]) -> Self {
+    fn from_array_256_u16(arr: [u16; 16]) -> Self {
         Self(unsafe { _mm256_loadu_si256(arr.as_ptr() as *const __m256i) })
     }
     #[cfg(test)]
-    fn to_array_u16(self) -> [u16; 16] {
+    fn to_array_256_u16(self) -> [u16; 16] {
         let mut arr = [0u16; 16];
         unsafe { _mm256_storeu_si256(arr.as_mut_ptr() as *mut __m256i, self.0) };
         arr
