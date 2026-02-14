@@ -93,6 +93,8 @@ impl super::Vector for AVXVector {
 
     #[inline(always)]
     unsafe fn shift_right_padded_u16<const N: i32>(self, other: Self) -> Self {
+        assert!(N >= 0 && N <= 8);
+
         // Permute: [padding_low, padding_high] + [low, high] -> [padding_high, low]
         let shifted_lanes = _mm256_permute2x128_si256(other.0, self.0, 0x21);
 
@@ -108,6 +110,7 @@ impl super::Vector for AVXVector {
             5 => _mm256_alignr_epi8(self.0, shifted_lanes, 6),
             6 => _mm256_alignr_epi8(self.0, shifted_lanes, 4),
             7 => _mm256_alignr_epi8(self.0, shifted_lanes, 2),
+            8 => _mm256_alignr_epi8(self.0, shifted_lanes, 0),
             _ => unreachable!(),
         })
     }
@@ -183,6 +186,12 @@ impl super::Vector256 for AVXVector {
 
     #[inline(always)]
     unsafe fn shift_right_u16<const N: i32>(self) -> Self {
+        assert!(N >= 0 && N <= 8);
+
+        if N == 8 {
+            return Self(_mm256_permute2x128_si256(self.0, self.0, 0x81));
+        }
+
         // Permute: [low, high] -> [zeros, low]
         let shifted_lanes = _mm256_permute2x128_si256(self.0, self.0, 0x08);
 
@@ -192,11 +201,11 @@ impl super::Vector256 for AVXVector {
         Self(match N {
             1 => _mm256_alignr_epi8(self.0, shifted_lanes, 14),
             2 => _mm256_alignr_epi8(self.0, shifted_lanes, 12),
-            3 => _mm256_alignr_epi8(self.0, shifted_lanes, 8),
-            4 => _mm256_alignr_epi8(self.0, shifted_lanes, 6),
-            5 => _mm256_alignr_epi8(self.0, shifted_lanes, 4),
-            6 => _mm256_alignr_epi8(self.0, shifted_lanes, 2),
-            7 => _mm256_alignr_epi8(self.0, shifted_lanes, 0),
+            3 => _mm256_alignr_epi8(self.0, shifted_lanes, 10),
+            4 => _mm256_alignr_epi8(self.0, shifted_lanes, 8),
+            5 => _mm256_alignr_epi8(self.0, shifted_lanes, 6),
+            6 => _mm256_alignr_epi8(self.0, shifted_lanes, 4),
+            7 => _mm256_alignr_epi8(self.0, shifted_lanes, 2),
             _ => unreachable!(),
         })
     }
