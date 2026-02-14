@@ -198,9 +198,11 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
                         diag_scores.max_u16(up_scores),                        // Current
                         score_matrix[row_idx * haystack_chunks + col_idx - 1], // Left
                         match_mask,
+                        self.match_masks[row_idx - 1], // Previous match mask
                         scoring.gap_open_penalty,
                         scoring.gap_extend_penalty,
                     );
+                    self.match_masks[row_idx - 1] = match_mask;
 
                     // Store results
                     score_matrix[row_idx * haystack_chunks + col_idx] = row_scores;
