@@ -24,6 +24,7 @@ pub struct SmithWatermanMatcherInternal<Simd128: Vector128Expansion<Simd256>, Si
     pub needle_simd: Vec<(Simd128, Simd128)>,
     pub scoring: Scoring,
     pub score_matrix: Vec<Simd256>,
+    pub match_masks: Vec<Simd256>,
     phantom: PhantomData<Simd256>,
 }
 
@@ -36,6 +37,9 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
             needle_simd: Self::broadcast_needle(needle),
             scoring: scoring.clone(),
             score_matrix: Self::generate_score_matrix(needle.len()),
+            match_masks: (0..needle.len())
+                .map(|_| unsafe { Simd256::zero() })
+                .collect(),
             phantom: PhantomData,
         }
     }
