@@ -110,7 +110,7 @@ impl super::Vector for AVXVector {
             5 => _mm256_alignr_epi8(self.0, shifted_lanes, 6),
             6 => _mm256_alignr_epi8(self.0, shifted_lanes, 4),
             7 => _mm256_alignr_epi8(self.0, shifted_lanes, 2),
-            8 => _mm256_alignr_epi8(self.0, shifted_lanes, 0),
+            8 => shifted_lanes,
             _ => unreachable!(),
         })
     }
