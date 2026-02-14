@@ -51,17 +51,26 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
                     }
 
                     // Each thread sorts so that we can perform k-way merge
-                    local_matches.sort_unstable();
+                    if config.sort {
+                        local_matches.sort_unstable();
+                    }
 
                     local_matches
                 })
             })
             .collect();
 
-        handles
-            .into_iter()
-            .map(|h| h.join().unwrap())
-            .kmerge()
-            .collect()
+        if config.sort {
+            handles
+                .into_iter()
+                .map(|h| h.join().unwrap())
+                .kmerge()
+                .collect()
+        } else {
+            handles
+                .into_iter()
+                .flat_map(|h| h.join().unwrap())
+                .collect()
+        }
     })
 }
