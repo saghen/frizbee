@@ -208,12 +208,20 @@ mod tests {
     #[test]
     fn test_score_affine_gap() {
         assert_eq!(
-            get_score("test", "Uterst"),
+            get_score("test", "Uteost"),
             CHAR_SCORE * 4 - GAP_OPEN_PENALTY
         );
         assert_eq!(
-            get_score("test", "Uterrst"),
+            get_score("test", "Uteoost"),
             CHAR_SCORE * 4 - GAP_OPEN_PENALTY - GAP_EXTEND_PENALTY
+        );
+        assert_eq!(
+            get_score("test", "Utooooeoooosoooot"),
+            CHAR_SCORE * 4 - GAP_OPEN_PENALTY * 3 - GAP_EXTEND_PENALTY * 9
+        );
+        assert_eq!(
+            get_score("test", "Utooooooeoooooosoooooot"),
+            CHAR_SCORE * 4 - GAP_OPEN_PENALTY * 3 - GAP_EXTEND_PENALTY * 15
         );
     }
 
