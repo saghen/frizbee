@@ -82,9 +82,10 @@ pub fn char_indices_from_score_matrix(score_matrix: &[&[u16]]) -> Vec<usize> {
 mod tests {
     use super::super::smith_waterman;
     use super::char_indices_from_score_matrix;
+    use crate::Scoring;
 
     fn get_indices(needle: &str, haystack: &str) -> Vec<usize> {
-        let (_, score_matrix, _) = smith_waterman(needle, haystack);
+        let (_, score_matrix, _) = smith_waterman(needle, haystack, &Scoring::default());
         let score_matrix_ref = score_matrix
             .iter()
             .map(|v| v.as_slice())

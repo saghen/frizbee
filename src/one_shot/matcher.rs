@@ -238,13 +238,74 @@ mod tests {
             assert_eq!(haystack[m.index as usize], needle)
         }
     }
+
     #[test]
     fn test_small_needle() {
         let mut config = Config::default();
-        config.max_typos = Some(2);  // max_typos longer than needle
+        config.max_typos = Some(2); // max_typos longer than needle
         let matches = match_list("1", &["1"], &config);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].index, 0);
         assert_eq!(matches[0].exact, true);
+    }
+
+    /// With high gap penalties, scattered character matches should be rejected
+    /// while contiguous subsequences should still match.
+    ///
+    /// This simulates the grep fuzzy mode use case: we want "SortedMap" to match
+    /// "SortedArrayMap" (typo / missing part) but NOT "LightSourceTeamApiKeys"
+    /// (scattered characters across unrelated words).
+    #[test]
+    fn test_high_gap_penalties_reject_scattered_matches() {
+        use crate::Scoring;
+
+        let needle = "SortedMap";
+        let haystack = vec![
+            "SortedArrayMap",         // Good: contiguous subsequence
+            "LightSourceTeamApiKeys", // Bad: scattered characters
+            "SortedMapEntry",         // Good: exact prefix
+            "formatDescription",      // Bad: scattered characters
+        ];
+
+        // Use high gap penalties to reject scattered character matches
+        let config = Config {
+            max_typos: Some(3),
+            sort: true,
+            scoring: Scoring {
+                gap_open_penalty: 100,
+                gap_extend_penalty: 80,
+                ..Scoring::default()
+            },
+            ..Config::default()
+        };
+
+        let matches = match_list(needle, &haystack, &config);
+        let matched_indices: Vec<u32> = matches.iter().map(|m| m.index).collect();
+
+        // SortedArrayMap (0) and SortedMapEntry (2) should match
+        assert!(
+            matched_indices.contains(&0),
+            "SortedArrayMap should match SortedMap: {:?}",
+            matches
+        );
+        assert!(
+            matched_indices.contains(&2),
+            "SortedMapEntry should match SortedMap: {:?}",
+            matches
+        );
+
+        // LightSourceTeamApiKeys (1) should NOT match with high gap penalties
+        assert!(
+            !matched_indices.contains(&1),
+            "LightSourceTeamApiKeys should NOT match SortedMap with high gap penalties: {:?}",
+            matches
+        );
+
+        // formatDescription (3) should NOT match
+        assert!(
+            !matched_indices.contains(&3),
+            "formatDescription should NOT match SortedMap with high gap penalties: {:?}",
+            matches
+        );
     }
 }

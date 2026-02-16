@@ -1,8 +1,14 @@
-use crate::r#const::*;
+use crate::Scoring;
 
-pub fn smith_waterman(needle: &str, haystack: &str) -> (u16, Vec<Vec<u16>>, bool) {
+pub fn smith_waterman(
+    needle: &str,
+    haystack: &str,
+    scoring: &Scoring,
+) -> (u16, Vec<Vec<u16>>, bool) {
     let needle = needle.as_bytes();
     let haystack = haystack.as_bytes();
+
+    let delimiter_bytes: Vec<u8> = scoring.delimiters.bytes().collect();
 
     // State
     let mut score_matrix = vec![vec![0; haystack.len()]; needle.len()];
@@ -39,17 +45,16 @@ pub fn smith_waterman(needle: &str, haystack: &str) -> (u16, Vec<Vec<u16>>, bool
             let haystack_is_lowercase = haystack_char.is_ascii_lowercase();
             let haystack_char = haystack_char.to_ascii_lowercase();
 
-            let haystack_is_delimiter =
-                [b' ', b'/', b'.', b',', b'_', b'-', b':'].contains(&haystack_char);
+            let haystack_is_delimiter = delimiter_bytes.contains(&haystack_char);
             let matched_casing_mask = needle_is_uppercase == haystack_is_uppercase;
 
             // Give a bonus for prefix matches
             let match_score = if is_prefix {
-                MATCH_SCORE + PREFIX_BONUS
+                scoring.match_score + scoring.prefix_bonus
             } else if is_offset_prefix {
-                MATCH_SCORE + OFFSET_PREFIX_BONUS
+                scoring.match_score + scoring.offset_prefix_bonus
             } else {
-                MATCH_SCORE
+                scoring.match_score
             };
 
             // Calculate diagonal (match/mismatch) scores
@@ -57,28 +62,28 @@ pub fn smith_waterman(needle: &str, haystack: &str) -> (u16, Vec<Vec<u16>>, bool
             let is_match = needle_char == haystack_char;
             let diag_score = if is_match {
                 diag + match_score
-                    + if prev_haystack_is_delimiter && delimiter_bonus_enabled && !haystack_is_delimiter { DELIMITER_BONUS } else { 0 }
+                    + if prev_haystack_is_delimiter && delimiter_bonus_enabled && !haystack_is_delimiter { scoring.delimiter_bonus } else { 0 }
                     // ignore capitalization on the prefix
-                    + if !is_prefix && haystack_is_uppercase && prev_haystack_is_lowercase { CAPITALIZATION_BONUS } else { 0 }
-                    + if matched_casing_mask { MATCHING_CASE_BONUS } else { 0 }
+                    + if !is_prefix && haystack_is_uppercase && prev_haystack_is_lowercase { scoring.capitalization_bonus } else { 0 }
+                    + if matched_casing_mask { scoring.matching_case_bonus } else { 0 }
             } else {
-                diag.saturating_sub(MISMATCH_PENALTY)
+                diag.saturating_sub(scoring.mismatch_penalty)
             };
 
             // Load and calculate up scores (skipping char in haystack)
             let up_gap_penalty = if up_gap_penalty_mask {
-                GAP_OPEN_PENALTY
+                scoring.gap_open_penalty
             } else {
-                GAP_EXTEND_PENALTY
+                scoring.gap_extend_penalty
             };
             let up_score = up_score_simd.saturating_sub(up_gap_penalty);
 
             // Load and calculate left scores (skipping char in needle)
             let left = prev_col_scores[j];
             let left_gap_penalty = if left_gap_penalty_mask {
-                GAP_OPEN_PENALTY
+                scoring.gap_open_penalty
             } else {
-                GAP_EXTEND_PENALTY
+                scoring.gap_extend_penalty
             };
             let left_score = left.saturating_sub(left_gap_penalty);
 
@@ -108,7 +113,7 @@ pub fn smith_waterman(needle: &str, haystack: &str) -> (u16, Vec<Vec<u16>>, bool
     let mut max_score = all_time_max_score;
     let exact = haystack == needle;
     if exact {
-        max_score += EXACT_MATCH_BONUS;
+        max_score += scoring.exact_match_bonus;
     }
 
     (max_score, score_matrix, exact)
@@ -117,14 +122,14 @@ pub fn smith_waterman(needle: &str, haystack: &str) -> (u16, Vec<Vec<u16>>, bool
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Scoring, smith_waterman::simd::smith_waterman as smith_waterman_simd};
+    use crate::{Scoring, r#const::*, smith_waterman::simd::smith_waterman as smith_waterman_simd};
 
     const CHAR_SCORE: u16 = MATCH_SCORE + MATCHING_CASE_BONUS;
 
     fn get_score(needle: &str, haystack: &str) -> u16 {
-        let ref_score = smith_waterman(needle, haystack).0;
-        let simd_score =
-            smith_waterman_simd::<16, 1>(needle, &[haystack], None, &Scoring::default()).0[0];
+        let scoring = Scoring::default();
+        let ref_score = smith_waterman(needle, haystack, &scoring).0;
+        let simd_score = smith_waterman_simd::<16, 1>(needle, &[haystack], None, &scoring).0[0];
 
         assert_eq!(
             ref_score, simd_score,
@@ -212,5 +217,93 @@ mod tests {
     fn test_score_prefix_beats_delimiter() {
         assert!(get_score("swap", "swap(test)") > get_score("swap", "iter_swap(test)"));
         assert!(get_score("_", "_private_member") > get_score("_", "public_member"));
+    }
+
+    /// Verifies that scattered character matches across long haystacks produce
+    /// lower scores than contiguous ones with default gap penalties.
+    #[test]
+    fn test_scattered_match_should_score_low() {
+        let scoring = Scoring::default();
+        // "SortedMap" vs a good match (contiguous subsequence)
+        let good_score = smith_waterman("SortedMap", "SortedArrayMap", &scoring).0;
+        // "SortedMap" vs a bad match (scattered characters across unrelated words)
+        let bad_score = smith_waterman("SortedMap", "LightSourceTeamApiKeys", &scoring).0;
+
+        // The good match should score higher than the scattered one
+        assert!(
+            good_score > bad_score,
+            "SortedArrayMap (score={}) should score higher than \
+             LightSourceTeamApiKeys (score={}) for needle 'SortedMap'",
+            good_score,
+            bad_score
+        );
+    }
+
+    /// Verifies that high gap penalties in custom Scoring cause scattered matches
+    /// to be heavily penalized in the reference path (used by match_indices).
+    /// The good (nearly contiguous) match should score significantly better.
+    #[test]
+    fn test_high_gap_penalties_reject_scattered_matches() {
+        let strict_scoring = Scoring {
+            gap_open_penalty: 100,
+            gap_extend_penalty: 80,
+            ..Scoring::default()
+        };
+
+        // Good match — nearly contiguous (only one gap for "Array" insertion)
+        let good_score = smith_waterman("SortedMap", "SortedArrayMap", &strict_scoring).0;
+        // Bad match — scattered across unrelated words
+        let bad_score = smith_waterman("SortedMap", "LightSourceTeamApiKeys", &strict_scoring).0;
+
+        assert!(
+            good_score > 0,
+            "Good match should still have a positive score, got {}",
+            good_score
+        );
+        // With high gap penalties, good match should beat the scattered one
+        assert!(
+            good_score > bad_score,
+            "Good match (score={}) should score higher than \
+             scattered match (score={}) with high gap penalties",
+            good_score,
+            bad_score
+        );
+
+        // Verify the gap penalties actually change behavior compared to defaults
+        let default_scoring = Scoring::default();
+        let default_bad_score =
+            smith_waterman("SortedMap", "LightSourceTeamApiKeys", &default_scoring).0;
+        assert!(
+            default_bad_score > bad_score,
+            "Default scoring bad_score ({}) should be higher than \
+             strict scoring bad_score ({}) — confirms gap penalties take effect",
+            default_bad_score,
+            bad_score
+        );
+    }
+
+    /// Verifies that with very high gap penalties, the algorithm is forced to pick
+    /// shorter contiguous matches rather than longer scattered ones.
+    /// This confirms the Scoring parameter is actually being used.
+    #[test]
+    fn test_gap_penalties_affect_reference_scoring() {
+        let default_scoring = Scoring::default();
+        let strict_scoring = Scoring {
+            gap_open_penalty: 100,
+            gap_extend_penalty: 80,
+            ..Scoring::default()
+        };
+
+        // "test" vs "Uterrrrrst" — has a gap of 5 extra 'r's
+        let default_score = smith_waterman("test", "Uterrrrrst", &default_scoring).0;
+        let strict_score = smith_waterman("test", "Uterrrrrst", &strict_scoring).0;
+
+        // With strict gap penalties, the score should drop significantly
+        assert!(
+            default_score > strict_score,
+            "Default score ({}) should be higher than strict score ({}) for gapped match",
+            default_score,
+            strict_score,
+        );
     }
 }

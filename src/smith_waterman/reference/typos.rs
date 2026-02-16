@@ -65,9 +65,10 @@ pub fn typos_from_score_matrix(score_matrix: &[&[u16]]) -> u16 {
 mod tests {
     use super::super::smith_waterman;
     use super::typos_from_score_matrix;
+    use crate::Scoring;
 
     fn get_typos(needle: &str, haystack: &str) -> u16 {
-        let (_, score_matrix, _) = smith_waterman(needle, haystack);
+        let (_, score_matrix, _) = smith_waterman(needle, haystack, &Scoring::default());
         let score_matrix_ref = score_matrix
             .iter()
             .map(|v| v.as_slice())

@@ -32,7 +32,7 @@ pub fn match_indices<S1: AsRef<str>, S2: AsRef<str>>(
     }
 
     // Get score matrix
-    let (score, score_matrix, exact) = smith_waterman(needle, haystack);
+    let (score, score_matrix, exact) = smith_waterman(needle, haystack, &config.scoring);
     let score_matrix_ref = score_matrix
         .iter()
         .map(|v| v.as_slice())
