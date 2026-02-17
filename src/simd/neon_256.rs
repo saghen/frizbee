@@ -199,19 +199,6 @@ impl super::Vector for NEON256Vector {
 
 impl super::Vector256 for NEON256Vector {
     #[cfg(test)]
-    fn from_array_256(arr: [u8; 32]) -> Self {
-        Self((unsafe { vld1q_u8(arr.as_ptr()) }, unsafe {
-            vld1q_u8(arr.as_ptr().add(16))
-        }))
-    }
-    #[cfg(test)]
-    fn to_array_256(self) -> [u8; 32] {
-        let mut arr = [0u8; 32];
-        unsafe { vst1q_u8(arr.as_mut_ptr(), self.0.0) };
-        unsafe { vst1q_u8(arr.as_mut_ptr().add(16), self.0.1) };
-        arr
-    }
-    #[cfg(test)]
     fn from_array_256_u16(arr: [u16; 16]) -> Self {
         Self((unsafe { vld1q_u8(arr.as_ptr() as *const u8) }, unsafe {
             vld1q_u8(arr.as_ptr().add(8) as *const u8)
