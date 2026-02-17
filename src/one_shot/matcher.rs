@@ -48,8 +48,13 @@ impl Matcher {
             u32::MAX
         );
 
-        // Guard against empty needle or empty haystacks
-        if self.needle.is_empty() {
+        // Guard against everything matching
+        if self
+            .needle
+            .len()
+            .saturating_sub(self.config.max_typos.unwrap_or(0) as usize)
+            == 0
+        {
             for index in (0..haystacks.len()).map(|i| i as u32 + index_offset) {
                 matches.push(Match {
                     index,
@@ -59,6 +64,7 @@ impl Matcher {
             }
             return;
         }
+        // Guard against empty haystacks
         if haystacks.is_empty() {
             return;
         }
