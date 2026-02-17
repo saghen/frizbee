@@ -49,12 +49,7 @@ impl Matcher {
         );
 
         // Guard against everything matching
-        if self
-            .needle
-            .len()
-            .saturating_sub(self.config.max_typos.unwrap_or(0) as usize)
-            == 0
-        {
+        if self.needle.is_empty() {
             for index in (0..haystacks.len()).map(|i| i as u32 + index_offset) {
                 matches.push(Match {
                     index,
@@ -199,11 +194,14 @@ mod tests {
     }
     #[test]
     fn test_small_needle() {
-        let mut config = Config::default();
-        config.max_typos = Some(2);  // max_typos longer than needle
+        // max_typos longer than needle
+        let config = Config {
+            max_typos: Some(2),
+            ..Config::default()
+        };
         let matches = match_list("1", &["1"], &config);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].index, 0);
-        assert_eq!(matches[0].exact, true);
+        assert!(matches[0].exact);
     }
 }
