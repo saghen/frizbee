@@ -165,7 +165,14 @@ mod tests {
     fn get_score(needle: &str, haystack: &str) -> u16 {
         let mut matcher = SmithWatermanMatcher::new(needle.as_bytes(), &Scoring::default());
         let score = matcher.score_haystack(haystack.as_bytes());
-        // matcher.print_score_matrix(haystack);
+        matcher.print_score_matrix(haystack);
+        score
+    }
+
+    fn get_score_typos(needle: &str, haystack: &str, max_typos: u16) -> Option<u16> {
+        let mut matcher = SmithWatermanMatcher::new(needle.as_bytes(), &Scoring::default());
+        let score = matcher.match_haystack(haystack.as_bytes(), Some(max_typos));
+        matcher.print_score_matrix(haystack);
         score
     }
 
@@ -253,5 +260,27 @@ mod tests {
     #[test]
     fn test_score_continuous_beats_capitalization() {
         assert!(get_score("fo", "foo") > get_score("fo", "faOo"));
+    }
+
+    #[test]
+    fn test_score_typos() {
+        assert_eq!(get_score_typos("foo", "Ufooo", 0), Some(CHAR_SCORE * 3));
+        assert_eq!(get_score_typos("foo", "Ufo", 0), None);
+        assert_eq!(
+            get_score_typos("foo", "Ufo", 1),
+            Some(CHAR_SCORE * 2 - GAP_OPEN_PENALTY)
+        );
+        assert_eq!(
+            get_score_typos("foo", "Ufo", 2),
+            Some(CHAR_SCORE * 2 - GAP_OPEN_PENALTY)
+        );
+        assert_eq!(get_score_typos("foo", "Uf", 1), None);
+        assert_eq!(
+            get_score_typos("foo", "Uf", 2),
+            Some(CHAR_SCORE - GAP_OPEN_PENALTY - GAP_EXTEND_PENALTY)
+        );
+        assert_eq!(get_score_typos("foo", "U", 2), None);
+        assert_eq!(get_score_typos("foo", "U", 3), Some(0));
+        assert_eq!(get_score_typos("foo", "U", 4), Some(0));
     }
 }
