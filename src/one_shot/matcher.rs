@@ -35,7 +35,7 @@ impl Matcher {
         }
     }
 
-    pub fn match_list_impl<S: AsRef<str>>(
+    pub fn match_list<S: AsRef<str>>(
         &mut self,
         haystacks: &[S],
         index_offset: u32,

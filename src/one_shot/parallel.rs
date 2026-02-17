@@ -47,7 +47,7 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
                         let end = (start + chunk_size).min(haystacks.len());
                         let haystacks_chunk = &haystacks[start..end];
 
-                        matcher.match_list_impl(haystacks_chunk, start as u32, &mut local_matches);
+                        matcher.match_list(haystacks_chunk, start as u32, &mut local_matches);
                     }
 
                     // Each thread sorts so that we can perform k-way merge

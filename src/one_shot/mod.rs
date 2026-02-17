@@ -13,7 +13,7 @@ pub fn match_list<S1: AsRef<str>, S2: AsRef<str>>(
 ) -> Vec<Match> {
     let mut matches = vec![];
     let mut matcher = Matcher::new(needle.as_ref(), config);
-    matcher.match_list_impl(haystacks, 0, &mut matches);
+    matcher.match_list(haystacks, 0, &mut matches);
 
     if config.sort {
         matches.sort_unstable();
