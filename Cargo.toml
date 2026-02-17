@@ -1,6 +1,6 @@
 [package]
 name = "frizbee"
-description = "Fast fuzzy matching via SIMD smith waterman, similar algorithm to FZF/FZY"
+description = "Fast typo-resistant fuzzy matching via SIMD smith waterman, similar algorithm to FZF/FZY"
 license = "MIT"
 version = "0.7.0"
 edition = "2024"

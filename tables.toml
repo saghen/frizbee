@@ -5,22 +5,22 @@ You may test these cases yourself via the included benchmarks. Benchmarks were r
 
 ```bash
 $ cargo version -v
-cargo 1.87.0-nightly (6cf826701 2025-03-14)
-release: 1.87.0-nightly
-commit-hash: 6cf8267012570f63d6b86e85a2ae5627de52df9e
-commit-date: 2025-03-14
+cargo 1.95.0-nightly (fe2f314ae 2026-01-30)
+release: 1.95.0-nightly
+commit-hash: fe2f314aef06e688a9517da1ac0577bb1854d01f
+commit-date: 2026-01-30
 host: x86_64-unknown-linux-gnu
-libgit2: 1.9.0 (sys:0.20.0 vendored)
-libcurl: 8.12.1-DEV (sys:0.4.80+curl-8.12.1 vendored ssl:OpenSSL/3.4.1)
-ssl: OpenSSL 3.4.1 11 Feb 2025
-os: NixOS 25.5.0 [64-bit]
+libgit2: 1.9.2 (sys:0.20.3 vendored)
+libcurl: 8.15.0-DEV (sys:0.4.83+curl-8.15.0 vendored ssl:OpenSSL/3.5.4)
+ssl: OpenSSL 3.5.4 30 Sep 2025
+os: NixOS 26.5.0 [64-bit]
 ```
 """
 
 Explanation = """
 In each of the benchmarks, the median length of the haystacks is varied from 8 to 128.
 
-- **Frizbee**: Uses the `Options::default()`, where we perform the fastest prefilter since no typos are allowed
+- **One Shot**: Uses the `Options::default()`, where we perform the fastest prefilter since no typos are allowed
 - **All Scores**: Set via `max_typos: None`, gets the scores for all of the items without any filtering
 - **1 Typo**: Set via `max_typos: Some(1)`, performs a slower, but still effective prefilter since a set number of typos are allowed
 - **Nucleo**: Runs with normalization disabled, case insentivity enabled and fuzzy matching enabled
@@ -63,6 +63,19 @@ None of the haystacks partially or fully match the needle, meaning none of the c
 needle: "deadbeef"
 match_percentage: 0.0
 partial_match_percentage: 0.0
+median_length: varies
+std_dev_length: median_length / 4
+num_samples: 100000
+```
+"""
+
+no_match_with_partial = """
+None of the haystacks fully match the needle while 15% of the haystack includes characters from the needle, but doesn't fully match.
+
+```rust
+needle: "deadbeef"
+match_percentage: 0.0
+partial_match_percentage: 0.15
 median_length: varies
 std_dev_length: median_length / 4
 num_samples: 100000
