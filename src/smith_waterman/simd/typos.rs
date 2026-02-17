@@ -23,7 +23,7 @@ pub fn typos_from_score_matrix<Simd256: Vector256>(
     let mut score = max_score;
 
     while row_idx > 0 {
-        if typo_count >= max_typos {
+        if typo_count > max_typos {
             return typo_count;
         }
 
