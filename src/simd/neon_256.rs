@@ -1,7 +1,5 @@
 use std::arch::aarch64::*;
 
-use super::Aligned32;
-
 #[derive(Debug, Clone, Copy)]
 pub struct NEON256Vector(pub(crate) (uint8x16_t, uint8x16_t));
 
@@ -228,6 +226,13 @@ impl super::Vector256 for NEON256Vector {
     }
 
     #[inline(always)]
+    unsafe fn load_unaligned(data: [u8; 32]) -> Self {
+        Self((unsafe { vld1q_u8(data.as_ptr()) }, unsafe {
+            vld1q_u8(data.as_ptr().add(16))
+        }))
+    }
+
+    #[inline(always)]
     unsafe fn idx_u16(self, search: u16) -> usize {
         // Compare all elements with search value (0xFFFF where equal, 0 otherwise)
         let cmp_a = vceqq_u16(vreinterpretq_u16_u8(self.0.0), vdupq_n_u16(search));
@@ -250,59 +255,5 @@ impl super::Vector256 for NEON256Vector {
             // Each byte represents one u16 lane, find first 0xFF byte
             bits_a.trailing_zeros() as usize / 8
         }
-    }
-
-    #[inline(always)]
-    unsafe fn from_aligned(data: Aligned32<[u8; 32]>) -> Self {
-        Self(std::mem::transmute::<[u8; 32], (uint8x16_t, uint8x16_t)>(
-            data.0,
-        ))
-    }
-
-    #[inline(always)]
-    unsafe fn blendv(self, other: Self, mask: Self) -> Self {
-        Self((
-            vbslq_u8(mask.0.0, other.0.0, self.0.0),
-            vbslq_u8(mask.0.1, other.0.1, self.0.1),
-        ))
-    }
-
-    #[inline(always)]
-    unsafe fn shift_right_u16<const N: i32>(self) -> Self {
-        const { assert!(N >= 0 && N <= 8) };
-
-        Self(match N {
-            0 => (self.0.0, self.0.1),
-            1 => (
-                vextq_u8(vdupq_n_u8(0), self.0.0, 16 - 2),
-                vextq_u8(self.0.0, self.0.1, 16 - 2),
-            ),
-            2 => (
-                vextq_u8(vdupq_n_u8(0), self.0.0, 16 - 4),
-                vextq_u8(self.0.0, self.0.1, 16 - 4),
-            ),
-            3 => (
-                vextq_u8(vdupq_n_u8(0), self.0.0, 16 - 6),
-                vextq_u8(self.0.0, self.0.1, 16 - 6),
-            ),
-            4 => (
-                vextq_u8(vdupq_n_u8(0), self.0.0, 16 - 8),
-                vextq_u8(self.0.0, self.0.1, 16 - 8),
-            ),
-            5 => (
-                vextq_u8(vdupq_n_u8(0), self.0.0, 16 - 10),
-                vextq_u8(self.0.0, self.0.1, 16 - 10),
-            ),
-            6 => (
-                vextq_u8(vdupq_n_u8(0), self.0.0, 16 - 12),
-                vextq_u8(self.0.0, self.0.1, 16 - 12),
-            ),
-            7 => (
-                vextq_u8(vdupq_n_u8(0), self.0.0, 16 - 14),
-                vextq_u8(self.0.0, self.0.1, 16 - 14),
-            ),
-            8 => (vdupq_n_u8(0), self.0.0),
-            _ => unreachable!(),
-        })
     }
 }

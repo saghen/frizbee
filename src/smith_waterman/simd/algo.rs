@@ -12,11 +12,10 @@ use super::typos::typos_from_score_matrix;
 
 const MAX_HAYSTACK_LEN: usize = 512;
 
-use crate::simd::Aligned32;
-pub const PREFIX_MASK: Aligned32<[u8; 32]> = Aligned32([
+pub const PREFIX_MASK: [u8; 32] = [
     0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-]);
+];
 
 #[derive(Debug, Clone)]
 pub struct SmithWatermanMatcherInternal<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256> {
@@ -96,14 +95,14 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
             let match_score = Simd256::splat_u16(scoring.match_score + scoring.mismatch_penalty);
             let mismatch_penalty = Simd256::splat_u16(scoring.mismatch_penalty);
             let matching_case_bonus = Simd256::splat_u16(scoring.matching_case_bonus);
-            let prefix_bonus = Simd256::splat_u16(scoring.prefix_bonus);
             let capitalization_bonus = Simd256::splat_u16(scoring.capitalization_bonus);
             let delimiter_bonus = Simd256::splat_u16(scoring.delimiter_bonus);
 
             // State
+            let mut prefix_bonus_masked =
+                Simd256::splat_u16(scoring.prefix_bonus).and(Simd256::load_unaligned(PREFIX_MASK));
             let mut prev_chunk_char_is_delimiter_mask = Simd128::zero();
             let mut prev_chunk_is_lower_mask = Simd128::zero();
-            let mut prefix_mask = Simd256::from_aligned(PREFIX_MASK);
             let mut max_scores = Simd256::zero();
 
             for (col_idx, haystack) in (0..(haystack_chunks - 1)).map(|col_idx| {
@@ -121,13 +120,15 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
                     haystack.gt_u8(Simd128::splat_u8(b'a' - 1)),
                 );
                 let is_letter_mask = is_upper_mask.or(is_lower_mask);
+
+                // Give the bonus if the character is uppercase and the previous character was lowercase
                 let capitalization_mask = Simd128::and(
                     is_upper_mask,
                     is_lower_mask.shift_right_padded_u8::<1>(prev_chunk_is_lower_mask),
                 )
                 .cast_i8_to_i16();
-
                 let capitalization_bonus_masked = capitalization_mask.and(capitalization_bonus);
+
                 prev_chunk_is_lower_mask = is_lower_mask;
 
                 // Bonus for matching after a delimiter character
@@ -148,6 +149,12 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
                     .cast_i8_to_i16();
                 let delimiter_bonus_masked = delimiter_mask.and(delimiter_bonus);
                 prev_chunk_char_is_delimiter_mask = char_is_delimiter_mask;
+
+                // Delimiter, capitalization and prefix bonuses
+                let match_and_masked_bonuses = delimiter_bonus_masked
+                    .add_u16(capitalization_bonus_masked)
+                    .add_u16(prefix_bonus_masked)
+                    .add_u16(match_score);
 
                 let mut up_gap_mask = Simd256::zero();
                 let mut prev_row_scores = score_matrix[col_idx];
@@ -170,17 +177,11 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
                             score_matrix[(row_idx - 1) * haystack_chunks + col_idx - 1],
                         );
 
-                        // Add match score (+ mismatch penalty) for matches, avoiding blendv
-                        let diag = diag.add_u16(match_mask.and(match_score));
+                        // Add match score (+ mismatch penalty) with bonuses for matches, avoiding blendv
+                        // Bonuses are delimiter, capitalization and prefix
+                        let diag = diag.add_u16(match_mask.and(match_and_masked_bonuses));
                         // Always add mismatch penalty
                         let diag = diag.subs_u16(mismatch_penalty);
-                        // Add prefix bonus
-                        let diag = diag.add_u16(prefix_mask.and(match_mask).and(prefix_bonus));
-                        // Add delimiter bonus
-                        let diag = diag
-                            .add_u16(delimiter_mask.and(match_mask).and(delimiter_bonus_masked));
-                        // Add capitalization bonus
-                        let diag = diag.add_u16(match_mask.and(capitalization_bonus_masked));
                         // Add matching case bonus
                         diag.add_u16(exact_case_match_mask.and(matching_case_bonus))
                     };
@@ -212,7 +213,7 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
 
                 // because we do this after the loop, we're guaranteed to be on the last row
                 max_scores = max_scores.max_u16(row_scores);
-                prefix_mask = Simd256::zero();
+                prefix_bonus_masked = Simd256::zero();
             }
 
             max_scores.smax_u16()

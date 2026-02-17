@@ -1,7 +1,5 @@
 use std::arch::x86_64::*;
 
-use crate::simd::Aligned32;
-
 #[derive(Debug, Clone, Copy)]
 pub struct AVXVector(pub __m256i);
 
@@ -164,6 +162,11 @@ impl super::Vector256 for AVXVector {
     }
 
     #[inline(always)]
+    unsafe fn load_unaligned(data: [u8; 32]) -> Self {
+        Self(unsafe { _mm256_loadu_si256(data.as_ptr() as *const __m256i) })
+    }
+
+    #[inline(always)]
     unsafe fn idx_u16(self, search: u16) -> usize {
         // compare all elements with max, get mask
         let cmp = _mm256_cmpeq_epi16(self.0, _mm256_set1_epi16(search as i16));
@@ -172,41 +175,5 @@ impl super::Vector256 for AVXVector {
         // find first set bit
         // divide by 2 to get element index (since u16 = 2 bytes)
         mask.trailing_zeros() as usize / 2
-    }
-
-    #[inline(always)]
-    unsafe fn from_aligned(data: Aligned32<[u8; 32]>) -> Self {
-        Self(std::mem::transmute::<[u8; 32], __m256i>(data.0))
-    }
-
-    #[inline(always)]
-    unsafe fn blendv(self, other: Self, mask: Self) -> Self {
-        Self(_mm256_blendv_epi8(self.0, other.0, mask.0))
-    }
-
-    #[inline(always)]
-    unsafe fn shift_right_u16<const N: i32>(self) -> Self {
-        assert!(N >= 0 && N <= 8);
-
-        if N == 8 {
-            return Self(_mm256_permute2x128_si256(self.0, self.0, 0x81));
-        }
-
-        // Permute: [low, high] -> [zeros, low]
-        let shifted_lanes = _mm256_permute2x128_si256(self.0, self.0, 0x08);
-
-        // alignr shifts within 128-bit lanes
-        // We need to shift by 2 bytes (one u16) to the right
-        // alignr(a, b, n) = (a:b) >> (n*8) for each 128-bit lane
-        Self(match N {
-            1 => _mm256_alignr_epi8(self.0, shifted_lanes, 14),
-            2 => _mm256_alignr_epi8(self.0, shifted_lanes, 12),
-            3 => _mm256_alignr_epi8(self.0, shifted_lanes, 10),
-            4 => _mm256_alignr_epi8(self.0, shifted_lanes, 8),
-            5 => _mm256_alignr_epi8(self.0, shifted_lanes, 6),
-            6 => _mm256_alignr_epi8(self.0, shifted_lanes, 4),
-            7 => _mm256_alignr_epi8(self.0, shifted_lanes, 2),
-            _ => unreachable!(),
-        })
     }
 }
