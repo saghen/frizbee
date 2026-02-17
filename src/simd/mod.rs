@@ -20,9 +20,6 @@ pub use sse::SSEVector;
 #[cfg(target_arch = "x86_64")]
 pub use sse_256::SSE256Vector;
 
-#[repr(C, align(32))]
-pub struct Aligned32<T>(pub T);
-
 pub trait Vector: Copy + core::fmt::Debug {
     /// Checks available vector extensions at runtime and returns whether the vector implementation
     /// may be safely used.
@@ -95,15 +92,10 @@ pub trait Vector256: Vector {
     #[cfg(test)]
     fn to_array_256_u16(self) -> [u16; 16];
 
+    unsafe fn load_unaligned(data: [u8; 32]) -> Self;
+
     /// Extract the value at the given index from the vector
     unsafe fn idx_u16(self, search: u16) -> usize;
-    /// Load the vector via transmute since alinment is guaranteed
-    unsafe fn from_aligned(data: Aligned32<[u8; 32]>) -> Self;
-    /// Uses a mask to blend the values of `self` and `other` where `00` means `self` and `FF` means
-    /// `other`
-    unsafe fn blendv(self, other: Self, mask: Self) -> Self;
-    /// Shift `self` right by `N` bytes, filling in the low bytes with zeros
-    unsafe fn shift_right_u16<const N: i32>(self) -> Self;
 }
 
 #[cfg(test)]
@@ -350,6 +342,8 @@ mod tests {
     }
 
     impl<T: Vector128Expansion<Expanded>, Expanded: Vector256> Vector128ExpansionTests<Expanded> for T {}
+
+    pub trait Vector256Tests: Vector256 {}
 
     macro_rules! simd_test {
         ($name:ident) => {

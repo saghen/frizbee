@@ -1,7 +1,5 @@
 use std::arch::x86_64::*;
 
-use crate::simd::Aligned32;
-
 /// 256-bit vector using SSE instructions via 2 internal 128-bit vectors
 #[derive(Debug, Clone, Copy)]
 pub struct SSE256Vector(pub(crate) (__m128i, __m128i));
@@ -216,6 +214,14 @@ impl super::Vector256 for SSE256Vector {
     }
 
     #[inline(always)]
+    unsafe fn load_unaligned(data: [u8; 32]) -> Self {
+        Self((
+            unsafe { _mm_loadu_si128(data.as_ptr() as *const __m128i) },
+            unsafe { _mm_loadu_si128(data.as_ptr().add(16) as *const __m128i) },
+        ))
+    }
+
+    #[inline(always)]
     unsafe fn idx_u16(self, search: u16) -> usize {
         // compare all elements with max, get mask
         let (cmp_low, cmp_high) = (
@@ -232,57 +238,5 @@ impl super::Vector256 for SSE256Vector {
         let low_trailing = mask_low.trailing_zeros() as usize / 2;
         let high_trailing = mask_high.trailing_zeros() as usize / 2 + 8;
         low_trailing.min(high_trailing)
-    }
-
-    #[inline(always)]
-    unsafe fn from_aligned(data: Aligned32<[u8; 32]>) -> Self {
-        Self(std::mem::transmute::<[u8; 32], (__m128i, __m128i)>(data.0))
-    }
-
-    #[inline(always)]
-    unsafe fn blendv(self, other: Self, mask: Self) -> Self {
-        Self((
-            _mm_blendv_epi8(self.0.0, other.0.0, mask.0.0),
-            _mm_blendv_epi8(self.0.1, other.0.1, mask.0.1),
-        ))
-    }
-
-    #[inline(always)]
-    unsafe fn shift_right_u16<const N: i32>(self) -> Self {
-        const { assert!(N >= 0 && N <= 8) };
-
-        Self(match N {
-            0 => (self.0.0, self.0.1),
-            1 => (
-                _mm_srli_si128(self.0.0, 2),
-                _mm_alignr_epi8(self.0.1, self.0.0, 2),
-            ),
-            2 => (
-                _mm_srli_si128(self.0.0, 4),
-                _mm_alignr_epi8(self.0.1, self.0.0, 4),
-            ),
-            3 => (
-                _mm_srli_si128(self.0.0, 6),
-                _mm_alignr_epi8(self.0.1, self.0.0, 6),
-            ),
-            4 => (
-                _mm_srli_si128(self.0.0, 8),
-                _mm_alignr_epi8(self.0.1, self.0.0, 8),
-            ),
-            5 => (
-                _mm_srli_si128(self.0.0, 10),
-                _mm_alignr_epi8(self.0.1, self.0.0, 10),
-            ),
-            6 => (
-                _mm_srli_si128(self.0.0, 12),
-                _mm_alignr_epi8(self.0.1, self.0.0, 12),
-            ),
-            7 => (
-                _mm_srli_si128(self.0.0, 14),
-                _mm_alignr_epi8(self.0.1, self.0.0, 14),
-            ),
-            8 => (_mm_setzero_si128(), self.0.0),
-            _ => unreachable!(),
-        })
     }
 }
