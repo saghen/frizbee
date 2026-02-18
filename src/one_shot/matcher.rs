@@ -138,6 +138,21 @@ impl Matcher {
 
     /// Returns an unsorted iterator over the matches in the haystacks.
     /// The needle must not be empty
+    ///
+    /// ```rust
+    /// // Must guard against empty needles
+    /// if needle.is_empty() {
+    ///     return (0..haystacks.len()).map(Match::from_index).collect()
+    /// }
+    ///
+    /// let mut matcher = Matcher::new(needle, config)
+    /// let mut matches = matcher
+    ///     .match_iter(haystacks)
+    ///     .map(|match_| ...)
+    ///     .collect::<Vec<_>>();
+    /// matches.sort_unstable();
+    /// matches
+    /// ```
     pub fn match_iter<S: AsRef<str>>(&mut self, haystacks: &[S]) -> impl Iterator<Item = Match> {
         Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
 
@@ -149,6 +164,21 @@ impl Matcher {
 
     /// Returns an unsorted iterator over the matches in the haystacks with indices.
     /// The needle must not be empty
+    ///
+    /// ```rust
+    /// // Must guard against empty needles
+    /// if needle.is_empty() {
+    ///     return (0..haystacks.len()).map(MatchIndices::from_index).collect()
+    /// }
+    ///
+    /// let mut matcher = Matcher::new(needle, config)
+    /// let mut matches = matcher
+    ///     .match_iter_indices(haystacks)
+    ///     .map(|match_| ...)
+    ///     .collect::<Vec<_>>();
+    /// matches.sort_unstable();
+    /// matches
+    /// ```
     pub fn match_iter_indices<S: AsRef<str>>(
         &mut self,
         haystacks: &[S],
