@@ -1,5 +1,3 @@
-#![feature(portable_simd)]
-
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::time::Duration;
 
@@ -24,8 +22,15 @@ fn criterion_benchmark(c: &mut Criterion) {
         ("No Match with Partial", (0.0, 0.15)),
         ("No Match", (0.0, 0.0)),
     ] {
-        match_list_generated_bench(c, name, match_percentage, partial_match_percentage);
+        match_list_generated_bench(
+            c,
+            name,
+            "deadbeef",
+            match_percentage,
+            partial_match_percentage,
+        );
     }
+    match_list_generated_bench(c, "Copy", "", 0., 0.);
 }
 
 criterion_group! {

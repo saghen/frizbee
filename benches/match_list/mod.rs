@@ -14,11 +14,10 @@ const SEED: u64 = 12345;
 pub fn match_list_generated_bench(
     c: &mut criterion::Criterion,
     name: &str,
+    needle: &str,
     match_percentage: f64,
     partial_match_percentage: f64,
 ) {
-    let needle = "deadbeef";
-
     for median_length in [16, 32, 64, 128] {
         // Generate haystacks
         let options = HaystackGenerationOptions {
@@ -81,6 +80,16 @@ pub fn match_list_bench(c: &mut criterion::Criterion, name: &str, needle: &str, 
         BenchmarkId::new("1 Typo", median_length),
         haystack,
         |b, haystack| b.iter(|| match_list(needle, haystack, Some(1))),
+    );
+    group.bench_with_input(
+        BenchmarkId::new("2 Typos", median_length),
+        haystack,
+        |b, haystack| b.iter(|| match_list(needle, haystack, Some(2))),
+    );
+    group.bench_with_input(
+        BenchmarkId::new("3 Typos", median_length),
+        haystack,
+        |b, haystack| b.iter(|| match_list(needle, haystack, Some(3))),
     );
 }
 
