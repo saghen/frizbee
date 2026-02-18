@@ -5,10 +5,12 @@ use crate::simd::{NEON256Vector, NEONVector};
 use crate::{Scoring, simd::Vector};
 
 mod algo;
+mod alignment;
+mod alignment_iter;
 mod gaps;
-mod typos;
 
 use algo::SmithWatermanMatcherInternal;
+pub use alignment_iter::{Alignment, AlignmentPathIter};
 
 #[derive(Debug, Clone)]
 pub enum SmithWatermanMatcher {
@@ -48,6 +50,28 @@ impl SmithWatermanMatcher {
         }
     }
 
+    pub fn match_haystack_indices(
+        &mut self,
+        haystack: &[u8],
+        skipped_chunks: usize,
+        max_typos: Option<u16>,
+    ) -> Option<(u16, Vec<usize>)> {
+        match self {
+            #[cfg(target_arch = "x86_64")]
+            Self::AVX2(matcher) => unsafe {
+                matcher.match_haystack_indices(haystack, skipped_chunks, max_typos)
+            },
+            #[cfg(target_arch = "x86_64")]
+            Self::SSE(matcher) => unsafe {
+                matcher.match_haystack_indices(haystack, skipped_chunks, max_typos)
+            },
+            #[cfg(target_arch = "aarch64")]
+            Self::NEON(matcher) => unsafe {
+                matcher.match_haystack_indices(haystack, skipped_chunks, max_typos)
+            },
+        }
+    }
+
     pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
         match self {
             #[cfg(target_arch = "x86_64")]
@@ -56,6 +80,48 @@ impl SmithWatermanMatcher {
             Self::SSE(matcher) => unsafe { matcher.score_haystack(haystack) },
             #[cfg(target_arch = "aarch64")]
             Self::NEON(matcher) => unsafe { matcher.score_haystack(haystack) },
+        }
+    }
+
+    /// Iterate over the alignment path positions.
+    ///
+    /// Yields `Some((needle_idx, haystack_idx))` for each matched position,
+    /// or `None` if max_typos was exceeded.
+    pub fn iter_alignment_path(
+        &self,
+        haystack_len: usize,
+        skipped_chunks: usize,
+        score: u16,
+        max_typos: Option<u16>,
+    ) -> AlignmentPathIter<'_> {
+        match self {
+            #[cfg(target_arch = "x86_64")]
+            Self::AVX2(m) => AlignmentPathIter::new(
+                &m.0.score_matrix,
+                m.0.needle.len(),
+                haystack_len,
+                skipped_chunks,
+                score,
+                max_typos,
+            ),
+            #[cfg(target_arch = "x86_64")]
+            Self::SSE(m) => AlignmentPathIter::new(
+                &m.0.score_matrix,
+                m.0.needle.len(),
+                haystack_len,
+                skipped_chunks,
+                score,
+                max_typos,
+            ),
+            #[cfg(target_arch = "aarch64")]
+            Self::NEON(m) => AlignmentPathIter::new(
+                &m.0.score_matrix,
+                m.0.needle.len(),
+                haystack_len,
+                skipped_chunks,
+                score,
+                max_typos,
+            ),
         }
     }
 
@@ -106,6 +172,17 @@ macro_rules! define_matcher {
                 max_typos: Option<u16>,
             ) -> Option<u16> {
                 self.0.match_haystack(haystack, max_typos)
+            }
+
+            #[doc = concat!("# Safety\n\nCaller must ensure that the target feature `", $feature, "` is available")]
+            #[target_feature(enable = $feature)]
+            pub unsafe fn match_haystack_indices(
+                &mut self,
+                haystack: &[u8],
+                skipped_chunks: usize,
+                max_typos: Option<u16>,
+            ) -> Option<(u16, Vec<usize>)> {
+                self.0.match_haystack_indices(haystack, skipped_chunks, max_typos)
             }
 
             #[doc = concat!(
@@ -174,6 +251,15 @@ mod tests {
         let score = matcher.match_haystack(haystack.as_bytes(), Some(max_typos));
         matcher.print_score_matrix(haystack);
         score
+    }
+
+    fn get_indices(needle: &str, haystack: &str) -> Option<Vec<usize>> {
+        let mut matcher = SmithWatermanMatcher::new(needle.as_bytes(), &Scoring::default());
+        let indices = matcher
+            .match_haystack_indices(haystack.as_bytes(), 0, None)
+            .map(|(_, indices)| indices);
+        matcher.print_score_matrix(haystack);
+        indices
     }
 
     #[test]
@@ -282,5 +368,15 @@ mod tests {
         assert_eq!(get_score_typos("foo", "U", 2), None);
         assert_eq!(get_score_typos("foo", "U", 3), Some(0));
         assert_eq!(get_score_typos("foo", "U", 4), Some(0));
+    }
+
+    #[test]
+    fn test_indices_basic() {
+        assert_eq!(get_indices("_", "abc"), Some(vec![]));
+        assert_eq!(get_indices("a", "abc"), Some(vec![0]));
+        assert_eq!(get_indices("b", "abc"), Some(vec![1]));
+        assert_eq!(get_indices("c", "abc"), Some(vec![2]));
+        assert_eq!(get_indices("ac", "________________abc"), Some(vec![18, 16]));
+        assert_eq!(get_indices("foo", "Uf"), Some(vec![1]));
     }
 }
