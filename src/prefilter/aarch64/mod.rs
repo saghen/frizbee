@@ -128,6 +128,10 @@ impl PrefilterNEON {
             _ => {}
         };
 
+        if max_typos >= 3 {
+            return (true, 0);
+        }
+
         let mut needle_iter = self
             .needle
             .iter()

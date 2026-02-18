@@ -104,6 +104,10 @@ impl PrefilterAVX {
             _ => {}
         };
 
+        if max_typos >= 3 {
+            return (true, 0);
+        }
+
         let mut needle_iter = self.needle_simd.iter();
         let mut needle_char = *needle_iter.next().unwrap();
 
