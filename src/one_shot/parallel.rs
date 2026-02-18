@@ -16,6 +16,16 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
         "haystack index overflow"
     );
 
+    if needle.as_ref().is_empty() {
+        return (0..haystacks.len())
+            .map(|index| Match {
+                index: index as u32,
+                score: 0,
+                exact: false,
+            })
+            .collect();
+    }
+
     if haystacks.is_empty() {
         return vec![];
     }
@@ -47,7 +57,7 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
                         let end = (start + chunk_size).min(haystacks.len());
                         let haystacks_chunk = &haystacks[start..end];
 
-                        matcher.match_list(haystacks_chunk, start as u32, &mut local_matches);
+                        matcher.match_list_into(haystacks_chunk, start as u32, &mut local_matches);
                     }
 
                     // Each thread sorts so that we can perform k-way merge

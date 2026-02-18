@@ -9,7 +9,7 @@ pub mod prefilter;
 mod simd;
 pub mod smith_waterman;
 
-pub use one_shot::{match_list, match_list_parallel};
+pub use one_shot::{Matcher, match_list, match_list_indices, match_list_parallel};
 
 use r#const::*;
 
@@ -17,10 +17,20 @@ use r#const::*;
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Match {
     pub score: u16,
-    /** Index of the match in the original list of haystacks */
+    /// Index of the match in the original list of haystacks
     pub index: u32,
-    /** Matched the needle exactly (i.e. "foo" on "foo") */
+    /// Matched the needle exactly (e.g. "foo" on "foo")
     pub exact: bool,
+}
+
+impl Match {
+    pub fn from_index(index: usize) -> Self {
+        Self {
+            score: 0,
+            index: index as u32,
+            exact: false,
+        }
+    }
 }
 
 impl PartialOrd for Match {
@@ -47,10 +57,44 @@ impl Eq for Match {}
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MatchIndices {
     pub score: u16,
-    pub indices: Vec<usize>,
-    /** Matched the needle exactly (i.e. "foo" on "foo") */
+    /// Index of the match in the original list of haystacks
+    pub index: u32,
+    /// Matched the needle exactly (e.g. "foo" on "foo")
     pub exact: bool,
+    /// Indices of the chars in the haystack that matched the needle
+    pub indices: Vec<usize>,
 }
+
+impl MatchIndices {
+    pub fn from_index(index: usize) -> Self {
+        Self {
+            score: 0,
+            index: index as u32,
+            exact: false,
+            indices: vec![],
+        }
+    }
+}
+
+impl PartialOrd for MatchIndices {
+    fn partial_cmp(&self, other: &MatchIndices) -> Option<Ordering> {
+        Some(std::cmp::Ord::cmp(self, other))
+    }
+}
+impl Ord for MatchIndices {
+    fn cmp(&self, other: &Self) -> Ordering {
+        (self.score as u64)
+            .cmp(&(other.score as u64))
+            .reverse()
+            .then_with(|| self.index.cmp(&other.index))
+    }
+}
+impl PartialEq for MatchIndices {
+    fn eq(&self, other: &Self) -> bool {
+        self.score == other.score && self.index == other.index
+    }
+}
+impl Eq for MatchIndices {}
 
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

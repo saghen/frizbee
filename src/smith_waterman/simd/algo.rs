@@ -4,11 +4,10 @@ use crate::{
     Scoring,
     prefilter::case_needle,
     simd::{Vector128Expansion, Vector256},
-    smith_waterman::greedy::match_greedy,
+    smith_waterman::{greedy::match_greedy, simd::alignment_iter::Alignment},
 };
 
 use super::gaps::propagate_horizontal_gaps;
-use super::typos::typos_from_score_matrix;
 
 const MAX_HAYSTACK_LEN: usize = 512;
 
@@ -65,19 +64,41 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
         }
 
         let score = self.score_haystack(haystack);
-        if let Some(max_typos) = max_typos {
-            let typos = typos_from_score_matrix(
-                &self.score_matrix,
-                score,
-                max_typos,
-                self.needle.len(),
-                haystack.len(),
-            );
-            if typos > max_typos {
-                return None;
+        match max_typos {
+            Some(max_typos) if !self.has_alignment_path(haystack.len(), score, max_typos) => None,
+            _ => Some(score),
+        }
+    }
+
+    #[inline(always)]
+    pub fn match_haystack_indices(
+        &mut self,
+        haystack: &[u8],
+        skipped_chunks: usize,
+        max_typos: Option<u16>,
+    ) -> Option<(u16, Vec<usize>)> {
+        if haystack.len() > MAX_HAYSTACK_LEN {
+            return match_greedy(self.needle.as_bytes(), haystack, &self.scoring);
+        }
+
+        let score = self.score_haystack(haystack);
+
+        let mut indices = Vec::with_capacity(self.needle.len());
+        let mut prev_haystack_idx = usize::MAX;
+        for pos in self.iter_alignment_path(haystack.len(), skipped_chunks, score, max_typos) {
+            match pos {
+                Some(Alignment::Match((_, haystack_idx))) => {
+                    if prev_haystack_idx != haystack_idx {
+                        indices.push(haystack_idx);
+                        prev_haystack_idx = haystack_idx;
+                    }
+                }
+                Some(_) => {}
+                None => return None,
             }
         }
-        Some(score)
+
+        Some((score, indices))
     }
 
     #[inline(always)]
