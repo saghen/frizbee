@@ -136,6 +136,36 @@ impl Matcher {
         }
     }
 
+    /// Returns an unsorted iterator over the matches in the haystacks.
+    /// The needle must not be empty
+    pub fn match_iter<S: AsRef<str>>(&mut self, haystacks: &[S]) -> impl Iterator<Item = Match> {
+        Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
+
+        self.prefilter_iter(haystacks)
+            .filter_map(|(index, haystack, skipped_chunks)| {
+                self.smith_waterman_one(haystack, index as u32, skipped_chunks == 0)
+            })
+    }
+
+    /// Returns an unsorted iterator over the matches in the haystacks with indices.
+    /// The needle must not be empty
+    pub fn match_iter_indices<S: AsRef<str>>(
+        &mut self,
+        haystacks: &[S],
+    ) -> impl Iterator<Item = MatchIndices> {
+        Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
+
+        self.prefilter_iter(haystacks)
+            .filter_map(|(index, haystack, skipped_chunks)| {
+                self.smith_waterman_indices_one(
+                    haystack,
+                    skipped_chunks,
+                    index as u32,
+                    skipped_chunks == 0,
+                )
+            })
+    }
+
     #[inline(always)]
     pub fn smith_waterman_one(
         &mut self,
