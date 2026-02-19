@@ -242,7 +242,7 @@ checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "frizbee"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "criterion",
  "itertools 0.14.0",
