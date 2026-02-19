@@ -9,8 +9,8 @@ pub use sse::*;
 /// Loads a chunk of 16 bytes from the haystack, with overlap when remaining bytes < 16,
 /// since it's dramatically faster than a memcpy.
 ///
-/// If the haystack the number of remaining bytes is < 16, and the total length is > 16,
-/// the last 16 bytes are loaded from the end of the haystack.
+/// If the remaining bytes in the haystack is < 16, but the total length is > 16,
+/// the last 16 bytes are loaded from the end of the haystack. (start: 16, len: 24, loads: 8-24)
 ///
 /// If the haystack is < 16 bytes, we load the first 8 bytes from the haystack, and the last 8
 /// bytes, and combine them into a single vector.
