@@ -9,15 +9,14 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
     #[inline(always)]
     pub fn iter_alignment_path(
         &self,
-        haystack_len: usize,
         skipped_chunks: usize,
         score: u16,
         max_typos: Option<u16>,
     ) -> AlignmentPathIter<'_> {
         AlignmentPathIter::new(
             &self.score_matrix,
+            &self.match_masks,
             self.needle.len(),
-            haystack_len,
             skipped_chunks,
             score,
             max_typos,
@@ -25,11 +24,11 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
     }
 
     #[inline(always)]
-    pub fn has_alignment_path(&self, haystack_len: usize, score: u16, max_typos: u16) -> bool {
+    pub fn has_alignment_path(&self, score: u16, max_typos: u16) -> bool {
         let iter = AlignmentPathIter::new(
             &self.score_matrix,
+            &self.match_masks,
             self.needle.len(),
-            haystack_len,
             0,
             score,
             Some(max_typos),

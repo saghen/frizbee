@@ -1,3 +1,4 @@
+use super::matrix::Matrix;
 use crate::simd::Vector256;
 
 pub enum Alignment {
@@ -17,15 +18,15 @@ impl Alignment {
 
     pub fn col(&self) -> usize {
         match self {
-            Alignment::Left((_, col_idx)) | Alignment::Up((_, col_idx)) => *col_idx,
-            Alignment::Match((_, col_idx)) | Alignment::Mismatch((_, col_idx)) => *col_idx,
+            Alignment::Left((_, col)) | Alignment::Up((_, col)) => *col,
+            Alignment::Match((_, col)) | Alignment::Mismatch((_, col)) => *col,
         }
     }
 
     pub fn row(&self) -> usize {
         match self {
-            Alignment::Left((row_idx, _)) | Alignment::Up((row_idx, _)) => *row_idx,
-            Alignment::Match((row_idx, _)) | Alignment::Mismatch((row_idx, _)) => *row_idx,
+            Alignment::Left((row, _)) | Alignment::Up((row, _)) => *row,
+            Alignment::Match((row, _)) | Alignment::Mismatch((row, _)) => *row,
         }
     }
 }
@@ -35,6 +36,7 @@ impl Alignment {
 /// or `None` to signal that max_typos was exceeded.
 pub struct AlignmentPathIter<'a> {
     score_matrix: &'a [[u16; 16]],
+    match_masks: &'a [[u16; 16]],
     haystack_chunks: usize,
     row_idx: usize,
     col_idx: usize,
@@ -48,20 +50,24 @@ pub struct AlignmentPathIter<'a> {
 impl<'a> AlignmentPathIter<'a> {
     #[inline(always)]
     pub fn new<Simd256: Vector256>(
-        score_matrix: &'a [Simd256],
+        score_matrix: &'a Matrix<Simd256>,
+        match_masks: &'a Matrix<Simd256>,
         needle_len: usize,
-        haystack_len: usize,
         skipped_chunks: usize,
         score: u16,
         max_typos: Option<u16>,
     ) -> Self {
-        let haystack_chunks = haystack_len.div_ceil(16) + 1;
-        let col_idx = Self::get_col_idx(score_matrix, needle_len, haystack_chunks, score);
-        let score_matrix = unsafe { std::mem::transmute::<&[Simd256], &[[u16; 16]]>(score_matrix) };
+        let col_idx = Self::get_col_idx(
+            score_matrix,
+            needle_len,
+            score_matrix.haystack_chunks,
+            score,
+        );
 
         Self {
-            score_matrix,
-            haystack_chunks,
+            score_matrix: score_matrix.as_slice(),
+            match_masks: match_masks.as_slice(),
+            haystack_chunks: score_matrix.haystack_chunks,
             row_idx: needle_len,
             col_idx,
             skipped_chunks,
@@ -74,13 +80,13 @@ impl<'a> AlignmentPathIter<'a> {
 
     #[inline(always)]
     fn get_col_idx<Simd256: Vector256>(
-        score_matrix: &[Simd256],
+        score_matrix: &Matrix<Simd256>,
         needle_len: usize,
         haystack_chunks: usize,
         score: u16,
     ) -> usize {
         for chunk_idx in 1..haystack_chunks {
-            let chunk = &score_matrix[needle_len * haystack_chunks + chunk_idx];
+            let chunk = &score_matrix.get(needle_len, chunk_idx);
             let idx = unsafe { chunk.idx_u16(score) };
             if idx != 16 {
                 return chunk_idx * 16 + idx;
@@ -92,6 +98,11 @@ impl<'a> AlignmentPathIter<'a> {
     #[inline(always)]
     fn get_score(&self, row: usize, col: usize) -> u16 {
         self.score_matrix[row * self.haystack_chunks + col / 16][col % 16]
+    }
+
+    #[inline(always)]
+    fn get_is_match(&self, row: usize, col: usize) -> bool {
+        self.match_masks[row * self.haystack_chunks + col / 16][col % 16] != 0
     }
 }
 
@@ -111,8 +122,8 @@ impl<'a> Iterator for AlignmentPathIter<'a> {
             return Some(None);
         }
 
-        // Must be moving up only (at left edge)
-        if self.col_idx < 16 {
+        // Must be moving up only (at left edge), or lost alignment
+        if self.col_idx < 16 || self.score == 0 {
             if let Some(max_typos) = self.max_typos
                 && (self.typo_count + self.row_idx as u16) > max_typos
             {
@@ -127,6 +138,13 @@ impl<'a> Iterator for AlignmentPathIter<'a> {
             self.row_idx - 1,
             self.col_idx - 16 + self.skipped_chunks * 16,
         );
+
+        if self.get_is_match(self.row_idx, self.col_idx) {
+            self.row_idx -= 1;
+            self.col_idx -= 1;
+            self.score = self.get_score(self.row_idx, self.col_idx);
+            return Some(Some(Alignment::Match(current_pos)));
+        }
 
         // Gather scores for all possible paths
         let diag = self.get_score(self.row_idx - 1, self.col_idx - 1);

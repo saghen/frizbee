@@ -8,6 +8,7 @@ mod algo;
 mod alignment;
 mod alignment_iter;
 mod gaps;
+mod matrix;
 
 use algo::SmithWatermanMatcherInternal;
 pub use alignment_iter::{Alignment, AlignmentPathIter};
@@ -89,7 +90,6 @@ impl SmithWatermanMatcher {
     /// or `None` if max_typos was exceeded.
     pub fn iter_alignment_path(
         &self,
-        haystack_len: usize,
         skipped_chunks: usize,
         score: u16,
         max_typos: Option<u16>,
@@ -98,8 +98,8 @@ impl SmithWatermanMatcher {
             #[cfg(target_arch = "x86_64")]
             Self::AVX2(m) => AlignmentPathIter::new(
                 &m.0.score_matrix,
+                &m.0.match_masks,
                 m.0.needle.len(),
-                haystack_len,
                 skipped_chunks,
                 score,
                 max_typos,
@@ -107,8 +107,8 @@ impl SmithWatermanMatcher {
             #[cfg(target_arch = "x86_64")]
             Self::SSE(m) => AlignmentPathIter::new(
                 &m.0.score_matrix,
+                &m.0.match_masks,
                 m.0.needle.len(),
-                haystack_len,
                 skipped_chunks,
                 score,
                 max_typos,
@@ -116,8 +116,8 @@ impl SmithWatermanMatcher {
             #[cfg(target_arch = "aarch64")]
             Self::NEON(m) => AlignmentPathIter::new(
                 &m.0.score_matrix,
+                &m.0.match_masks,
                 m.0.needle.len(),
-                haystack_len,
                 skipped_chunks,
                 score,
                 max_typos,
@@ -241,9 +241,9 @@ mod tests {
 
     fn get_score(needle: &str, haystack: &str) -> u16 {
         let mut matcher = SmithWatermanMatcher::new(needle.as_bytes(), &Scoring::default());
-        let score = matcher.score_haystack(haystack.as_bytes());
+        let score = matcher.match_haystack(haystack.as_bytes(), Some(0));
         matcher.print_score_matrix(haystack);
-        score
+        score.unwrap()
     }
 
     fn get_score_typos(needle: &str, haystack: &str, max_typos: u16) -> Option<u16> {

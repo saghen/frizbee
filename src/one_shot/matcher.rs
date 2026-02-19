@@ -140,18 +140,25 @@ impl Matcher {
     /// The needle must not be empty
     ///
     /// ```rust
-    /// // Must guard against empty needles
-    /// if needle.is_empty() {
-    ///     return (0..haystacks.len()).map(Match::from_index).collect()
-    /// }
+    /// use frizbee::{Config, Match, Matcher};
     ///
-    /// let mut matcher = Matcher::new(needle, config)
-    /// let mut matches = matcher
-    ///     .match_iter(haystacks)
-    ///     .map(|match_| ...)
-    ///     .collect::<Vec<_>>();
-    /// matches.sort_unstable();
-    /// matches
+    /// fn match_list(needle: &str, haystacks: &[&str]) -> Vec<Match> {
+    ///     // Must guard against empty needles
+    ///     if needle.is_empty() {
+    ///         return (0..haystacks.len()).map(Match::from_index).collect()
+    ///     }
+    ///
+    ///     let mut matcher = Matcher::new(needle, &Config::default());
+    ///     let mut matches = matcher
+    ///         .match_iter(haystacks)
+    ///         .map(|match_| {
+    ///             // apply transformations here
+    ///             match_
+    ///         })
+    ///         .collect::<Vec<_>>();
+    ///     matches.sort_unstable();
+    ///     matches
+    /// }
     /// ```
     pub fn match_iter<S: AsRef<str>>(&mut self, haystacks: &[S]) -> impl Iterator<Item = Match> {
         Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
@@ -166,18 +173,25 @@ impl Matcher {
     /// The needle must not be empty
     ///
     /// ```rust
-    /// // Must guard against empty needles
-    /// if needle.is_empty() {
-    ///     return (0..haystacks.len()).map(MatchIndices::from_index).collect()
-    /// }
+    /// use frizbee::{Config, Matcher, MatchIndices};
     ///
-    /// let mut matcher = Matcher::new(needle, config)
-    /// let mut matches = matcher
-    ///     .match_iter_indices(haystacks)
-    ///     .map(|match_| ...)
-    ///     .collect::<Vec<_>>();
-    /// matches.sort_unstable();
-    /// matches
+    /// fn match_list_indices(needle: &str, haystacks: &[&str]) -> Vec<MatchIndices> {
+    ///     // Must guard against empty needles
+    ///     if needle.is_empty() {
+    ///         return (0..haystacks.len()).map(MatchIndices::from_index).collect()
+    ///     }
+    ///
+    ///     let mut matcher = Matcher::new(needle, &Config::default());
+    ///     let mut matches = matcher
+    ///         .match_iter_indices(haystacks)
+    ///         .map(|match_| {
+    ///             // apply transformations here
+    ///             match_
+    ///         })
+    ///         .collect::<Vec<_>>();
+    ///     matches.sort_unstable();
+    ///     matches
+    /// }
     /// ```
     pub fn match_iter_indices<S: AsRef<str>>(
         &mut self,
@@ -282,18 +296,9 @@ impl Matcher {
     }
 
     #[inline(always)]
-    pub fn iter_alignment_path(
-        &self,
-        haystack_len: usize,
-        skipped_chunks: usize,
-        score: u16,
-    ) -> AlignmentPathIter<'_> {
-        self.smith_waterman.iter_alignment_path(
-            haystack_len,
-            skipped_chunks,
-            score,
-            self.config.max_typos,
-        )
+    pub fn iter_alignment_path(&self, skipped_chunks: usize, score: u16) -> AlignmentPathIter<'_> {
+        self.smith_waterman
+            .iter_alignment_path(skipped_chunks, score, self.config.max_typos)
     }
 
     #[inline(always)]
