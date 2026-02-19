@@ -54,9 +54,9 @@ See the full implementation in [`src/prefilter/x86_64/avx2.rs`](src/prefilter/x8
 
 ### Smith Waterman
 
-The Smith Waterman algorithm performs local sequence alignment, originally designed to find similar sequences between two DNA strings. The algorithm's time and space complexity of O(nm) led to plenty of research on parallelization. Since each cell in the matrix has a data dependency on the cell to the left, up, and left-up diagonal, and for biology, DNA sequences are typically quite large (m > 1000), most of the parallelization approaches focused on large matrices ([see this paper for common parallelization techniques](https://pmc.ncbi.nlm.nih.gov/articles/PMC8419822)).
+The [Smith Waterman algorithm](https://en.wikipedia.org/wiki/Smith%E2%80%93Waterman_algorithm) performs local sequence alignment ([explanation](https://kaell.se/bibook/pairwise/waterman.html)), originally designed to find similar sequences between two DNA strings. The algorithm's time and space complexity of O(nm) led to plenty of research on parallelization. Each cell in the matrix has a data dependency on the cell to the left, up, and left-up diagonal. For biology, DNA sequences are typically quite large (m > 1000), so most of the parallelization approaches focused on large matrices ([see this paper for common parallelization techniques](https://pmc.ncbi.nlm.nih.gov/articles/PMC8419822)).
 
-As a fuzzy matcher, the matrices in Frizbee are typically much smaller than those in DNA alignment. Frizbee uses an approach similar to [sequential layout](https://pmc.ncbi.nlm.nih.gov/articles/PMC8419822/#Sec11), except the horizontal (vertical in the paper, but flipped in frizbee) data dependency [is applied immediately](src/smith_waterman/simd/gaps.rs). This approach supports [affine gaps](https://en.wikipedia.org/wiki/Smith%E2%80%93Waterman_algorithm#Affine).
+As a fuzzy matcher, the matrices in Frizbee are typically much smaller than those in DNA alignment (m < 128). Frizbee uses an approach similar to [sequential layout](https://pmc.ncbi.nlm.nih.gov/articles/PMC8419822/#Sec11), except the horizontal (vertical in the paper, but flipped in frizbee) data dependency [is applied immediately](src/smith_waterman/simd/gaps.rs). This approach supports [affine gaps](https://en.wikipedia.org/wiki/Smith%E2%80%93Waterman_algorithm#Affine).
 
 ```
 needle: "foo"
