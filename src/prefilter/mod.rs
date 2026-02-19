@@ -2,14 +2,35 @@
 //! a small percentage of the haystack will match the needle. Automatically used by the Matcher
 //! and match_list APIs.
 //!
-//! Unordered algorithms are much faster than ordered algorithms, but don't guarantee that the
-//! needle is contained in the haystack, unlike ordered algorithms. As a result, a backwards
-//! pass must be performed after Smith Waterman to verify the number of typos. But the faster
-//! prefilter generally seems to outweigh this extra cost.
+//! Unordered algorithms are much faster than ordered algorithms, but allow for false positives.
+//! As a result, a backwards pass must be performed after Smith Waterman to verify the number of typos.
+//! But the faster prefilter outweighs this extra cost. The algorithm also checks both lowercase and
+//! uppercase needle chars in the same comparison (when AVX2 is available).
+//!
+//! ```text
+//! needle: "foo"
+//! haystack: "Fo_o"
+//!
+//! // assuming 4 and 8 byte SIMD widths for simplicity
+//! // in reality, the widths are 16 and 32 bytes
+//!
+//! needle[0]: [f, f, f, f, F, F, F, F]
+//!
+//! haystack: [F, o, _, o]
+//! // expand to 8 bytes by broadcasting lo to hi
+//! haystack: [F, o, _, o, F, o, _, o]
+//!
+//! needle == haystack
+//! mask: [00, 00, 00, 00, FF, 00, 00, 00]
+//! bitmask: 0b00001000 // movemask(mask)
+//! bitmask > 0 // needle found in haystack, check next needle char
+//! ```
+//!
+//! See the full implementation in [`src/prefilter/x86_64/avx2.rs`](src/prefilter/x86_64/avx2.rs). When 256-bit SIMD is not available (no AVX2 or ARM), we simply check the uppercase and lowercase separately.
 //!
 //! The `Prefilter` struct chooses the fastest algorithm via runtime feature detection.
-//!
-//! All algorithms, except scalar, assume that needle.len() > 0 && haystack.len() >= 8
+//! SIMD algorithms only apply to haystack.len() >= 16.
+//! All algorithms assume that needle.len() > 0
 
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
@@ -33,6 +54,8 @@ pub(crate) fn case_needle(needle: &[u8]) -> Vec<(u8, u8)> {
         .collect()
 }
 
+/// SIMD unordered prefiltering algorithm which allows for false positives.
+/// Chooses the fastest algorithm via runtime feature detection.
 #[derive(Debug, Clone)]
 pub enum Prefilter {
     #[cfg(target_arch = "x86_64")]
@@ -58,6 +81,18 @@ impl Prefilter {
         Prefilter::NEON(aarch64::PrefilterNEON::new(needle))
     }
 
+    /// Checks if the needle is wholly contained in the haystack, ignoring the exact order of the
+    /// bytes. For example, if the needle is "test", the haystack "tset" will return true. However,
+    /// the order does matter across 16 byte boundaries. The needle chars must include both the
+    /// uppercase and lowercase variants of the character.
+    ///
+    /// Optionally, define the maximum number of typos (missing characters from the needle) before
+    /// the haystack is filtered out.
+    ///
+    /// Returns the chunk (16 bytes) index of the first match in the haystack (first needle char).
+    /// The haystack can then be sliced to skip empty chunks: `haystack[skipped_chunks * 16..]`
+    ///
+    /// The caller must ensure needle.len() > 0
     #[inline]
     pub fn match_haystack(&self, haystack: &[u8], max_typos: u16) -> (bool, usize) {
         match (self, max_typos) {

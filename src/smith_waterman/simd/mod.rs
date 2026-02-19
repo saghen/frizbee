@@ -13,6 +13,8 @@ mod matrix;
 use algo::SmithWatermanMatcherInternal;
 pub use alignment_iter::{Alignment, AlignmentPathIter};
 
+/// SIMD Smith Waterman matcher with affine gaps and sequential layout parallelism.
+/// Chooses the fastest algorithm via runtime feature detection.
 #[derive(Debug, Clone)]
 pub enum SmithWatermanMatcher {
     #[cfg(target_arch = "x86_64")]
@@ -84,7 +86,7 @@ impl SmithWatermanMatcher {
         }
     }
 
-    /// Iterate over the alignment path positions.
+    /// Iterate over the alignment path positions with support for max typos.
     ///
     /// Yields `Some((needle_idx, haystack_idx))` for each matched position,
     /// or `None` if max_typos was exceeded.

@@ -31,7 +31,8 @@ impl Alignment {
     }
 }
 
-/// Iterator over alignment path positions.
+/// Iterator over alignment path positions with support for max typos.
+///
 /// Yields `Some((needle_idx, haystack_idx))` for each position in the path,
 /// or `None` to signal that max_typos was exceeded.
 pub struct AlignmentPathIter<'a> {

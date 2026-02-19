@@ -1,3 +1,113 @@
+//! Frizbee is a SIMD typo-resistant fuzzy string matcher written in Rust. The core of the algorithm uses Smith-Waterman with affine gaps, similar to FZF, but with many of the scoring bonuses from FZY. In the included benchmark, with typo resistance disabled, it outperforms [nucleo](https://github.com/helix-editor/nucleo) by ~1.7x and supports multithreading, see [benchmarks](./BENCHMARKS.md). It matches against bytes directly, ignoring unicode. Used by [blink.cmp](https://github.com/saghen/blink.cmp), [skim](https://github.com/skim-rs/skim), [fff.nvim](https://github.com/dmtrKovalenko/fff.nvim). Special thank you to [stefanboca](https://github.com/stefanboca) and [ii14](https://github.com/ii14)!
+//!
+//! The core of the algorithm is Smith-Waterman with affine gaps and row-wise parallelism via SIMD. Besides the parallelism, this is the basis of other popular fuzzy matching algorithms like [FZF](https://github.com/junegunn/fzf) and [Nucleo](https://github.com/helix-editor/nucleo). The main properties of Smith-Waterman are:
+//! - Always finds the best alignment
+//! - Supports insertion, deletion and substitution
+//!
+//! # Example: using `match_list`
+//!
+//! ```rust
+//! use frizbee::{match_list, match_list_parallel, Config};
+//!
+//! let needle = "fBr";
+//! let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
+//!
+//! let matches = match_list(needle, &haystacks, &Config::default());
+//! // or in parallel (8 threads)
+//! let matches = match_list_parallel(needle, &haystacks, &Config::default(), 8);
+//! ```
+//!
+//! # Example: using `Matcher`
+//!
+//! Useful for when you want to match one needle against more than one haystack.
+//!
+//! ```rust
+//! use frizbee::{Matcher, Config};
+//!
+//! let needle = "fBr";
+//! let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
+//!
+//! let mut matcher = Matcher::new(needle, &Config::default());
+//! let matches = matcher.match_list(&haystacks);
+//! ```
+//!
+//! # Example: custom scoring offsets
+//!
+//! If you want to apply a custom score before sorting the results, you may use the
+//! `match_iter` API on the `Matcher`.
+//!
+//! ```rust
+//! use frizbee::{Match, Matcher, Config};
+//!
+//! let needle = "fBr";
+//! let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
+//!
+//! let mut matcher = Matcher::new(needle, &Config::default());
+//! let mut matches = matcher.match_iter(&haystacks)
+//!     .map(|m| Match { score: m.score + 10, ..m })
+//!     .collect::<Vec<_>>();
+//! matches.sort_unstable();
+//! ```
+//!
+//! # Example: custom scoring based on alignment path
+//!
+//! If you want to apply a custom score based on which characters were matched in the, you may drop
+//! down to the lower level
+//!
+//! ```rust
+//! use frizbee::{Config, Match, Matcher, smith_waterman::Alignment};
+//!
+//! let needle = "fBr";
+//! let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
+//!
+//! // Guarding against empty needle is required by `prefilter_iter()`
+//! if needle.is_empty() {
+//!       return
+//!       // return (0..haystacks.len())
+//!       //   .map(|index| Match {
+//!       //       index: index as u32,
+//!       //       score: 0,
+//!       //       exact: false,
+//!       //   })
+//!       //   .collect();
+//! }
+//!
+//!
+//! let config = Config::default();
+//! let mut matcher = Matcher::new(needle, &config);
+//! let mut matches = matcher.prefilter_iter(&haystacks)
+//!     .filter_map(|(index, haystack, skipped_chunks)| {
+//!         let mut score = matcher
+//!             .smith_waterman
+//!             .score_haystack(haystack);
+//!
+//!         for alignment in matcher.iter_alignment_path(skipped_chunks, score) {
+//!              // Return None if Alignment is None (max typos exceeded)
+//!              match alignment? {
+//!                 Alignment::Match((needle_idx, haystack_idx)) => {
+//!                     // adjust score as desired
+//!                 }
+//!                 // optionally handle Left, Up and Mismatch
+//!                 _ => {}
+//!              }
+//!         }
+//!
+//!         let exact = skipped_chunks == 0 && needle.as_bytes() == haystack;
+//!         if exact {
+//!             score += config.scoring.exact_match_bonus;
+//!         }
+//!
+//!         Some(Match {
+//!             index: index as u32,
+//!             score,
+//!             exact,
+//!         })
+//!     })
+//!     .collect::<Vec<_>>();
+//!
+//! matches.sort_unstable();
+//! ```
+
 use std::cmp::Ordering;
 
 #[cfg(feature = "serde")]
@@ -61,7 +171,7 @@ pub struct MatchIndices {
     pub index: u32,
     /// Matched the needle exactly (e.g. "foo" on "foo")
     pub exact: bool,
-    /// Indices of the chars in the haystack that matched the needle
+    /// Indices of the chars in the haystack that matched the needle in reverse order
     pub indices: Vec<usize>,
 }
 

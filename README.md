@@ -47,7 +47,8 @@ haystack: [F, o, _, o, F, o, _, o]
 
 needle == haystack
 mask: [00, 00, 00, 00, FF, 00, 00, 00]
-movemask(mask) > 0 // needle found in haystack, check next needle char
+bitmask: 0b00001000 // movemask(mask)
+bitmask > 0 // needle found in haystack, check next needle char
 ```
 
 See the full implementation in [`src/prefilter/x86_64/avx2.rs`](src/prefilter/x86_64/avx2.rs). When 256-bit SIMD is not available (no AVX2 or ARM), we simply check the uppercase and lowercase separately.
@@ -87,7 +88,8 @@ left:        [0   16  11  10]
 // shift current right by 1 element, filling in with right most element from left
 shifted:     [10  8   7   24]
 // decay by gap extend penalty (1)
-// last element decayed by 5 (gap open penalty) instead of 1 because the previous element matched (affine gaps)
+// last element decayed by 5 (gap open penalty) instead of 1 (gap extend penalty)
+// because the previous element matched (affine gaps)
 decayed:     [9   7   6   19]
 // max with current
 current:     [9   7   24  19]
