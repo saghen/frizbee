@@ -97,6 +97,12 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
 
     #[inline(always)]
     pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
+        if haystack.len() > MAX_HAYSTACK_LEN {
+            return match_greedy(self.needle.as_bytes(), haystack, &self.scoring)
+                .map(|(score, _)| score)
+                .unwrap_or(0);
+        }
+
         let scoring = &self.scoring;
         let haystack_chunks = haystack.len().div_ceil(16) + 1;
 
