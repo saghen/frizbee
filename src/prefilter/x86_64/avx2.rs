@@ -113,9 +113,6 @@ impl PrefilterAVX {
 
         let mut typos = 0;
         loop {
-            let mut skipped_chunks = 0;
-            let mut can_skip_chunks = true;
-
             // TODO: this is slightly incorrect, because if we match on the third chunk,
             // we would only scan from the third chunk onwards for the next needle. Technically,
             // we should scan from the beginning of the haystack instead, but I believe the
@@ -135,14 +132,9 @@ impl PrefilterAVX {
 
                     // Progress to next needle char, if available
                     if let Some(next_needle_char) = needle_iter.next() {
-                        if can_skip_chunks {
-                            skipped_chunks = start / 16;
-                        }
-                        can_skip_chunks = false;
-
                         needle_char = *next_needle_char;
                     } else {
-                        return (true, skipped_chunks);
+                        return (true, 0);
                     }
                 }
             }
@@ -155,7 +147,7 @@ impl PrefilterAVX {
             if let Some(next_needle_char) = needle_iter.next() {
                 needle_char = *next_needle_char;
             } else {
-                return (true, skipped_chunks);
+                return (true, 0);
             }
         }
     }
