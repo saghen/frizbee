@@ -52,7 +52,7 @@ match_percentage: 0.08
 partial_match_percentage: unknown
 median_length: 67
 std_dev_length: unknown
-num_samples: 1406941
+haystack_size: 1406941
 ```
 
 |          | `Nucleo`                 | `One Shot`                      | `Parallel`                      | `All Scores`                     | `1 Typo`                          |
@@ -69,7 +69,7 @@ partial_match_percentage: 0.20
 match_percentage: 0.05
 median_length: varies
 std_dev_length: median_length / 4
-num_samples: 100000
+haystack_size: 100000
 ```
 
 |           | `Nucleo`                | `One Shot`                     | `Parallel`                        | `All Scores`                    | `1 Typo`                        |
@@ -89,7 +89,7 @@ match_percentage: 1.0
 partial_match_percentage: 0.0
 median_length: varies
 std_dev_length: median_length / 4
-num_samples: 100000
+haystack_size: 100000
 ```
 
 |           | `Nucleo`                  | `One Shot`                      | `Parallel`                      | `All Scores`                    | `1 Typo`                         |
@@ -109,7 +109,7 @@ match_percentage: 0.0
 partial_match_percentage: 0.15
 median_length: varies
 std_dev_length: median_length / 4
-num_samples: 100000
+haystack_size: 100000
 ```
 
 |           | `Nucleo`                | `One Shot`                       | `Parallel`                        | `All Scores`                     | `1 Typo`                        |
@@ -129,7 +129,7 @@ match_percentage: 0.0
 partial_match_percentage: 0.0
 median_length: varies
 std_dev_length: median_length / 4
-num_samples: 100000
+haystack_size: 100000
 ```
 
 |           | `Nucleo`                | `One Shot`                       | `Parallel`                        | `All Scores`                     | `1 Typo`                          |

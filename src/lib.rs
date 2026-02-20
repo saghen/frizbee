@@ -51,8 +51,8 @@
 //!
 //! # Example: custom scoring based on alignment path
 //!
-//! If you want to apply a custom score based on which characters were matched in the, you may drop
-//! down to the lower level
+//! If you want to apply a custom score based on which characters were matched, you may drop
+//! down to the lower level API
 //!
 //! ```rust
 //! use frizbee::{Config, Match, Matcher, smith_waterman::Alignment};

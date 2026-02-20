@@ -17,14 +17,14 @@ os: NixOS 26.5.0 [64-bit]
 ```
 """
 
-Explanation = """
+Overview = """
 In each of the benchmarks, the median length of the haystacks is varied from 8 to 128.
 
 - **One Shot**: Uses the `Options::default()`, where we perform the fastest prefilter since no typos are allowed
+- **Parallel**: Same as $BENCH, but uses 8 threads to perform the matching in parallel
 - **All Scores**: Set via `max_typos: None`, gets the scores for all of the items without any filtering
 - **1 Typo**: Set via `max_typos: Some(1)`, performs a slower, but still effective prefilter since a set number of typos are allowed
 - **Nucleo**: Runs with normalization disabled, case insentivity enabled and fuzzy matching enabled
-- **\\$BENCH (Parallel)**: Same as $BENCH, but uses 8 threads to perform the matching in parallel
 
 NOTE: The nucleo parallel benchmark is not included since I haven't discovered a way to ensure the matcher has finished running.
 """
@@ -87,6 +87,19 @@ All of the haystacks match the needle. The "All Scores" case will always be the 
 
 ```rust
 needle: "deadbeef"
+match_percentage: 1.0
+partial_match_percentage: 0.0
+median_length: varies
+std_dev_length: median_length / 4
+num_samples: 100000
+```
+"""
+
+copy = """
+Zero-sized needle, all haystacks match the needle.
+
+```rust
+needle: ""
 match_percentage: 1.0
 partial_match_percentage: 0.0
 median_length: varies
