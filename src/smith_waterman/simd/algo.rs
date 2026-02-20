@@ -108,8 +108,10 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
 
         let score_matrix = &mut self.score_matrix;
         score_matrix.set_haystack_chunks(haystack_chunks);
+        score_matrix.zero();
         let match_masks = &mut self.match_masks;
         match_masks.set_haystack_chunks(haystack_chunks);
+        match_masks.zero();
 
         unsafe {
             // Constants
