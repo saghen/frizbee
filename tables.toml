@@ -20,8 +20,8 @@ os: NixOS 26.5.0 [64-bit]
 Overview = """
 In each of the benchmarks, the median length of the haystacks is varied from 8 to 128.
 
-- **One Shot**: Uses the `Options::default()`, where we perform the fastest prefilter since no typos are allowed
-- **Parallel**: Same as $BENCH, but uses 8 threads to perform the matching in parallel
+- **Frizbee**: Uses the `Options::default()`, where we perform the fastest prefilter since no typos are allowed
+- **Parallel (x8)**: Same as $BENCH, but uses 8 threads to perform the matching in parallel
 - **All Scores**: Set via `max_typos: None`, gets the scores for all of the items without any filtering
 - **1 Typo**: Set via `max_typos: Some(1)`, performs a slower, but still effective prefilter since a set number of typos are allowed
 - **Nucleo**: Runs with normalization disabled, case insentivity enabled and fuzzy matching enabled
@@ -39,7 +39,7 @@ match_percentage: 0.08
 partial_match_percentage: unknown
 median_length: 67
 std_dev_length: unknown
-num_samples: 1406941
+haystack_size: 1406941
 ```
 """
 
@@ -52,7 +52,7 @@ partial_match_percentage: 0.20
 match_percentage: 0.05
 median_length: varies
 std_dev_length: median_length / 4
-num_samples: 100000
+haystack_size: 100000
 ```
 """
 
@@ -65,7 +65,7 @@ match_percentage: 0.0
 partial_match_percentage: 0.0
 median_length: varies
 std_dev_length: median_length / 4
-num_samples: 100000
+haystack_size: 100000
 ```
 """
 
@@ -78,7 +78,7 @@ match_percentage: 0.0
 partial_match_percentage: 0.15
 median_length: varies
 std_dev_length: median_length / 4
-num_samples: 100000
+haystack_size: 100000
 ```
 """
 
@@ -91,7 +91,7 @@ match_percentage: 1.0
 partial_match_percentage: 0.0
 median_length: varies
 std_dev_length: median_length / 4
-num_samples: 100000
+haystack_size: 100000
 ```
 """
 
@@ -104,6 +104,6 @@ match_percentage: 1.0
 partial_match_percentage: 0.0
 median_length: varies
 std_dev_length: median_length / 4
-num_samples: 100000
+haystack_size: 100000
 ```
 """

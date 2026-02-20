@@ -62,12 +62,12 @@ pub fn match_list_bench(c: &mut criterion::Criterion, name: &str, needle: &str, 
         },
     );
     group.bench_with_input(
-        BenchmarkId::new("One Shot", median_length),
+        BenchmarkId::new("Frizbee", median_length),
         haystack,
         |b, haystack| b.iter(|| match_list(needle, haystack, Some(0))),
     );
     group.bench_with_input(
-        BenchmarkId::new("Parallel", median_length),
+        BenchmarkId::new("Parallel (x8)", median_length),
         haystack,
         |b, haystack| b.iter(|| match_list_parallel(needle, haystack, Some(0))),
     );
