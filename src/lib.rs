@@ -43,12 +43,14 @@ use std::cmp::Ordering;
 use serde::{Deserialize, Serialize};
 
 mod r#const;
+mod incremental;
 mod k_merge;
 mod one_shot;
 mod prefilter;
 mod smith_waterman;
 pub mod sort;
 
+pub use incremental::IncrementalMatcher;
 pub use k_merge::k_merge;
 pub use one_shot::{Matcher, match_list, match_list_indices, match_list_parallel};
 pub use sort::radix_sort;
