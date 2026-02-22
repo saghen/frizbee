@@ -5,12 +5,16 @@ use std::thread;
 use crate::one_shot::Matcher;
 use crate::{Config, Match, MatchIndices};
 
-/// Incremental fuzzy matcher that reuses previous results when the needle is extended.
+fn common_prefix_len(a: &str, b: &str) -> usize {
+    a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
+}
+
+/// Incremental fuzzy matcher that reuses previous results when the needle changes.
 ///
-/// When a user types a query character by character (e.g. `"f"` → `"fo"` → `"foo"`),
-/// extending a needle can only eliminate matches, never create new ones. This matcher
-/// stores which haystack indices matched previously and only rescores that subset when
-/// the new needle is a prefix extension of the previous one.
+/// Maintains a history of which haystack indices matched at each needle length. On
+/// forward extension (`"fo"` → `"foo"`), narrows the previous match set. On backspace
+/// or partial change (`"foo"` → `"fo"` or `"foo"` → `"fob"`), restores the closest
+/// historical match set sharing a common prefix, then narrows from there.
 ///
 /// # Example
 ///
@@ -23,12 +27,15 @@ use crate::{Config, Match, MatchIndices};
 /// let matches = matcher.match_list("f", &haystacks);
 /// let matches = matcher.match_list("fo", &haystacks);
 /// let matches = matcher.match_list("foo", &haystacks);
+/// // backspace: restores "fo" match set instead of full rescore
+/// let matches = matcher.match_list("fo", &haystacks);
 /// ```
 pub struct IncrementalMatcher {
     matcher: Matcher,
     prev_needle: String,
     matched_indices: Vec<u32>,
     prev_haystack_count: usize,
+    index_history: Vec<Option<Vec<u32>>>,
 }
 
 impl IncrementalMatcher {
@@ -38,108 +45,127 @@ impl IncrementalMatcher {
             prev_needle: String::new(),
             matched_indices: Vec::new(),
             prev_haystack_count: 0,
+            index_history: Vec::new(),
         }
     }
 
-    /// Match the needle against the haystacks, reusing previous results when possible.
     pub fn match_list<S: AsRef<str>>(&mut self, needle: &str, haystacks: &[S]) -> Vec<Match> {
-        let is_prefix_extension = self.is_prefix_extension(needle);
         let haystack_count = haystacks.len();
-
         self.matcher.set_needle(needle);
 
         if needle.is_empty() {
-            self.prev_needle.clear();
-            self.matched_indices.clear();
+            self.reset();
             self.prev_haystack_count = haystack_count;
             return (0..haystack_count).map(Match::from_index).collect();
         }
 
-        if is_prefix_extension && haystack_count == self.prev_haystack_count {
-            let mut matches = self.match_narrowed_unsorted(haystacks);
-            if self.matcher.config.sort {
-                matches.sort_unstable();
+        if haystack_count == self.prev_haystack_count && !self.prev_needle.is_empty() {
+            let level = self.find_reusable_level(needle);
+            if level > 0 {
+                self.restore_or_save(needle, level);
+                let mut matches = self.match_narrowed_unsorted(haystacks);
+                self.save_to_history(needle.len());
+                if self.matcher.config.sort {
+                    matches.sort_unstable();
+                }
+                self.set_prev(needle, haystack_count);
+                return matches;
             }
-            self.set_prev(needle, haystack_count);
-            matches
-        } else if is_prefix_extension && haystack_count > self.prev_haystack_count {
+        } else if self.is_prefix_extension(needle) && haystack_count > self.prev_haystack_count {
             let matches = self.match_narrowed_with_growth(haystacks);
+            self.index_history.clear();
             self.set_prev(needle, haystack_count);
-            matches
-        } else {
-            self.full_rescore(haystacks, needle, haystack_count)
+            return matches;
         }
+
+        self.index_history.clear();
+        let result = self.full_rescore(haystacks, needle, haystack_count);
+        self.save_to_history(needle.len());
+        result
     }
 
-    /// Match the needle against the haystacks with character match indices.
     pub fn match_list_indices<S: AsRef<str>>(
         &mut self,
         needle: &str,
         haystacks: &[S],
     ) -> Vec<MatchIndices> {
-        let is_prefix_extension = self.is_prefix_extension(needle);
         let haystack_count = haystacks.len();
-
         self.matcher.set_needle(needle);
 
         if needle.is_empty() {
-            self.prev_needle.clear();
-            self.matched_indices.clear();
+            self.reset();
             self.prev_haystack_count = haystack_count;
             return (0..haystack_count).map(MatchIndices::from_index).collect();
         }
 
-        if is_prefix_extension && haystack_count == self.prev_haystack_count {
-            let mut matches = self.match_narrowed_indices_unsorted(haystacks);
-            if self.matcher.config.sort {
-                matches.sort_unstable();
+        if haystack_count == self.prev_haystack_count && !self.prev_needle.is_empty() {
+            let level = self.find_reusable_level(needle);
+            if level > 0 {
+                self.restore_or_save(needle, level);
+                let mut matches = self.match_narrowed_indices_unsorted(haystacks);
+                self.save_to_history(needle.len());
+                if self.matcher.config.sort {
+                    matches.sort_unstable();
+                }
+                self.set_prev(needle, haystack_count);
+                return matches;
             }
-            self.set_prev(needle, haystack_count);
-            matches
-        } else if is_prefix_extension && haystack_count > self.prev_haystack_count {
+        } else if self.is_prefix_extension(needle) && haystack_count > self.prev_haystack_count {
             let matches = self.match_narrowed_indices_with_growth(haystacks);
+            self.index_history.clear();
             self.set_prev(needle, haystack_count);
-            matches
-        } else {
-            self.full_rescore_indices(haystacks, needle, haystack_count)
+            return matches;
         }
+
+        self.index_history.clear();
+        let result = self.full_rescore_indices(haystacks, needle, haystack_count);
+        self.save_to_history(needle.len());
+        result
     }
 
-    /// Match the needle against the haystacks in parallel.
     pub fn match_list_parallel<S: AsRef<str> + Sync>(
         &mut self,
         needle: &str,
         haystacks: &[S],
         threads: usize,
     ) -> Vec<Match> {
-        let is_prefix_extension = self.is_prefix_extension(needle);
         let haystack_count = haystacks.len();
-
         self.matcher.set_needle(needle);
 
         if needle.is_empty() {
-            self.prev_needle.clear();
-            self.matched_indices.clear();
+            self.reset();
             self.prev_haystack_count = haystack_count;
             return (0..haystack_count).map(Match::from_index).collect();
         }
 
-        if is_prefix_extension && haystack_count >= self.prev_haystack_count {
+        if haystack_count == self.prev_haystack_count && !self.prev_needle.is_empty() {
+            let level = self.find_reusable_level(needle);
+            if level > 0 {
+                self.restore_or_save(needle, level);
+                let matches = self.match_narrowed_parallel(haystacks, threads);
+                self.save_to_history(needle.len());
+                self.set_prev(needle, haystack_count);
+                return matches;
+            }
+        } else if self.is_prefix_extension(needle) && haystack_count > self.prev_haystack_count {
             let matches = self.match_narrowed_parallel(haystacks, threads);
+            self.index_history.clear();
             self.set_prev(needle, haystack_count);
-            matches
-        } else {
-            let matches = self.full_rescore_parallel(haystacks, threads);
-            self.update_state_from_matches(needle, haystack_count, matches.iter().map(|m| m.index));
-            matches
+            return matches;
         }
+
+        self.index_history.clear();
+        let matches = self.full_rescore_parallel(haystacks, threads);
+        self.update_state_from_matches(needle, haystack_count, matches.iter().map(|m| m.index));
+        self.save_to_history(needle.len());
+        matches
     }
 
-    /// Reset the incremental state, forcing a full rescore on the next call.
     pub fn reset(&mut self) {
         self.prev_needle.clear();
         self.matched_indices.clear();
         self.prev_haystack_count = 0;
+        self.index_history.clear();
     }
 
     pub fn matcher(&self) -> &Matcher {
@@ -151,6 +177,39 @@ impl IncrementalMatcher {
         !self.prev_needle.is_empty()
             && needle.len() > self.prev_needle.len()
             && needle.starts_with(&self.prev_needle)
+    }
+
+    fn find_reusable_level(&self, needle: &str) -> usize {
+        if needle.starts_with(&self.prev_needle) {
+            return self.prev_needle.len();
+        }
+        let common = common_prefix_len(needle, &self.prev_needle);
+        for level in (1..=common).rev() {
+            if level <= self.index_history.len() && self.index_history[level - 1].is_some() {
+                return level;
+            }
+        }
+        0
+    }
+
+    fn restore_or_save(&mut self, needle: &str, level: usize) {
+        if level == self.prev_needle.len() && needle.starts_with(&self.prev_needle) {
+            self.save_to_history(level);
+        } else {
+            self.matched_indices = self.index_history[level - 1].clone().unwrap();
+            self.index_history.truncate(level);
+        }
+    }
+
+    fn save_to_history(&mut self, needle_len: usize) {
+        if needle_len == 0 {
+            return;
+        }
+        let idx = needle_len - 1;
+        if self.index_history.len() <= idx {
+            self.index_history.resize_with(idx + 1, || None);
+        }
+        self.index_history[idx] = Some(self.matched_indices.clone());
     }
 
     #[inline]
@@ -185,7 +244,6 @@ impl IncrementalMatcher {
         let mut matches = Vec::new();
         self.matcher.match_list_into(haystacks, 0, &mut matches);
 
-        // Extract indices while in insertion order (ascending)
         self.matched_indices.clear();
         self.matched_indices.extend(matches.iter().map(|m| m.index));
 
@@ -612,14 +670,57 @@ mod tests {
     }
 
     #[test]
-    fn deletion_full_rescore() {
-        let haystacks = ["fooBar", "foo_bar", "fBaz"];
+    fn backspace_uses_history() {
+        let haystacks = ["fooBar", "foo_bar", "fBaz", "format!", "prelude"];
         let config = Config::default();
         let mut incr = IncrementalMatcher::new(&config);
 
-        incr.match_list("foo", &haystacks);
+        for needle in ["f", "fo", "foo"] {
+            let expected = match_list(needle, &haystacks, &config);
+            let actual = incr.match_list(needle, &haystacks);
+            assert_eq!(actual, expected, "forward mismatch for {:?}", needle);
+        }
+
         let m = incr.match_list("fo", &haystacks);
         let expected = match_list("fo", &haystacks, &config);
+        assert_eq!(m, expected);
+
+        let m = incr.match_list("f", &haystacks);
+        let expected = match_list("f", &haystacks, &config);
+        assert_eq!(m, expected);
+    }
+
+    #[test]
+    fn backspace_then_retype() {
+        let haystacks = ["fooBar", "fobBaz", "format!", "prelude"];
+        let config = Config::default();
+        let mut incr = IncrementalMatcher::new(&config);
+
+        incr.match_list("f", &haystacks);
+        incr.match_list("fo", &haystacks);
+        incr.match_list("foo", &haystacks);
+
+        let m = incr.match_list("fob", &haystacks);
+        let expected = match_list("fob", &haystacks, &config);
+        assert_eq!(m, expected);
+    }
+
+    #[test]
+    fn multi_backspace() {
+        let haystacks = ["fooBarBaz", "fooBat", "fooXyz", "prelude"];
+        let config = Config::default();
+        let mut incr = IncrementalMatcher::new(&config);
+
+        for needle in ["f", "fo", "foo", "fooB", "fooBar"] {
+            incr.match_list(needle, &haystacks);
+        }
+
+        let m = incr.match_list("fo", &haystacks);
+        let expected = match_list("fo", &haystacks, &config);
+        assert_eq!(m, expected);
+
+        let m = incr.match_list("foo", &haystacks);
+        let expected = match_list("foo", &haystacks, &config);
         assert_eq!(m, expected);
     }
 
