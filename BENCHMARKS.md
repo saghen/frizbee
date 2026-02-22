@@ -56,24 +56,10 @@ std_dev_length: unknown
 haystack_size: 1406941
 ```
 
-
-FZF (threaded): 189.9ms
-FZF (single thread): 427.3ms
-Using `hyperfine 'taskset -c 0 fzf --filter linux < benches/match_list/data.txt' --output null` on a Ryzen 9 5900x, FZF came out to 189.9ms
-
 |          | `Nucleo`                 | `Frizbee`                       | `Parallel (x8)`                 | `All Scores`                     | `1 Typo`                         | `2 Typos`                        | `3 Typos`                         |
 |:---------|:-------------------------|:--------------------------------|:--------------------------------|:---------------------------------|:---------------------------------|:---------------------------------|:--------------------------------- |
 | **`67`** | `94.12 ms` (**1.00x**) | `55.09 ms` (**1.71x faster**) | `7.95 ms` (**11.84x faster**) | `217.86 ms` (*2.31x slower*)   | `159.66 ms` (*1.70x slower*)   | `245.31 ms` (*2.61x slower*)   | `270.86 ms` (*2.88x slower*)    |
 
-#### FZF
-
-Unlike the primary benchmarks, FZF cannot load the data ahead of time and the results are pushed to stdout. As a result, this benchmark isn't exactly apples to apples but gives a rough idea on the performance delta.
-
-Single threaded: 427.3ms (7.75x slower)
-  - `hyperfine 'taskset -c 0 fzf --filter linux < benches/match_list/data.txt' --output null`
-
-Multi threaded: 189.9ms (3.45x slower)
-  - `hyperfine 'fzf --filter linux < benches/match_list/data.txt' --output null`
 
 ### Partial Match
 
