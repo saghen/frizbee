@@ -27,6 +27,13 @@ fn main() {
         );
         bench_query(&refs, &["B", "Bt", "BtL", "BtLs"], &config);
         bench_query(&refs, &["z", "zx", "zxq"], &config);
+
+        println!("  -- backspace --\n");
+        bench_backspace(
+            &refs,
+            &["s", "sr", "src", "src/", "src/c", "src/co", "src/com", "src/comp"],
+            &config,
+        );
     }
 }
 
@@ -102,6 +109,51 @@ fn bench_query(haystacks: &[&str], steps: &[&str], config: &Config) {
                 os,
                 inc_step,
                 speedup
+            );
+        }
+    }
+    println!();
+}
+
+fn bench_backspace(haystacks: &[&str], steps: &[&str], config: &Config) {
+    println!(
+        "    {:>10} {:>10} {:>10} {:>7}",
+        "backspace", "one-shot", "incr", "speedup"
+    );
+
+    for back_to in (0..steps.len() - 1).rev() {
+        let needle = steps[back_to];
+        let os = time_avg(ITERS, || {
+            black_box(match_list(black_box(needle), black_box(haystacks), config));
+        });
+
+        // type forward to the end, then backspace to `back_to`
+        let inc = time_avg(ITERS, || {
+            let mut m = IncrementalMatcher::new(config);
+            for &s in steps {
+                m.match_list(s, haystacks);
+            }
+            black_box(m.match_list(black_box(needle), black_box(haystacks)));
+        });
+        let setup = time_avg(ITERS, || {
+            let mut m = IncrementalMatcher::new(config);
+            for &s in steps {
+                m.match_list(s, haystacks);
+            }
+        });
+        let inc_step = inc.saturating_sub(setup);
+
+        let label = format!("{:?}->{:?}", steps.last().unwrap(), needle);
+        if inc_step.as_nanos() == 0 {
+            println!(
+                "    {:>10} {:>10.2?} {:>10} {:>6}x",
+                label, os, "~0", ">99"
+            );
+        } else {
+            let speedup = os.as_nanos() as f64 / inc_step.as_nanos() as f64;
+            println!(
+                "    {:>10} {:>10.2?} {:>10.2?} {:>5.1}x",
+                label, os, inc_step, speedup
             );
         }
     }
