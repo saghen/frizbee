@@ -62,8 +62,9 @@ haystack_size: 1406941
 
 #### FZF
 
-Single threaded: 154.0ms (2.8x slower)
-Multi threaded (8 threads): 35.9ms (4.5x slower vs parallel)
+Single threaded: `154.0ms` (*2.8x slower*)
+
+Multi threaded (8 threads): `35.9ms` (*4.5x slower* vs parallel)
 
 `fzf --filter linux --tiebreak index < benches/match_list/data.txt`
 
