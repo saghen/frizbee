@@ -60,6 +60,78 @@ haystack_size: 1406941
 |:---------|:-------------------------|:--------------------------------|:--------------------------------|:---------------------------------|:---------------------------------|:---------------------------------|:--------------------------------- |
 | **`67`** | `94.12 ms` (**1.00x**) | `55.09 ms` (**1.71x faster**) | `7.95 ms` (**11.84x faster**) | `217.86 ms` (*2.31x slower*)   | `159.66 ms` (*1.70x slower*)   | `245.31 ms` (*2.61x slower*)   | `270.86 ms` (*2.88x slower*)    |
 
+#### FZF
+
+Single threaded: 154.0ms (2.8x slower)
+Multi threaded (8 threads): 35.9ms (4.5x slower vs parallel)
+
+`fzf --filter linux --tiebreak index < benches/match_list/data.txt`
+
+We added `--tiebreak index` to only sort the results by their matching scores. FZF patch to get the elapsed time of the matcher thanks to [@junegunn](https://github.com/junegunn). These are the timings before fzf merges all the results from all threads.
+
+```diff
+diff --git a/src/constants.go b/src/constants.go
+index 5f5c8ca1..789dd966 100644
+--- a/src/constants.go
++++ b/src/constants.go
+@@ -35,7 +35,7 @@ const (
+ 
+        // Matcher
+        numPartitionsMultiplier = 8
+-       maxPartitions           = 32
++       maxPartitions           = 8
+        progressMinDuration     = 200 * time.Millisecond
+ 
+        // Capacity of each chunk
+diff --git a/src/core.go b/src/core.go
+index debcc3f1..1f0d0f87 100644
+--- a/src/core.go
++++ b/src/core.go
+@@ -3,6 +3,7 @@ package fzf
+ 
+ import (
+        "maps"
++       "fmt"
+        "os"
+        "sync"
+        "time"
+@@ -281,13 +282,16 @@ func Run(opts *Options) (int, error) {
+ 
+                        // NOTE: Streaming filter is inherently not compatible with --tail
+                        snapshot, _, _ := chunkList.Snapshot(opts.Tail)
++                       start := time.Now()
+                        result := matcher.scan(MatchRequest{
+                                chunks:  snapshot,
+                                pattern: pattern})
++                       fmt.Println("Elapsed:", time.Since(start))
+                        for i := 0; i < result.merger.Length(); i++ {
+                                opts.Printer(transformer(result.merger.Get(i).item))
+                                found = true
+                        }
++                       fmt.Println("Partitions merged:", time.Since(start))
+                }
+                if found {
+                        return ExitOk, nil
+
+```
+
+Single-threaded patch applied on top of the previous patch:
+
+```diff
+diff --git a/src/constants.go b/src/constants.go
+index 5f5c8ca1..89a73ab8 100644
+--- a/src/constants.go
++++ b/src/constants.go
+@@ -35,7 +35,7 @@ const (
+ 
+ 	// Matcher
+ 	numPartitionsMultiplier = 8
+-	maxPartitions           = 8
++	maxPartitions           = 1
+ 	progressMinDuration     = 200 * time.Millisecond
+ 
+ 	// Capacity of each chunk
+```
 
 ### Partial Match
 
