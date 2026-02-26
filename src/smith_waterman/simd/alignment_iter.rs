@@ -98,12 +98,18 @@ impl<'a> AlignmentPathIter<'a> {
 
     #[inline(always)]
     fn get_score(&self, row: usize, col: usize) -> u16 {
-        self.score_matrix[row * self.haystack_chunks + col / 16][col % 16]
+        if row == 0 || col == 0 {
+            return 0;
+        }
+        self.score_matrix[(row - 1) * self.haystack_chunks + (col - 1) / 16][(col - 1) % 16]
     }
 
     #[inline(always)]
     fn get_is_match(&self, row: usize, col: usize) -> bool {
-        self.match_masks[row * self.haystack_chunks + col / 16][col % 16] != 0
+        if row == 0 || col == 0 {
+            return false;
+        }
+        self.match_masks[(row - 1) * self.haystack_chunks + (col - 1) / 16][(col - 1) % 16] != 0
     }
 }
 

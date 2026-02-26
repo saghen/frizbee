@@ -108,15 +108,13 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
 
         let score_matrix = &mut self.score_matrix;
         score_matrix.set_haystack_chunks(haystack_chunks);
-        score_matrix.zero();
         let match_masks = &mut self.match_masks;
         match_masks.set_haystack_chunks(haystack_chunks);
-        match_masks.zero();
 
         unsafe {
             // Constants
-            let gap_extend = Simd256::splat_u16(scoring.gap_extend_penalty);
-            let gap_open =
+            let gap_extend_penalty = Simd256::splat_u16(scoring.gap_extend_penalty);
+            let gap_open_penalty =
                 Simd256::splat_u16(scoring.gap_open_penalty - scoring.gap_extend_penalty);
             let match_score = Simd256::splat_u16(scoring.match_score + scoring.mismatch_penalty);
             let mismatch_penalty = Simd256::splat_u16(scoring.mismatch_penalty);
