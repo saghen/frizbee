@@ -302,7 +302,7 @@ impl Matcher {
     }
 
     #[inline(always)]
-    pub fn guard_against_score_overflow(&self) {
+    fn guard_against_score_overflow(&self) {
         let scoring = &self.config.scoring;
         let max_per_char_score = scoring.match_score
             + scoring.capitalization_bonus / 2
@@ -319,7 +319,7 @@ impl Matcher {
     }
 
     #[inline(always)]
-    pub fn guard_against_haystack_overflow(haystack_len: usize, haystack_index_offset: u32) {
+    fn guard_against_haystack_overflow(haystack_len: usize, haystack_index_offset: u32) {
         assert!(
             (haystack_len.saturating_add(haystack_index_offset as usize)) <= (u32::MAX as usize),
             "too many haystack which will overflow the u32 index: {} > {} (index offset: {})",

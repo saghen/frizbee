@@ -1,0 +1,33 @@
+{
+  "name": "frizbee",
+  "version": "0.8.2",
+  "description": "Fast typo-resistant fuzzy matching via SIMD smith waterman, similar algorithm to FZF/FZY",
+  "author": "Liam Dyer <liamcdyer@gmail.com>",
+  "license": "MIT",
+  "main": "index.cjs",
+  "types": "index.d.ts",
+  "scripts": {
+    "build": "cargo-cp-artifact -a cdylib frizbee_node index.node -- cargo build --release --message-format=json-render-diagnostics",
+    "install": "npm run build"
+  },
+  "dependencies": {
+    "cargo-cp-artifact": "^0.1"
+  },
+  "keywords": [
+    "fuzzy",
+    "matching",
+    "fzf",
+    "fzy",
+    "rust",
+    "simd",
+    "smith-waterman"
+  ],
+  "homepage": "https://github.com/saghen/frizbee#readme",
+  "bugs": {
+    "url": "https://github.com/saghen/frizbee/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/saghen/frizbee.git"
+  }
+}

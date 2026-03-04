@@ -281,6 +281,10 @@ mod tests {
     fn test_score_exact_match() {
         assert_eq!(get_score("a", "a"), CHAR_SCORE + PREFIX_BONUS);
         assert_eq!(get_score("abc", "abc"), 3 * CHAR_SCORE + PREFIX_BONUS);
+        assert_eq!(
+            get_score("vagrant-libvirt", "vagrant-libvirt"),
+            15 * CHAR_SCORE + PREFIX_BONUS
+        );
     }
 
     #[test]
@@ -296,6 +300,7 @@ mod tests {
     #[test]
     fn test_score_no_delimiter_for_delimiter_chars() {
         assert_eq!(get_score("-", "a-bc"), CHAR_SCORE);
+        assert_eq!(get_score("-b", "a-bc"), 2 * CHAR_SCORE);
         assert_eq!(get_score("-", "a--bc"), CHAR_SCORE);
         assert!(get_score("a_b", "a_bb") > get_score("a_b", "a__b"));
     }
