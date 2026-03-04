@@ -1,0 +1,16 @@
+[package]
+name = "frizbee-python"
+version = "0.8.2"
+edition = "2024"
+
+description = "Fast typo-resistant fuzzy matching via SIMD smith waterman, similar algorithm to FZF/FZY"
+repository = "https://github.com/saghen/frizbee"
+license = "MIT"
+
+[lib]
+crate-type = ["cdylib"]
+name = "frizbee_python"
+
+[dependencies]
+frizbee.workspace = true
+pyo3 = { version = "0.28", features = ["extension-module", "generate-import-lib"] }

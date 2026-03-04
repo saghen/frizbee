@@ -1,0 +1,40 @@
+[project]
+name = "frizbee"
+description = "Python bindings for frizbee, a fast SIMD fuzzy matcher"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [
+  { name = "Philipp Temminghoff", email = "philipp.temminghoff@gmail.com" },
+  { name = "Liam Dyer", email = "liamcdyer@gmail.com" },
+]
+keywords = ["fuzzy", "fzf", "fzy", "matching", "rust", "simd", "smith-waterman"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Programming Language :: Rust",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Topic :: Text Processing",
+]
+dependencies = []
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/saghen/frizbee"
+Issues = "https://github.com/saghen/frizbee/issues"
+Repository = "https://github.com/saghen/frizbee"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]

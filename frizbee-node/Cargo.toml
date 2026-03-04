@@ -1,0 +1,16 @@
+[package]
+name = "frizbee-node"
+version = "0.8.2"
+description = "Fast typo-resistant fuzzy matching via SIMD smith waterman, similar algorithm to FZF/FZY"
+authors = ["Liam Dyer <liamcdyer@gmail.com>"]
+license = "MIT"
+edition = "2024"
+exclude = ["index.node"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+frizbee = { workspace = true, features = ["serde"] }
+neon = { version = "1.2.0-alpha.0", features = ["napi-8", "serde"] }
+serde = { version = "1.0.228", features = ["derive"] }
