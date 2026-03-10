@@ -19,6 +19,10 @@ rand_distr = "0.6"
 name = "lib"
 harness = false
 
+[[bench]]
+name = "incremental"
+harness = false
+
 [lib]
 bench = false
 
