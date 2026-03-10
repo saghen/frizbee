@@ -219,7 +219,7 @@ impl PartialEq for MatchIndices {
 }
 impl Eq for MatchIndices {}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Config {
     /// The maximum number of characters missing from the needle, before an item in the
@@ -243,7 +243,7 @@ impl Default for Config {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Scoring {
     /// Score for a matching character between needle and haystack
@@ -254,7 +254,6 @@ pub struct Scoring {
     pub gap_open_penalty: u16,
     /// Penalty for extending a gap (deletion/insertion)
     pub gap_extend_penalty: u16,
-
     /// Bonus for matching the first character of the haystack (e.g. "h" on "hello_world")
     pub prefix_bonus: u16,
     /// Bonus for matching a capital letter after a lowercase letter

@@ -1,5 +1,5 @@
 [package]
-name = "frizbee"
+name = "neo_frizbee"
 description = "Fast typo-resistant fuzzy matching via SIMD smith waterman, similar algorithm to FZF/FZY"
 license = "MIT"
 version = "0.9.0"
