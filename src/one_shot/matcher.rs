@@ -1,6 +1,7 @@
 use crate::prefilter::Prefilter;
 use crate::smith_waterman::AlignmentPathIter;
 use crate::smith_waterman::simd::SmithWatermanMatcher;
+use crate::sort::radix_sort_matches_by_score;
 use crate::{Config, Match, MatchIndices};
 
 #[derive(Debug, Clone)]
@@ -54,7 +55,7 @@ impl Matcher {
         self.match_list_into(haystacks, 0, &mut matches);
 
         if self.config.sort {
-            matches.sort_unstable();
+            radix_sort_matches_by_score(&mut matches);
         }
 
         matches
@@ -105,12 +106,9 @@ impl Matcher {
                 continue;
             }
 
-            let (matched, skipped_chunks) =
-                self.config
-                    .max_typos
-                    .map_or((true, 0), |max_typos| {
-                        self.prefilter.match_haystack(haystack, max_typos)
-                    });
+            let (matched, skipped_chunks) = self.config.max_typos.map_or((true, 0), |max_typos| {
+                self.prefilter.match_haystack(haystack, max_typos)
+            });
             if !matched {
                 continue;
             }
@@ -154,12 +152,9 @@ impl Matcher {
                 continue;
             }
 
-            let (matched, skipped_chunks) =
-                self.config
-                    .max_typos
-                    .map_or((true, 0), |max_typos| {
-                        self.prefilter.match_haystack(haystack, max_typos)
-                    });
+            let (matched, skipped_chunks) = self.config.max_typos.map_or((true, 0), |max_typos| {
+                self.prefilter.match_haystack(haystack, max_typos)
+            });
             if !matched {
                 continue;
             }

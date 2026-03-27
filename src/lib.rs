@@ -120,12 +120,13 @@ mod one_shot;
 pub mod prefilter;
 mod simd;
 pub mod smith_waterman;
+pub mod sort;
 
 pub use one_shot::{Matcher, match_list, match_list_indices, match_list_parallel};
 
 use r#const::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Match {
     pub score: u16,
