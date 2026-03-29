@@ -254,7 +254,12 @@ impl Matcher {
         index: u32,
         include_exact: bool,
     ) -> Option<Match> {
-        // Haystack too large, fallback to greedy matching
+        #[cfg(feature = "match_end_col")]
+        let (mut score, match_end_col) = self
+            .smith_waterman
+            .match_haystack_with_end_col(haystack, self.config.max_typos)?;
+
+        #[cfg(not(feature = "match_end_col"))]
         let mut score = self
             .smith_waterman
             .match_haystack(haystack, self.config.max_typos)?;

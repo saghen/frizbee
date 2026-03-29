@@ -26,7 +26,7 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
                 #[cfg(feature = "match_end_col")]
                 end_col: 0,
             })
-            .collect();
+        .collect();
     }
 
     if haystacks.is_empty() {

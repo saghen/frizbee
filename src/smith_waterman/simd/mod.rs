@@ -57,6 +57,28 @@ impl SmithWatermanMatcher {
         }
     }
 
+    #[cfg(feature = "match_end_col")]
+    pub fn match_haystack_with_end_col(
+        &mut self,
+        haystack: &[u8],
+        max_typos: Option<u16>,
+    ) -> Option<(u16, u16)> {
+        match self {
+            #[cfg(target_arch = "x86_64")]
+            Self::AVX2(matcher) => unsafe {
+                matcher.match_haystack_with_end_col(haystack, max_typos)
+            },
+            #[cfg(target_arch = "x86_64")]
+            Self::SSE(matcher) => unsafe {
+                matcher.match_haystack_with_end_col(haystack, max_typos)
+            },
+            #[cfg(target_arch = "aarch64")]
+            Self::NEON(matcher) => unsafe {
+                matcher.match_haystack_with_end_col(haystack, max_typos)
+            },
+        }
+    }
+
     pub fn match_haystack_indices(
         &mut self,
         haystack: &[u8],
@@ -207,6 +229,17 @@ macro_rules! define_matcher {
                 max_typos: Option<u16>,
             ) -> Option<u16> {
                 self.0.match_haystack(haystack, max_typos)
+            }
+
+            #[cfg(feature = "match_end_col")]
+            #[doc = concat!("# Safety\n\nCaller must ensure that the target feature `", $feature, "` is available")]
+            #[target_feature(enable = $feature)]
+            pub unsafe fn match_haystack_with_end_col(
+                &mut self,
+                haystack: &[u8],
+                max_typos: Option<u16>,
+            ) -> Option<(u16, u16)> {
+                self.0.match_haystack_with_end_col(haystack, max_typos)
             }
 
             #[doc = concat!("# Safety\n\nCaller must ensure that the target feature `", $feature, "` is available")]

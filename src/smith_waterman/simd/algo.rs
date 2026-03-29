@@ -68,6 +68,47 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
         }
     }
 
+    /// Like `match_haystack` but also returns the end column of the best alignment.
+    /// For the SIMD path, scans the last row of the score matrix to find where the max landed.
+    /// For the greedy fallback, uses the last matched index.
+    #[cfg(feature = "match_end_col")]
+    #[inline(always)]
+    pub fn match_haystack_with_end_col(
+        &mut self,
+        haystack: &[u8],
+        max_typos: Option<u16>,
+    ) -> Option<(u16, u16)> {
+        if haystack.len() > MAX_HAYSTACK_LEN {
+            return match_greedy(self.needle.as_bytes(), haystack, &self.scoring)
+                .map(|(score, indices)| (score, indices.last().copied().unwrap_or(0) as u16));
+        }
+
+        let score = self.score_haystack(haystack);
+        match max_typos {
+            Some(max_typos) if !self.has_alignment_path(score, max_typos) => None,
+            _ => {
+                let end_col = self.get_match_end_col(score);
+                Some((score, end_col))
+            }
+        }
+    }
+
+    /// Find the haystack byte position where the max score occurs in the last needle row.
+    /// Must be called after `score_haystack` which populates the matrix.
+    #[cfg(feature = "match_end_col")]
+    #[inline(always)]
+    fn get_match_end_col(&self, score: u16) -> u16 {
+        let needle_len = self.needle.len();
+        for chunk_idx in 1..self.haystack_chunks {
+            let chunk = self.score_matrix.get(needle_len, chunk_idx);
+            let idx = unsafe { chunk.idx_u16(score) };
+            if idx != 16 {
+                return ((chunk_idx - 1) * 16 + idx) as u16;
+            }
+        }
+        0
+    }
+
     #[inline(always)]
     pub fn match_haystack_indices(
         &mut self,
