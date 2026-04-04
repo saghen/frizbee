@@ -2,7 +2,7 @@
 use crate::simd::{AVXVector, SSE256Vector, SSEVector};
 #[cfg(target_arch = "aarch64")]
 use crate::simd::{NEON256Vector, NEONVector};
-use crate::simd::{Scalar256Vector, ScalarVector};
+use crate::simd::{Scalar128Vector, Scalar256Vector};
 use crate::{Scoring, simd::Vector};
 
 mod algo;
@@ -256,7 +256,9 @@ define_matcher!(
 );
 
 #[derive(Debug, Clone)]
-pub struct SmithWatermanMatcherScalar(SmithWatermanMatcherInternal<ScalarVector, Scalar256Vector>);
+pub struct SmithWatermanMatcherScalar(
+    SmithWatermanMatcherInternal<Scalar128Vector, Scalar256Vector>,
+);
 
 impl SmithWatermanMatcherScalar {
     pub fn new(needle: &[u8], scoring: &Scoring) -> Self {
@@ -267,11 +269,7 @@ impl SmithWatermanMatcherScalar {
         true
     }
 
-    pub fn match_haystack(
-        &mut self,
-        haystack: &[u8],
-        max_typos: Option<u16>,
-    ) -> Option<u16> {
+    pub fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
         self.0.match_haystack(haystack, max_typos)
     }
 
@@ -281,7 +279,8 @@ impl SmithWatermanMatcherScalar {
         skipped_chunks: usize,
         max_typos: Option<u16>,
     ) -> Option<(u16, Vec<usize>)> {
-        self.0.match_haystack_indices(haystack, skipped_chunks, max_typos)
+        self.0
+            .match_haystack_indices(haystack, skipped_chunks, max_typos)
     }
 
     pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {

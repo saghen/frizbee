@@ -4,7 +4,8 @@ mod avx;
 mod neon;
 #[cfg(target_arch = "aarch64")]
 mod neon_256;
-mod scalar;
+mod scalar_128;
+mod scalar_256;
 #[cfg(target_arch = "x86_64")]
 mod sse;
 #[cfg(target_arch = "x86_64")]
@@ -16,7 +17,8 @@ pub use avx::AVXVector;
 pub use neon::NEONVector;
 #[cfg(target_arch = "aarch64")]
 pub use neon_256::NEON256Vector;
-pub use scalar::{Scalar256Vector, ScalarVector};
+pub use scalar_128::Scalar128Vector;
+pub use scalar_256::Scalar256Vector;
 #[cfg(target_arch = "x86_64")]
 pub use sse::SSEVector;
 #[cfg(target_arch = "x86_64")]
@@ -431,7 +433,7 @@ mod tests {
                     NEON256Vector::$name();
                 };
                 unsafe {
-                    ScalarVector::$name();
+                    Scalar128Vector::$name();
                     Scalar256Vector::$name();
                 };
             }
@@ -451,7 +453,7 @@ mod tests {
                     NEONVector::$name();
                 };
                 unsafe {
-                    ScalarVector::$name();
+                    Scalar128Vector::$name();
                 };
             }
         };
@@ -506,7 +508,7 @@ mod tests {
             <NEONVector as Vector128ExpansionTests<NEON256Vector>>::test_cast_i8_to_i16()
         };
         unsafe {
-            <ScalarVector as Vector128ExpansionTests<Scalar256Vector>>::test_cast_i8_to_i16()
+            <Scalar128Vector as Vector128ExpansionTests<Scalar256Vector>>::test_cast_i8_to_i16()
         };
     }
 }
