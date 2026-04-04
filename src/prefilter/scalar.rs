@@ -62,9 +62,10 @@ impl PrefilterScalar {
     }
 
     /// Determines the byte range to check for a given chunk, replicating SIMD
-    /// overlapping load behavior where the last chunk may overlap with the previous.
+    /// overlapping load behavior where when reaching the last chunk, the last
+    /// 16 bytes are loaded (overlapping with the previous chunk).
     #[inline(always)]
-    fn chunk_range(start: usize, len: usize) -> (usize, usize) {
+    fn overlapping_load(start: usize, len: usize) -> (usize, usize) {
         if len <= 16 {
             (0, len)
         } else if start + 16 <= len {
@@ -90,7 +91,7 @@ impl PrefilterScalar {
         let mut needle_idx = 0;
 
         for start in (0..len).step_by(16) {
-            let (chunk_start, chunk_end) = PrefilterScalar::chunk_range(start, len);
+            let (chunk_start, chunk_end) = PrefilterScalar::overlapping_load(start, len);
             let chunk = &haystack[chunk_start..chunk_end];
 
             loop {
@@ -132,7 +133,7 @@ impl PrefilterScalar {
 
         loop {
             for start in (0..len).step_by(16) {
-                let (chunk_start, chunk_end) = PrefilterScalar::chunk_range(start, len);
+                let (chunk_start, chunk_end) = PrefilterScalar::overlapping_load(start, len);
                 let chunk = &haystack[chunk_start..chunk_end];
 
                 loop {
