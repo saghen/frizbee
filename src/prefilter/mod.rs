@@ -64,28 +64,7 @@ pub enum Prefilter {
     SSE(x86_64::PrefilterSSE),
     #[cfg(target_arch = "aarch64")]
     NEON(aarch64::PrefilterNEON),
-    Scalar(PrefilterScalar),
-}
-
-#[derive(Debug, Clone)]
-pub struct PrefilterScalar {
-    needle: Vec<(u8, u8)>,
-}
-
-impl PrefilterScalar {
-    pub fn new(needle: &[u8]) -> Self {
-        Self {
-            needle: case_needle(needle),
-        }
-    }
-
-    pub fn match_haystack(&self, haystack: &[u8]) -> (bool, usize) {
-        scalar::match_haystack_unordered(&self.needle, haystack)
-    }
-
-    pub fn match_haystack_typos(&self, haystack: &[u8], max_typos: u16) -> (bool, usize) {
-        scalar::match_haystack_unordered_typos(&self.needle, haystack, max_typos)
-    }
+    Scalar(scalar::PrefilterScalar),
 }
 
 impl Prefilter {
@@ -103,7 +82,7 @@ impl Prefilter {
         return Prefilter::NEON(aarch64::PrefilterNEON::new(needle));
 
         #[cfg(not(target_arch = "aarch64"))]
-        Prefilter::Scalar(PrefilterScalar::new(needle))
+        Prefilter::Scalar(scalar::PrefilterScalar::new(needle))
     }
 
     /// Checks if the needle is wholly contained in the haystack, ignoring the exact order of the
@@ -345,7 +324,7 @@ mod tests {
     }
 
     fn match_haystack_generic(needle: &str, haystack: &str, max_typos: u16) -> bool {
-        use crate::prefilter::PrefilterScalar;
+        use crate::prefilter::scalar::PrefilterScalar;
 
         let haystack = normalize_haystack(haystack);
         let haystack = haystack.as_bytes();
