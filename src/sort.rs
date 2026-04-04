@@ -1,9 +1,9 @@
 use crate::Match;
 
 /// Sorts a slice of [`Match`] values in-place by descending `score` using a
-/// stable radix sort.
+/// stable radix sort. This assumes that the matches are already sorted by index.
 #[inline]
-pub fn radix_sort_matches_by_score(matches: &mut [Match]) {
+pub fn radix_sort_matches(matches: &mut [Match]) {
     // pass 1
     let mut histogram = [0u32; 256];
     for m in matches.iter() {
@@ -62,7 +62,7 @@ mod test {
             })
             .collect::<Vec<_>>();
 
-        radix_sort_matches_by_score(&mut matches);
+        radix_sort_matches(&mut matches);
 
         assert!(matches.is_sorted());
     }

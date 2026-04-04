@@ -1,7 +1,7 @@
 use crate::prefilter::Prefilter;
 use crate::smith_waterman::AlignmentPathIter;
 use crate::smith_waterman::simd::SmithWatermanMatcher;
-use crate::sort::radix_sort_matches_by_score;
+use crate::sort::radix_sort_matches;
 use crate::{Config, Match, MatchIndices};
 
 #[derive(Debug, Clone)]
@@ -55,7 +55,7 @@ impl Matcher {
         self.match_list_into(haystacks, 0, &mut matches);
 
         if self.config.sort {
-            radix_sort_matches_by_score(&mut matches);
+            radix_sort_matches(&mut matches);
         }
 
         matches
