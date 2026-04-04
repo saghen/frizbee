@@ -345,8 +345,19 @@ mod tests {
     }
 
     fn match_haystack_generic(needle: &str, haystack: &str, max_typos: u16) -> bool {
+        use crate::prefilter::PrefilterScalar;
+
         let haystack = normalize_haystack(haystack);
         let haystack = haystack.as_bytes();
+
+        let scalar_result = {
+            let prefilter = PrefilterScalar::new(needle.as_bytes());
+            if max_typos > 0 {
+                prefilter.match_haystack_typos(haystack, max_typos).0
+            } else {
+                prefilter.match_haystack(haystack).0
+            }
+        };
 
         #[cfg(target_arch = "x86_64")]
         return {
@@ -372,22 +383,33 @@ mod tests {
                 avx_result, sse_result,
                 "avx and sse results should be the same"
             );
+            assert_eq!(
+                avx_result, scalar_result,
+                "avx and scalar results should be the same"
+            );
             avx_result
         };
 
         #[cfg(target_arch = "aarch64")]
-        return unsafe {
-            use crate::prefilter::aarch64::PrefilterNEON;
+        return {
+            let neon_result = unsafe {
+                use crate::prefilter::aarch64::PrefilterNEON;
 
-            if max_typos > 0 {
-                PrefilterNEON::new(needle.as_bytes())
-                    .match_haystack_typos(haystack, max_typos)
-                    .0
-            } else {
-                PrefilterNEON::new(needle.as_bytes())
-                    .match_haystack(haystack)
-                    .0
-            }
+                if max_typos > 0 {
+                    PrefilterNEON::new(needle.as_bytes())
+                        .match_haystack_typos(haystack, max_typos)
+                        .0
+                } else {
+                    PrefilterNEON::new(needle.as_bytes())
+                        .match_haystack(haystack)
+                        .0
+                }
+            };
+            assert_eq!(
+                neon_result, scalar_result,
+                "neon and scalar results should be the same"
+            );
+            neon_result
         };
 
         #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
