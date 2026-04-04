@@ -4,7 +4,7 @@ use criterion::{BatchSize, BenchmarkId, Criterion};
 use frizbee::Match;
 use rand::RngExt;
 
-fn bench_with_scale(c: &mut Criterion, name: &str, scale: usize, batch_size: BatchSize) {
+fn bench_with_scale(c: &mut Criterion, scale: usize, batch_size: BatchSize) {
     let mut rng = rand::rng();
     let matches = (0..16 * scale)
         .map(|index| Match {
@@ -14,44 +14,43 @@ fn bench_with_scale(c: &mut Criterion, name: &str, scale: usize, batch_size: Bat
         })
         .collect::<Vec<_>>();
 
-    let mut group = c.benchmark_group(name);
+    let mut group = c.benchmark_group("sort");
 
-    for idx in 1..=16 {
-        let len = scale * idx;
-        let input = Vec::from(&matches[..len]);
+    let input = Vec::from(&matches[..scale]);
 
-        group.throughput(criterion::Throughput::Elements(len as u64));
+    group.throughput(criterion::Throughput::Elements(scale as u64));
 
-        group.bench_with_input(BenchmarkId::new("std", len), &input, |b, i| {
-            b.iter_batched(
-                || i.clone(),
-                |mut d| {
-                    d.sort_by_key(|m| m.score);
-                    d
-                },
-                batch_size,
-            )
-        });
+    group.bench_with_input(BenchmarkId::new("std", scale), &input, |b, i| {
+        b.iter_batched(
+            || i.clone(),
+            |mut d| {
+                d.sort_by_key(|m| m.score);
+                d
+            },
+            batch_size,
+        )
+    });
 
-        group.bench_with_input(BenchmarkId::new("radix", len), &input, |b, i| {
-            b.iter_batched(
-                || i.clone(),
-                |mut m| {
-                    frizbee::sort::radix_sort_matches_by_score(&mut m);
-                    m
-                },
-                batch_size,
-            )
-        });
-    }
+    group.bench_with_input(BenchmarkId::new("radix", scale), &input, |b, i| {
+        b.iter_batched(
+            || i.clone(),
+            |mut m| {
+                frizbee::sort::radix_sort_matches(&mut m);
+                m
+            },
+            batch_size,
+        )
+    });
 
     group.finish();
 }
 
 fn bench(c: &mut Criterion) {
-    bench_with_scale(c, "sort tiny", 10, BatchSize::SmallInput);
-    bench_with_scale(c, "sort small", 100, BatchSize::SmallInput);
-    bench_with_scale(c, "sort large", 10000, BatchSize::LargeInput);
+    bench_with_scale(c, 10, BatchSize::SmallInput);
+    bench_with_scale(c, 100, BatchSize::SmallInput);
+    bench_with_scale(c, 1000, BatchSize::LargeInput);
+    bench_with_scale(c, 10000, BatchSize::LargeInput);
+    bench_with_scale(c, 100000, BatchSize::LargeInput);
 }
 
 criterion::criterion_group! {
