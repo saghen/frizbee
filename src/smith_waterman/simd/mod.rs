@@ -2,6 +2,7 @@
 use crate::simd::{AVXVector, SSE256Vector, SSEVector};
 #[cfg(target_arch = "aarch64")]
 use crate::simd::{NEON256Vector, NEONVector};
+use crate::simd::{Scalar256Vector, ScalarVector};
 use crate::{Scoring, simd::Vector};
 
 mod algo;
@@ -23,6 +24,7 @@ pub enum SmithWatermanMatcher {
     SSE(SmithWatermanMatcherSSE),
     #[cfg(target_arch = "aarch64")]
     NEON(SmithWatermanMatcherNEON),
+    Scalar(SmithWatermanMatcherScalar),
 }
 
 impl SmithWatermanMatcher {
@@ -35,11 +37,12 @@ impl SmithWatermanMatcher {
         if SmithWatermanMatcherSSE::is_available() {
             return Self::SSE(unsafe { SmithWatermanMatcherSSE::new(needle, scoring) });
         }
-        #[cfg(target_arch = "x86_64")]
-        panic!("no smith waterman implementation available due to missing SSE4.1 support");
 
         #[cfg(target_arch = "aarch64")]
         return Self::NEON(unsafe { SmithWatermanMatcherNEON::new(needle, scoring) });
+
+        #[cfg(not(target_arch = "aarch64"))]
+        Self::Scalar(SmithWatermanMatcherScalar::new(needle, scoring))
     }
 
     pub fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
@@ -50,6 +53,7 @@ impl SmithWatermanMatcher {
             Self::SSE(matcher) => unsafe { matcher.match_haystack(haystack, max_typos) },
             #[cfg(target_arch = "aarch64")]
             Self::NEON(matcher) => unsafe { matcher.match_haystack(haystack, max_typos) },
+            Self::Scalar(matcher) => matcher.match_haystack(haystack, max_typos),
         }
     }
 
@@ -72,6 +76,9 @@ impl SmithWatermanMatcher {
             Self::NEON(matcher) => unsafe {
                 matcher.match_haystack_indices(haystack, skipped_chunks, max_typos)
             },
+            Self::Scalar(matcher) => {
+                matcher.match_haystack_indices(haystack, skipped_chunks, max_typos)
+            }
         }
     }
 
@@ -83,6 +90,7 @@ impl SmithWatermanMatcher {
             Self::SSE(matcher) => unsafe { matcher.score_haystack(haystack) },
             #[cfg(target_arch = "aarch64")]
             Self::NEON(matcher) => unsafe { matcher.score_haystack(haystack) },
+            Self::Scalar(matcher) => matcher.score_haystack(haystack),
         }
     }
 
@@ -127,6 +135,15 @@ impl SmithWatermanMatcher {
                 score,
                 max_typos,
             ),
+            Self::Scalar(m) => AlignmentPathIter::new(
+                &m.0.score_matrix,
+                &m.0.match_masks,
+                m.0.needle.len(),
+                m.0.haystack_chunks,
+                skipped_chunks,
+                score,
+                max_typos,
+            ),
         }
     }
 
@@ -139,6 +156,7 @@ impl SmithWatermanMatcher {
             Self::SSE(matcher) => unsafe { matcher.print_score_matrix(haystack) },
             #[cfg(target_arch = "aarch64")]
             Self::NEON(matcher) => unsafe { matcher.print_score_matrix(haystack) },
+            Self::Scalar(matcher) => matcher.print_score_matrix(haystack),
         }
     }
 }
@@ -236,6 +254,45 @@ define_matcher!(
     target_feature = "neon",
     available = NEONVector::is_available() && NEON256Vector::is_available()
 );
+
+#[derive(Debug, Clone)]
+pub struct SmithWatermanMatcherScalar(SmithWatermanMatcherInternal<ScalarVector, Scalar256Vector>);
+
+impl SmithWatermanMatcherScalar {
+    pub fn new(needle: &[u8], scoring: &Scoring) -> Self {
+        Self(SmithWatermanMatcherInternal::new(needle, scoring))
+    }
+
+    pub fn is_available() -> bool {
+        true
+    }
+
+    pub fn match_haystack(
+        &mut self,
+        haystack: &[u8],
+        max_typos: Option<u16>,
+    ) -> Option<u16> {
+        self.0.match_haystack(haystack, max_typos)
+    }
+
+    pub fn match_haystack_indices(
+        &mut self,
+        haystack: &[u8],
+        skipped_chunks: usize,
+        max_typos: Option<u16>,
+    ) -> Option<(u16, Vec<usize>)> {
+        self.0.match_haystack_indices(haystack, skipped_chunks, max_typos)
+    }
+
+    pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
+        self.0.score_haystack(haystack)
+    }
+
+    #[cfg(test)]
+    pub fn print_score_matrix(&self, haystack: &str) {
+        self.0.print_score_matrix(haystack)
+    }
+}
 
 #[cfg(test)]
 mod tests {

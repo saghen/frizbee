@@ -24,8 +24,10 @@ bench = false
 
 [dependencies]
 itertools = "0.14" # k-way merge
-raw-cpuid = "11.6" # runtime feature detection
 serde = { version = "1.0", features = ["derive"], optional = true }
+
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+raw-cpuid = "11.6" # runtime feature detection
 
 [features]
 serde = ["dep:serde"]
