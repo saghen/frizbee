@@ -42,14 +42,6 @@ impl PrefilterAVX {
     pub unsafe fn match_haystack(&self, haystack: &[u8]) -> (bool, usize) {
         let len = haystack.len();
 
-        match len {
-            0 => return (true, 0),
-            1..=7 => {
-                return (scalar::match_haystack(&self.needle_scalar, haystack), 0);
-            }
-            _ => {}
-        };
-
         let mut skipped_chunks = 0;
         let mut can_skip_chunks = true;
 

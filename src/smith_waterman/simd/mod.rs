@@ -42,6 +42,17 @@ impl SmithWatermanMatcher {
         return Self::NEON(unsafe { SmithWatermanMatcherNEON::new(needle, scoring) });
     }
 
+    pub fn match_haystack_u8(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
+        match self {
+            #[cfg(target_arch = "x86_64")]
+            Self::AVX2(matcher) => unsafe { matcher.match_haystack_u8(haystack, max_typos) },
+            #[cfg(target_arch = "x86_64")]
+            Self::SSE(matcher) => unsafe { matcher.match_haystack_u8(haystack, max_typos) },
+            #[cfg(target_arch = "aarch64")]
+            Self::NEON(matcher) => unsafe { matcher.match_haystack_u8(haystack, max_typos) },
+        }
+    }
+
     pub fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
         match self {
             #[cfg(target_arch = "x86_64")]
@@ -72,6 +83,17 @@ impl SmithWatermanMatcher {
             Self::NEON(matcher) => unsafe {
                 matcher.match_haystack_indices(haystack, skipped_chunks, max_typos)
             },
+        }
+    }
+
+    pub fn score_haystack_u8(&mut self, haystack: &[u8]) -> u16 {
+        match self {
+            #[cfg(target_arch = "x86_64")]
+            Self::AVX2(matcher) => unsafe { matcher.score_haystack_u8(haystack) },
+            #[cfg(target_arch = "x86_64")]
+            Self::SSE(matcher) => unsafe { matcher.score_haystack_u8(haystack) },
+            #[cfg(target_arch = "aarch64")]
+            Self::NEON(matcher) => unsafe { matcher.score_haystack_u8(haystack) },
         }
     }
 
@@ -171,6 +193,20 @@ macro_rules! define_matcher {
                 "Caller must ensure that the target feature `", $feature, "` is available"
             )]
             #[target_feature(enable = $feature)]
+            pub unsafe fn match_haystack_u8(
+                &mut self,
+                haystack: &[u8],
+                max_typos: Option<u16>,
+            ) -> Option<u16> {
+                self.0.match_haystack_u8(haystack, max_typos)
+            }
+
+            #[doc = concat!(
+                "Match the haystack against the needle, with an optional maximum number of typos\n\n",
+                "# Safety\n\n",
+                "Caller must ensure that the target feature `", $feature, "` is available"
+            )]
+            #[target_feature(enable = $feature)]
             pub unsafe fn match_haystack(
                 &mut self,
                 haystack: &[u8],
@@ -188,6 +224,16 @@ macro_rules! define_matcher {
                 max_typos: Option<u16>,
             ) -> Option<(u16, Vec<usize>)> {
                 self.0.match_haystack_indices(haystack, skipped_chunks, max_typos)
+            }
+
+            #[doc = concat!(
+                "Match the haystack against the needle, returning the score on the final row of the matrix\n\n",
+                "# Safety\n\n",
+                "Caller must ensure that the target feature `", $feature, "` is available"
+            )]
+            #[target_feature(enable = $feature)]
+            pub unsafe fn score_haystack_u8(&mut self, haystack: &[u8]) -> u16 {
+                self.0.score_haystack_u8(haystack)
             }
 
             #[doc = concat!(

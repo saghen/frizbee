@@ -3,7 +3,7 @@ use std::arch::x86_64::*;
 use crate::simd::{AVXVector, SSE256Vector};
 
 #[derive(Debug, Clone, Copy)]
-pub struct SSEVector(__m128i);
+pub struct SSEVector(pub __m128i);
 
 impl SSEVector {
     #[inline(always)]
@@ -59,132 +59,6 @@ impl super::Vector for SSEVector {
             .is_some_and(|info| info.has_sse41())
     }
 
-    #[inline(always)]
-    unsafe fn zero() -> Self {
-        unsafe { Self(_mm_setzero_si128()) }
-    }
-
-    #[inline(always)]
-    unsafe fn splat_u8(value: u8) -> Self {
-        unsafe { Self(_mm_set1_epi8(value as i8)) }
-    }
-
-    #[inline(always)]
-    unsafe fn splat_u16(value: u16) -> Self {
-        unsafe { Self(_mm_set1_epi16(value as i16)) }
-    }
-
-    #[inline(always)]
-    unsafe fn eq_u8(self, other: Self) -> Self {
-        unsafe { Self(_mm_cmpeq_epi8(self.0, other.0)) }
-    }
-
-    #[inline(always)]
-    unsafe fn gt_u8(self, other: Self) -> Self {
-        unsafe {
-            let sign_bit = _mm_set1_epi8(-128i8);
-            let a_flipped = _mm_xor_si128(self.0, sign_bit);
-            let b_flipped = _mm_xor_si128(other.0, sign_bit);
-            Self(_mm_cmpgt_epi8(a_flipped, b_flipped))
-        }
-    }
-
-    #[inline(always)]
-    unsafe fn lt_u8(self, other: Self) -> Self {
-        unsafe {
-            let sign_bit = _mm_set1_epi8(-128i8);
-            let a_flipped = _mm_xor_si128(self.0, sign_bit);
-            let b_flipped = _mm_xor_si128(other.0, sign_bit);
-            Self(_mm_cmplt_epi8(a_flipped, b_flipped))
-        }
-    }
-
-    #[inline(always)]
-    unsafe fn max_u16(self, other: Self) -> Self {
-        unsafe { Self(_mm_max_epu16(self.0, other.0)) }
-    }
-
-    #[inline(always)]
-    unsafe fn smax_u16(self) -> u16 {
-        unsafe {
-            // PHMINPOSUW finds minimum, so we invert to find maximum
-            let all_ones = _mm_set1_epi16(-1); // 0xFFFF
-            let inverted = _mm_xor_si128(self.0, all_ones); // ~v
-
-            // Find minimum of inverted values (= maximum of original)
-            let min_pos = _mm_minpos_epu16(inverted);
-
-            // Extract and invert back
-            let min_val = _mm_extract_epi16(min_pos, 0) as u16;
-            !min_val // Invert to get original max
-        }
-    }
-
-    #[inline(always)]
-    unsafe fn add_u16(self, other: Self) -> Self {
-        unsafe { Self(_mm_add_epi16(self.0, other.0)) }
-    }
-
-    #[inline(always)]
-    unsafe fn subs_u16(self, other: Self) -> Self {
-        unsafe { Self(_mm_subs_epu16(self.0, other.0)) }
-    }
-
-    #[inline(always)]
-    unsafe fn and(self, other: Self) -> Self {
-        unsafe { Self(_mm_and_si128(self.0, other.0)) }
-    }
-
-    #[inline(always)]
-    unsafe fn or(self, other: Self) -> Self {
-        unsafe { Self(_mm_or_si128(self.0, other.0)) }
-    }
-
-    #[inline(always)]
-    unsafe fn not(self) -> Self {
-        unsafe { Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1))) }
-    }
-
-    #[inline(always)]
-    unsafe fn shift_right_padded_u16<const L: i32>(self, other: Self) -> Self {
-        unsafe {
-            match L {
-                0 => self,
-                1 => Self(_mm_alignr_epi8::<14>(self.0, other.0)),
-                2 => Self(_mm_alignr_epi8::<12>(self.0, other.0)),
-                3 => Self(_mm_alignr_epi8::<10>(self.0, other.0)),
-                4 => Self(_mm_alignr_epi8::<8>(self.0, other.0)),
-                5 => Self(_mm_alignr_epi8::<6>(self.0, other.0)),
-                6 => Self(_mm_alignr_epi8::<4>(self.0, other.0)),
-                7 => Self(_mm_alignr_epi8::<2>(self.0, other.0)),
-                _ => unreachable!(),
-            }
-        }
-    }
-
-    #[cfg(test)]
-    fn from_array(arr: [u8; 16]) -> Self {
-        Self(unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) })
-    }
-    #[cfg(test)]
-    fn to_array(self) -> [u8; 16] {
-        let mut arr = [0u8; 16];
-        unsafe { _mm_storeu_si128(arr.as_mut_ptr() as *mut __m128i, self.0) };
-        arr
-    }
-    #[cfg(test)]
-    fn from_array_u16(arr: [u16; 8]) -> Self {
-        Self(unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) })
-    }
-    #[cfg(test)]
-    fn to_array_u16(self) -> [u16; 8] {
-        let mut arr = [0u16; 8];
-        unsafe { _mm_storeu_si128(arr.as_mut_ptr() as *mut __m128i, self.0) };
-        arr
-    }
-}
-
-impl super::Vector128 for SSEVector {
     #[inline(always)]
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         unsafe {
@@ -249,6 +123,134 @@ impl super::Vector128 for SSEVector {
     }
 
     #[inline(always)]
+    unsafe fn zero() -> Self {
+        unsafe { Self(_mm_setzero_si128()) }
+    }
+
+    #[inline(always)]
+    unsafe fn splat_u8(value: u8) -> Self {
+        unsafe { Self(_mm_set1_epi8(value as i8)) }
+    }
+
+    #[inline(always)]
+    unsafe fn splat_u16(value: u16) -> Self {
+        unsafe { Self(_mm_set1_epi16(value as i16)) }
+    }
+
+    #[inline(always)]
+    unsafe fn eq_u8(self, other: Self) -> Self {
+        unsafe { Self(_mm_cmpeq_epi8(self.0, other.0)) }
+    }
+
+    #[inline(always)]
+    unsafe fn gt_u8(self, other: Self) -> Self {
+        unsafe {
+            let sign_bit = _mm_set1_epi8(-128i8);
+            let a_flipped = _mm_xor_si128(self.0, sign_bit);
+            let b_flipped = _mm_xor_si128(other.0, sign_bit);
+            Self(_mm_cmpgt_epi8(a_flipped, b_flipped))
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn lt_u8(self, other: Self) -> Self {
+        unsafe {
+            let sign_bit = _mm_set1_epi8(-128i8);
+            let a_flipped = _mm_xor_si128(self.0, sign_bit);
+            let b_flipped = _mm_xor_si128(other.0, sign_bit);
+            Self(_mm_cmplt_epi8(a_flipped, b_flipped))
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn max_u8(self, other: Self) -> Self {
+        unsafe { Self(_mm_max_epu8(self.0, other.0)) }
+    }
+
+    #[inline(always)]
+    unsafe fn max_u16(self, other: Self) -> Self {
+        unsafe { Self(_mm_max_epu16(self.0, other.0)) }
+    }
+
+    #[inline(always)]
+    unsafe fn smax_u8(self) -> u8 {
+        unsafe {
+            let all_ones = _mm_set1_epi8(-1); // 0xFF in each byte
+            let inverted = _mm_xor_si128(self.0, all_ones); // ~v
+
+            // Split 16 × u8 into two 8 × u16 halves
+            let zero = _mm_setzero_si128();
+            let lo = _mm_unpacklo_epi8(inverted, zero); // bytes 0..7 → u16
+            let hi = _mm_unpackhi_epi8(inverted, zero); // bytes 8..15 → u16
+
+            // Find minimum u16 in each half
+            let min_lo = _mm_minpos_epu16(lo);
+            let min_hi = _mm_minpos_epu16(hi);
+
+            // Extract the two minimum values
+            let val_lo = _mm_extract_epi16(min_lo, 0) as u16;
+            let val_hi = _mm_extract_epi16(min_hi, 0) as u16;
+
+            // Overall minimum of the inverted values
+            let min_val = val_lo.min(val_hi) as u8;
+
+            // Invert back to get the original maximum
+            !min_val
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn smax_u16(self) -> u16 {
+        unsafe {
+            // PHMINPOSUW finds minimum, so we invert to find maximum
+            let all_ones = _mm_set1_epi16(-1); // 0xFFFF
+            let inverted = _mm_xor_si128(self.0, all_ones); // ~v
+
+            // Find minimum of inverted values (= maximum of original)
+            let min_pos = _mm_minpos_epu16(inverted);
+
+            // Extract and invert back
+            let min_val = _mm_extract_epi16(min_pos, 0) as u16;
+            !min_val // Invert to get original max
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn add_u8(self, other: Self) -> Self {
+        unsafe { Self(_mm_add_epi8(self.0, other.0)) }
+    }
+
+    #[inline(always)]
+    unsafe fn add_u16(self, other: Self) -> Self {
+        unsafe { Self(_mm_add_epi16(self.0, other.0)) }
+    }
+
+    #[inline(always)]
+    unsafe fn subs_u8(self, other: Self) -> Self {
+        unsafe { Self(_mm_subs_epu8(self.0, other.0)) }
+    }
+
+    #[inline(always)]
+    unsafe fn subs_u16(self, other: Self) -> Self {
+        unsafe { Self(_mm_subs_epu16(self.0, other.0)) }
+    }
+
+    #[inline(always)]
+    unsafe fn and(self, other: Self) -> Self {
+        unsafe { Self(_mm_and_si128(self.0, other.0)) }
+    }
+
+    #[inline(always)]
+    unsafe fn or(self, other: Self) -> Self {
+        unsafe { Self(_mm_or_si128(self.0, other.0)) }
+    }
+
+    #[inline(always)]
+    unsafe fn not(self) -> Self {
+        unsafe { Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1))) }
+    }
+
+    #[inline(always)]
     unsafe fn shift_right_padded_u8<const L: i32>(self, other: Self) -> Self {
         unsafe {
             match L {
@@ -272,7 +274,47 @@ impl super::Vector128 for SSEVector {
             }
         }
     }
+
+    #[inline(always)]
+    unsafe fn shift_right_padded_u16<const L: i32>(self, other: Self) -> Self {
+        unsafe {
+            match L {
+                0 => self,
+                1 => Self(_mm_alignr_epi8::<14>(self.0, other.0)),
+                2 => Self(_mm_alignr_epi8::<12>(self.0, other.0)),
+                3 => Self(_mm_alignr_epi8::<10>(self.0, other.0)),
+                4 => Self(_mm_alignr_epi8::<8>(self.0, other.0)),
+                5 => Self(_mm_alignr_epi8::<6>(self.0, other.0)),
+                6 => Self(_mm_alignr_epi8::<4>(self.0, other.0)),
+                7 => Self(_mm_alignr_epi8::<2>(self.0, other.0)),
+                _ => unreachable!(),
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn from_array(arr: [u8; 16]) -> Self {
+        Self(unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) })
+    }
+    #[cfg(test)]
+    fn to_array(self) -> [u8; 16] {
+        let mut arr = [0u8; 16];
+        unsafe { _mm_storeu_si128(arr.as_mut_ptr() as *mut __m128i, self.0) };
+        arr
+    }
+    #[cfg(test)]
+    fn from_array_u16(arr: [u16; 8]) -> Self {
+        Self(unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) })
+    }
+    #[cfg(test)]
+    fn to_array_u16(self) -> [u16; 8] {
+        let mut arr = [0u16; 8];
+        unsafe { _mm_storeu_si128(arr.as_mut_ptr() as *mut __m128i, self.0) };
+        arr
+    }
 }
+
+impl super::Vector128 for SSEVector {}
 
 impl super::Vector128Expansion<AVXVector> for SSEVector {
     #[inline(always)]

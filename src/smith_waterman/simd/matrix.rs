@@ -40,7 +40,18 @@ impl<Simd256: Vector256> Matrix<Simd256> {
     }
 
     #[inline(always)]
-    pub fn as_slice(&self) -> &[[u16; 16]] {
+    pub fn as_slice_u8(&self) -> &[[u8; 32]] {
+        // safe because we ensure alignment and size at compile time
+        const { assert!(std::mem::size_of::<Simd256>() == std::mem::size_of::<[u8; 32]>()) };
+        const { assert!(std::mem::align_of::<Simd256>() >= std::mem::align_of::<[u8; 32]>()) };
+        unsafe { std::mem::transmute::<&[Simd256], &[[u8; 32]]>(&self.matrix) }
+    }
+
+    #[inline(always)]
+    pub fn as_slice_u16(&self) -> &[[u16; 16]] {
+        // safe because we ensure alignment and size at compile time
+        const { assert!(std::mem::size_of::<Simd256>() == std::mem::size_of::<[u16; 16]>()) };
+        const { assert!(std::mem::align_of::<Simd256>() >= std::mem::align_of::<[u16; 16]>()) };
         unsafe { std::mem::transmute::<&[Simd256], &[[u16; 16]]>(&self.matrix) }
     }
 }

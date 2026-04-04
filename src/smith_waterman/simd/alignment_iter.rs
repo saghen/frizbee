@@ -59,16 +59,11 @@ impl<'a> AlignmentPathIter<'a> {
         score: u16,
         max_typos: Option<u16>,
     ) -> Self {
-        let col_idx = Self::get_col_idx(
-            score_matrix,
-            needle_len,
-            haystack_chunks,
-            score,
-        );
+        let col_idx = Self::get_col_idx(score_matrix, needle_len, haystack_chunks, score);
 
         Self {
-            score_matrix: score_matrix.as_slice(),
-            match_masks: match_masks.as_slice(),
+            score_matrix: score_matrix.as_slice_u16(),
+            match_masks: match_masks.as_slice_u16(),
             haystack_chunks: score_matrix.haystack_chunks,
             row_idx: needle_len,
             col_idx,

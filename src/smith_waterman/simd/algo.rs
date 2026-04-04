@@ -4,11 +4,11 @@ use crate::{
     Scoring,
     prefilter::case_needle,
     simd::{Vector128Expansion, Vector256},
-    smith_waterman::greedy::match_greedy,
+    smith_waterman::{greedy::match_greedy, simd::gaps::propagate_horizontal_gaps_u8},
 };
 
 use super::alignment_iter::Alignment;
-use super::gaps::propagate_horizontal_gaps;
+use super::gaps::propagate_horizontal_gaps_u16;
 use super::matrix::Matrix;
 
 const MAX_HAYSTACK_LEN: usize = 512;
@@ -22,6 +22,7 @@ pub const PREFIX_MASK: [u8; 32] = [
 pub struct SmithWatermanMatcherInternal<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256> {
     pub needle: String,
     pub needle_simd: Vec<(Simd128, Simd128)>,
+    pub needle_simd_256: Vec<(Simd256, Simd256)>,
     pub scoring: Scoring,
     pub score_matrix: Matrix<Simd256>,
     pub match_masks: Matrix<Simd256>,
@@ -38,6 +39,7 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
         Self {
             needle: String::from_utf8_lossy(needle).to_string(),
             needle_simd: Self::broadcast_needle(needle),
+            needle_simd_256: Self::broadcast_needle_256(needle),
             scoring: scoring.clone(),
             score_matrix: Matrix::new(needle.len(), MAX_HAYSTACK_LEN),
             match_masks: Matrix::new(needle.len(), MAX_HAYSTACK_LEN),
@@ -54,14 +56,37 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
             .collect()
     }
 
+    fn broadcast_needle_256(needle: &[u8]) -> Vec<(Simd256, Simd256)> {
+        let needle_cased = case_needle(needle);
+        needle_cased
+            .iter()
+            .map(|(c1, c2)| unsafe { (Simd256::splat_u8(*c1), Simd256::splat_u8(*c2)) })
+            .collect()
+    }
+
     #[inline(always)]
-    pub fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
+    pub fn match_haystack_u8(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(self.needle.as_bytes(), haystack, &self.scoring)
                 .map(|(score, _)| score);
         }
 
-        let score = self.score_haystack(haystack);
+        // TODO: alignment path
+        let score = self.score_haystack_u8(haystack);
+        match max_typos {
+            Some(max_typos) if !self.has_alignment_path(score, max_typos) => None,
+            _ => Some(score),
+        }
+    }
+
+    #[inline(always)]
+    pub fn match_haystack_u16(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
+        if haystack.len() > MAX_HAYSTACK_LEN {
+            return match_greedy(self.needle.as_bytes(), haystack, &self.scoring)
+                .map(|(score, _)| score);
+        }
+
+        let score = self.score_haystack_u16(haystack);
         match max_typos {
             Some(max_typos) if !self.has_alignment_path(score, max_typos) => None,
             _ => Some(score),
@@ -79,7 +104,7 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
             return match_greedy(self.needle.as_bytes(), haystack, &self.scoring);
         }
 
-        let score = self.score_haystack(haystack);
+        let score = self.score_haystack_u16(haystack);
 
         let mut indices = Vec::with_capacity(self.needle.len());
         let mut prev_haystack_idx = usize::MAX;
@@ -100,7 +125,158 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
     }
 
     #[inline(always)]
-    pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
+    pub fn score_haystack_u8(&mut self, haystack: &[u8]) -> u16 {
+        if haystack.len() > MAX_HAYSTACK_LEN {
+            return match_greedy(self.needle.as_bytes(), haystack, &self.scoring)
+                .map(|(score, _)| score)
+                .unwrap_or(0);
+        }
+
+        let scoring = &self.scoring;
+        let haystack_chunks = haystack.len().div_ceil(32) + 1;
+        self.haystack_chunks = haystack_chunks;
+
+        // Matrix stride is fixed at MAX_HAYSTACK_CHUNKS from construction.
+        // Row 0 and column 0 are always zero (never written by the inner loop),
+        // so no re-zeroing is needed between calls.
+        let score_matrix = &mut self.score_matrix;
+        let match_masks = &mut self.match_masks;
+
+        unsafe {
+            // Constants
+            let gap_extend_penalty = Simd256::splat_u8(scoring.gap_extend_penalty as u8);
+            let gap_open_penalty =
+                Simd256::splat_u8((scoring.gap_open_penalty - scoring.gap_extend_penalty) as u8);
+            let match_score =
+                Simd256::splat_u8((scoring.match_score + scoring.mismatch_penalty) as u8);
+            let mismatch_penalty = Simd256::splat_u8(scoring.mismatch_penalty as u8);
+            let matching_case_bonus = Simd256::splat_u8(scoring.matching_case_bonus as u8);
+            let capitalization_bonus = Simd256::splat_u8(scoring.capitalization_bonus as u8);
+            let delimiter_bonus = Simd256::splat_u8(scoring.delimiter_bonus as u8);
+
+            // State
+            // TODO: have prefix bonus scale based on distance
+            let mut prefix_bonus_masked =
+                Simd256::splat_u16(scoring.prefix_bonus).and(Simd256::load_unaligned(PREFIX_MASK));
+            let mut prev_chunk_char_is_delimiter_mask = Simd256::zero();
+            let mut prev_chunk_is_lower_mask = Simd256::zero();
+            let mut max_scores = Simd256::zero();
+
+            // TODO: try doing N needle chars per haystack chunk for better cache locality
+            for (col_idx, haystack) in (0..(haystack_chunks - 1)).map(|col_idx| {
+                let haystack =
+                    Simd256::load_partial(haystack.as_ptr(), col_idx * 32, haystack.len());
+                (col_idx + 1, haystack)
+            }) {
+                // Bonus for matching a capital letter after a lowercase letter
+                let is_upper_mask = Simd256::and(
+                    haystack.lt_u8(Simd256::splat_u8(b'Z' + 1)),
+                    haystack.gt_u8(Simd256::splat_u8(b'A' - 1)),
+                );
+                let is_lower_mask = Simd256::and(
+                    haystack.lt_u8(Simd256::splat_u8(b'z' + 1)),
+                    haystack.gt_u8(Simd256::splat_u8(b'a' - 1)),
+                );
+                let is_letter_mask = is_upper_mask.or(is_lower_mask);
+
+                // Give the bonus if the character is uppercase and the previous character was lowercase
+                let capitalization_mask = Simd256::and(
+                    is_upper_mask,
+                    is_lower_mask.shift_right_padded_u8::<1>(prev_chunk_is_lower_mask),
+                );
+                let capitalization_bonus_masked = capitalization_mask.and(capitalization_bonus);
+
+                prev_chunk_is_lower_mask = is_lower_mask;
+
+                // Bonus for matching after a delimiter character
+                // We consider anything that isn't a digit or a letter, and within ASCII range, to
+                // be a delimiter
+                let is_digit_mask = Simd256::and(
+                    haystack.gt_u8(Simd256::splat_u8(b'0' - 1)),
+                    haystack.lt_u8(Simd256::splat_u8(b'9' + 1)),
+                );
+                let char_is_delimiter_mask = is_letter_mask
+                    .or(is_digit_mask)
+                    .or(haystack.gt_u8(Simd256::splat_u8(127)))
+                    .not();
+                let prev_char_is_delimiter_mask = char_is_delimiter_mask
+                    .shift_right_padded_u8::<1>(prev_chunk_char_is_delimiter_mask);
+                let delimiter_mask = prev_char_is_delimiter_mask.and(char_is_delimiter_mask.not());
+                let delimiter_bonus_masked = delimiter_mask.and(delimiter_bonus);
+                prev_chunk_char_is_delimiter_mask = char_is_delimiter_mask;
+
+                // Delimiter, capitalization and prefix bonuses
+                let match_and_masked_bonuses = delimiter_bonus_masked
+                    .add_u8(capitalization_bonus_masked)
+                    .add_u8(prefix_bonus_masked)
+                    .add_u8(match_score);
+
+                let mut up_gap_mask = Simd256::zero();
+                let mut prev_row_scores = Simd256::zero();
+                let mut row_scores = Simd256::zero();
+
+                for (row_idx, (needle_char, flipped_case_needle_char)) in self
+                    .needle_simd_256
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| (i + 1, c))
+                {
+                    // Match needle chars against the haystack (case insensitive)
+                    let exact_case_match_mask = (*needle_char).eq_u8(haystack);
+                    let flipped_case_match_mask = (*flipped_case_needle_char).eq_u8(haystack);
+                    let match_mask = exact_case_match_mask.or(flipped_case_match_mask);
+
+                    // Diagonal - typical match/mismatch, moving along one haystack and needle char
+                    let diag_scores = {
+                        let diag = prev_row_scores.shift_right_padded_u16::<1>(
+                            score_matrix.get(row_idx - 1, col_idx - 1),
+                        );
+
+                        // Add match score (+ mismatch penalty) with bonuses for matches, avoiding blendv
+                        // Bonuses are delimiter, capitalization and prefix
+                        let diag = diag.add_u8(match_mask.and(match_and_masked_bonuses));
+                        // Always add mismatch penalty
+                        let diag = diag.subs_u8(mismatch_penalty);
+                        // Add matching case bonus
+                        diag.add_u8(exact_case_match_mask.and(matching_case_bonus))
+                    };
+
+                    // Up - skipping char in needle
+                    let up_scores = {
+                        // Always apply gap extend penalty
+                        let score_after_gap_extend = prev_row_scores.subs_u16(gap_extend_penalty);
+                        // Apply gap open penalty - gap extend penalty for opened gaps, avoiding blendv
+                        score_after_gap_extend.subs_u8(up_gap_mask.and(gap_open_penalty))
+                    };
+
+                    // Max of diagonal, up and left (after gap extension)
+                    row_scores = propagate_horizontal_gaps_u8::<Simd256>(
+                        diag_scores.max_u8(up_scores),          // Current
+                        score_matrix.get(row_idx, col_idx - 1), // Left
+                        match_mask,                             // Current
+                        match_masks.get(row_idx, col_idx - 1),  // Left
+                        gap_open_penalty,
+                        gap_extend_penalty,
+                    );
+
+                    // Store results
+                    score_matrix.set(row_idx, col_idx, row_scores);
+                    match_masks.set(row_idx, col_idx, match_mask);
+                    prev_row_scores = row_scores;
+                    up_gap_mask = match_mask;
+                }
+
+                // because we do this after the loop, we're guaranteed to be on the last row
+                max_scores = max_scores.max_u8(row_scores);
+                prefix_bonus_masked = Simd256::zero();
+            }
+
+            max_scores.smax_u8() as u16
+        }
+    }
+
+    #[inline(always)]
+    pub fn score_haystack_u16(&mut self, haystack: &[u8]) -> u16 {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(self.needle.as_bytes(), haystack, &self.scoring)
                 .map(|(score, _)| score)
@@ -227,7 +403,7 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
                     };
 
                     // Max of diagonal, up and left (after gap extension)
-                    row_scores = propagate_horizontal_gaps::<Simd256>(
+                    row_scores = propagate_horizontal_gaps_u16::<Simd256>(
                         diag_scores.max_u16(up_scores),         // Current
                         score_matrix.get(row_idx, col_idx - 1), // Left
                         match_mask,                             // Current
@@ -256,7 +432,7 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
     pub fn print_score_matrix(&self, haystack: &str) {
         let haystack_chunks = haystack.len().div_ceil(16) + 1;
         let stride = self.score_matrix.haystack_chunks;
-        let score_matrix = self.score_matrix.as_slice();
+        let score_matrix = self.score_matrix.as_slice_u16();
 
         print!("     ");
         for char in haystack.chars() {

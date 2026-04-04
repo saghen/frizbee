@@ -27,6 +27,14 @@ pub trait Vector: Copy + core::fmt::Debug {
     /// compiles to a constant when compiled with `RUSTFLAGS="-C target-cpu=x86-64-v3"`
     fn is_available() -> bool;
 
+    /// Loads from the given pointer, where the number of remaining bytes may be less than
+    /// the vector size. The pointer does not need to be aligned.
+    ///
+    /// # Safety
+    ///
+    /// Callers must guarantee that the pointer contains `len` bytes and `start < len`.
+    unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self;
+
     /// Create a vector with zeros in all lanes.
     unsafe fn zero() -> Self;
     /// Create a vector with 8-bit lanes with the given byte repeated into each
@@ -40,9 +48,16 @@ pub trait Vector: Copy + core::fmt::Debug {
     unsafe fn gt_u8(self, other: Self) -> Self;
     unsafe fn lt_u8(self, other: Self) -> Self;
 
+    unsafe fn max_u8(self, other: Self) -> Self;
     unsafe fn max_u16(self, other: Self) -> Self;
+
+    /// Get the maximum value in the vector as a scalar
+    unsafe fn smax_u8(self) -> u8;
     /// Get the maximum value in the vector as a scalar
     unsafe fn smax_u16(self) -> u16;
+
+    unsafe fn add_u8(self, other: Self) -> Self;
+    unsafe fn subs_u8(self, other: Self) -> Self;
 
     unsafe fn add_u16(self, other: Self) -> Self;
     unsafe fn subs_u16(self, other: Self) -> Self;
@@ -51,6 +66,12 @@ pub trait Vector: Copy + core::fmt::Debug {
     unsafe fn or(self, other: Self) -> Self;
     unsafe fn not(self) -> Self;
 
+    /// Shift `self` right by `L` bytes, filling in the low bytes with the right most values in
+    /// `other`
+    unsafe fn shift_right_padded_u8<const L: i32>(self, other: Self) -> Self;
+
+    /// Shift `self` right by `N` lanes, filling in the low lanes with the right most values in
+    /// `other`
     unsafe fn shift_right_padded_u16<const N: i32>(self, other: Self) -> Self;
 
     #[cfg(test)]
@@ -63,19 +84,7 @@ pub trait Vector: Copy + core::fmt::Debug {
     fn to_array_u16(self) -> [u16; 8];
 }
 
-pub trait Vector128: Vector {
-    /// Loads from the given pointer, where the number of remaining bytes may be less than
-    /// the vector size. The pointer does not need to be aligned.
-    ///
-    /// # Safety
-    ///
-    /// Callers must guarantee that the pointer contains `len` bytes and `start < len`.
-    unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self;
-
-    /// Shift `self` right by `L` bytes, filling in the low bytes with the right most values in
-    /// `other`
-    unsafe fn shift_right_padded_u8<const L: i32>(self, other: Self) -> Self;
-}
+pub trait Vector128: Vector {}
 
 pub trait Vector128Expansion<Expanded: Vector256>: Vector128 {
     /// Expands the vector from 128-bit to 256-bit by expanding each byte
@@ -90,7 +99,10 @@ pub trait Vector256: Vector {
 
     unsafe fn load_unaligned(data: [u8; 32]) -> Self;
 
-    /// Extract the value at the given index from the vector
+    /// Find the index of the first occurrence of the given byte
+    // unsafe fn idx_u8(self, search: u8) -> usize;
+
+    /// Find the index of the first occurrence of the given value
     unsafe fn idx_u16(self, search: u16) -> usize;
 }
 

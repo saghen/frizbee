@@ -12,6 +12,11 @@ impl super::Vector for SSE256Vector {
     }
 
     #[inline(always)]
+    unsafe fn load_partial(_data: *const u8, _start: usize, _len: usize) -> Self {
+        todo!()
+    }
+
+    #[inline(always)]
     unsafe fn zero() -> Self {
         unsafe { Self((_mm_setzero_si128(), _mm_setzero_si128())) }
     }
@@ -69,6 +74,16 @@ impl super::Vector for SSE256Vector {
     }
 
     #[inline(always)]
+    unsafe fn max_u8(self, other: Self) -> Self {
+        unsafe {
+            Self((
+                _mm_max_epu8(self.0.0, other.0.0),
+                _mm_max_epu8(self.0.1, other.0.1),
+            ))
+        }
+    }
+
+    #[inline(always)]
     unsafe fn max_u16(self, other: Self) -> Self {
         unsafe {
             Self((
@@ -76,6 +91,11 @@ impl super::Vector for SSE256Vector {
                 _mm_max_epu16(self.0.1, other.0.1),
             ))
         }
+    }
+
+    #[inline(always)]
+    unsafe fn smax_u8(self) -> u8 {
+        todo!()
     }
 
     #[inline(always)]
@@ -99,11 +119,31 @@ impl super::Vector for SSE256Vector {
     }
 
     #[inline(always)]
+    unsafe fn add_u8(self, other: Self) -> Self {
+        unsafe {
+            Self((
+                _mm_add_epi8(self.0.0, other.0.0),
+                _mm_add_epi8(self.0.1, other.0.1),
+            ))
+        }
+    }
+
+    #[inline(always)]
     unsafe fn add_u16(self, other: Self) -> Self {
         unsafe {
             Self((
                 _mm_add_epi16(self.0.0, other.0.0),
                 _mm_add_epi16(self.0.1, other.0.1),
+            ))
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn subs_u8(self, other: Self) -> Self {
+        unsafe {
+            Self((
+                _mm_subs_epu8(self.0.0, other.0.0),
+                _mm_subs_epu8(self.0.1, other.0.1),
             ))
         }
     }
@@ -146,6 +186,11 @@ impl super::Vector for SSE256Vector {
                 _mm_xor_si128(self.0.1, _mm_set1_epi32(-1)),
             ))
         }
+    }
+
+    #[inline(always)]
+    unsafe fn shift_right_padded_u8<const L: i32>(self, _other: Self) -> Self {
+        todo!()
     }
 
     #[inline(always)]

@@ -105,12 +105,9 @@ impl Matcher {
                 continue;
             }
 
-            let (matched, skipped_chunks) =
-                self.config
-                    .max_typos
-                    .map_or((true, 0), |max_typos| {
-                        self.prefilter.match_haystack(haystack, max_typos)
-                    });
+            let (matched, skipped_chunks) = self.config.max_typos.map_or((true, 0), |max_typos| {
+                self.prefilter.match_haystack(haystack, max_typos)
+            });
             if !matched {
                 continue;
             }
@@ -154,12 +151,9 @@ impl Matcher {
                 continue;
             }
 
-            let (matched, skipped_chunks) =
-                self.config
-                    .max_typos
-                    .map_or((true, 0), |max_typos| {
-                        self.prefilter.match_haystack(haystack, max_typos)
-                    });
+            let (matched, skipped_chunks) = self.config.max_typos.map_or((true, 0), |max_typos| {
+                self.prefilter.match_haystack(haystack, max_typos)
+            });
             if !matched {
                 continue;
             }
@@ -260,7 +254,7 @@ impl Matcher {
         // Haystack too large, fallback to greedy matching
         let mut score = self
             .smith_waterman
-            .match_haystack(haystack, self.config.max_typos)?;
+            .match_haystack_u8(haystack, self.config.max_typos)?;
 
         let exact = include_exact && self.needle.as_bytes() == haystack;
         if exact {
