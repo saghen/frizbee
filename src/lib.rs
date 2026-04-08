@@ -130,6 +130,19 @@ pub use one_shot::{Matcher, match_list, match_list_indices, match_list_parallel}
 
 use r#const::*;
 
+/// This is very fff.nvim specific trait that allows me to do some perfiltering without recollect
+pub trait Matchable {
+    fn match_str(&self) -> Option<&str>;
+}
+
+/// Blanket impl: anything that is `AsRef<str>` is always matchable.
+impl<T: AsRef<str>> Matchable for T {
+    #[inline]
+    fn match_str(&self) -> Option<&str> {
+        Some(self.as_ref())
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Match {

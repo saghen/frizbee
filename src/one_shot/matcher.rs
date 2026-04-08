@@ -2,7 +2,7 @@ use crate::prefilter::Prefilter;
 use crate::smith_waterman::AlignmentPathIter;
 use crate::smith_waterman::simd::SmithWatermanMatcher;
 use crate::sort::radix_sort_matches;
-use crate::{Config, Match, MatchIndices};
+use crate::{Config, Match, MatchIndices, Matchable};
 
 #[derive(Debug, Clone)]
 pub struct Matcher {
@@ -38,7 +38,7 @@ impl Matcher {
         self.guard_against_score_overflow();
     }
 
-    pub fn match_list<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<Match> {
+    pub fn match_list<S: Matchable>(&mut self, haystacks: &[S]) -> Vec<Match> {
         Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
 
         if self.needle.is_empty() {
@@ -63,7 +63,7 @@ impl Matcher {
         matches
     }
 
-    pub fn match_list_indices<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<MatchIndices> {
+    pub fn match_list_indices<S: Matchable>(&mut self, haystacks: &[S]) -> Vec<MatchIndices> {
         Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
 
         if self.needle.is_empty() {
@@ -80,7 +80,7 @@ impl Matcher {
         matches
     }
 
-    pub fn match_list_into<S: AsRef<str>>(
+    pub fn match_list_into<S: Matchable>(
         &mut self,
         haystacks: &[S],
         haystack_index_offset: u32,
@@ -89,8 +89,10 @@ impl Matcher {
         Matcher::guard_against_haystack_overflow(haystacks.len(), haystack_index_offset);
 
         if self.needle.is_empty() {
-            for index in (0..haystacks.len()).map(|i| i + haystack_index_offset as usize) {
-                matches.push(Match::from_index(index));
+            for (i, item) in haystacks.iter().enumerate() {
+                if item.match_str().is_some() {
+                    matches.push(Match::from_index(i + haystack_index_offset as usize));
+                }
             }
             return;
         }
@@ -102,8 +104,11 @@ impl Matcher {
             .map(|max| needle.len().saturating_sub(max as usize))
             .unwrap_or(0);
 
-        for (index, haystack_str) in haystacks.iter().enumerate() {
-            let haystack = haystack_str.as_ref().as_bytes();
+        for (index, haystack_item) in haystacks.iter().enumerate() {
+            let Some(haystack_str) = haystack_item.match_str() else {
+                continue;
+            };
+            let haystack = haystack_str.as_bytes();
             if haystack.len() < min_haystack_len {
                 continue;
             }
@@ -126,7 +131,7 @@ impl Matcher {
         }
     }
 
-    pub fn match_list_indices_into<S: AsRef<str>>(
+    pub fn match_list_indices_into<S: Matchable>(
         &mut self,
         haystacks: &[S],
         haystack_index_offset: u32,
@@ -135,8 +140,10 @@ impl Matcher {
         Matcher::guard_against_haystack_overflow(haystacks.len(), haystack_index_offset);
 
         if self.needle.is_empty() {
-            for index in (0..haystacks.len()).map(|i| i + haystack_index_offset as usize) {
-                matches.push(MatchIndices::from_index(index));
+            for (i, item) in haystacks.iter().enumerate() {
+                if item.match_str().is_some() {
+                    matches.push(MatchIndices::from_index(i + haystack_index_offset as usize));
+                }
             }
             return;
         }
@@ -148,8 +155,11 @@ impl Matcher {
             .map(|max| needle.len().saturating_sub(max as usize))
             .unwrap_or(0);
 
-        for (index, haystack_str) in haystacks.iter().enumerate() {
-            let haystack = haystack_str.as_ref().as_bytes();
+        for (index, haystack_item) in haystacks.iter().enumerate() {
+            let Some(haystack_str) = haystack_item.match_str() else {
+                continue;
+            };
+            let haystack = haystack_str.as_bytes();
             if haystack.len() < min_haystack_len {
                 continue;
             }
@@ -197,7 +207,7 @@ impl Matcher {
     ///     matches
     /// }
     /// ```
-    pub fn match_iter<S: AsRef<str>>(&mut self, haystacks: &[S]) -> impl Iterator<Item = Match> {
+    pub fn match_iter<S: Matchable>(&mut self, haystacks: &[S]) -> impl Iterator<Item = Match> {
         Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
 
         self.prefilter_iter(haystacks)
@@ -230,7 +240,7 @@ impl Matcher {
     ///     matches
     /// }
     /// ```
-    pub fn match_iter_indices<S: AsRef<str>>(
+    pub fn match_iter_indices<S: Matchable>(
         &mut self,
         haystacks: &[S],
     ) -> impl Iterator<Item = MatchIndices> {
@@ -274,7 +284,7 @@ impl Matcher {
             score,
             exact,
             #[cfg(feature = "match_end_col")]
-            end_col: self.smith_waterman.match_end_col(haystack),
+            end_col: match_end_col,
         })
     }
 
@@ -307,7 +317,7 @@ impl Matcher {
     }
 
     #[inline(always)]
-    pub fn prefilter_iter<'a, S: AsRef<str>>(
+    pub fn prefilter_iter<'a, S: Matchable>(
         &self,
         haystacks: &'a [S],
     ) -> impl Iterator<Item = (usize, &'a [u8], usize)> + use<'a, S> {
@@ -326,8 +336,8 @@ impl Matcher {
 
         haystacks
             .iter()
-            .map(|h| h.as_ref().as_bytes())
             .enumerate()
+            .filter_map(|(i, item)| item.match_str().map(|s| (i, s.as_bytes())))
             .filter(move |(_, h)| h.len() >= min_haystack_len)
             // Prefiltering
             .filter_map(move |(i, haystack)| {

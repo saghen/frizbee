@@ -76,6 +76,7 @@ impl SmithWatermanMatcher {
             Self::NEON(matcher) => unsafe {
                 matcher.match_haystack_with_end_col(haystack, max_typos)
             },
+            Self::Scalar(matcher) => matcher.match_haystack_with_end_col(haystack, max_typos),
         }
     }
 
@@ -125,6 +126,7 @@ impl SmithWatermanMatcher {
             Self::SSE(matcher) => unsafe { matcher.match_end_col(haystack) },
             #[cfg(target_arch = "aarch64")]
             Self::NEON(matcher) => unsafe { matcher.match_end_col(haystack) },
+            Self::Scalar(matcher) => matcher.match_end_col(haystack),
         }
     }
 
@@ -340,6 +342,20 @@ impl SmithWatermanMatcherScalar {
 
     pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
         self.0.score_haystack(haystack)
+    }
+
+    #[cfg(feature = "match_end_col")]
+    pub fn match_haystack_with_end_col(
+        &mut self,
+        haystack: &[u8],
+        max_typos: Option<u16>,
+    ) -> Option<(u16, u16)> {
+        self.0.match_haystack_with_end_col(haystack, max_typos)
+    }
+
+    #[cfg(feature = "match_end_col")]
+    pub fn match_end_col(&self, haystack: &[u8]) -> u16 {
+        self.0.match_end_col(haystack)
     }
 
     #[cfg(test)]

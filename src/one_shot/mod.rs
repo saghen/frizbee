@@ -1,4 +1,4 @@
-use crate::{Config, Match, MatchIndices};
+use crate::{Config, Match, MatchIndices, Matchable};
 
 mod matcher;
 mod parallel;
@@ -6,7 +6,7 @@ mod parallel;
 pub use matcher::Matcher;
 pub use parallel::match_list_parallel;
 
-pub fn match_list<S1: AsRef<str>, S2: AsRef<str>>(
+pub fn match_list<S1: AsRef<str>, S2: Matchable>(
     needle: S1,
     haystacks: &[S2],
     config: &Config,
@@ -14,7 +14,7 @@ pub fn match_list<S1: AsRef<str>, S2: AsRef<str>>(
     Matcher::new(needle.as_ref(), config).match_list(haystacks)
 }
 
-pub fn match_list_indices<S1: AsRef<str>, S2: AsRef<str>>(
+pub fn match_list_indices<S1: AsRef<str>, S2: Matchable>(
     needle: S1,
     haystacks: &[S2],
     config: &Config,

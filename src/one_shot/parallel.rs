@@ -4,9 +4,9 @@ use std::thread;
 
 use super::Matcher;
 use crate::sort::radix_sort_matches;
-use crate::{Config, Match};
+use crate::{Config, Match, Matchable};
 
-pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
+pub fn match_list_parallel<S1: AsRef<str>, S2: Matchable + Sync>(
     needle: S1,
     haystacks: &[S2],
     config: &Config,
@@ -18,15 +18,18 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
     );
 
     if needle.as_ref().is_empty() {
-        return (0..haystacks.len())
-            .map(|index| Match {
+        return haystacks
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| item.match_str().is_some())
+            .map(|(index, _)| Match {
                 index: index as u32,
                 score: 0,
                 exact: false,
                 #[cfg(feature = "match_end_col")]
                 end_col: 0,
             })
-        .collect();
+            .collect();
     }
 
     if haystacks.is_empty() {
