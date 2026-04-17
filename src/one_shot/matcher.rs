@@ -2,7 +2,7 @@ use crate::prefilter::Prefilter;
 use crate::smith_waterman::AlignmentPathIter;
 use crate::smith_waterman::simd::SmithWatermanMatcher;
 use crate::sort::radix_sort_matches;
-use crate::{Config, Match, MatchIndices, Matchable};
+use crate::{Config, Match, MatchIndices, Matchable, MatchableChunked};
 
 #[derive(Debug, Clone)]
 pub struct Matcher {
@@ -16,7 +16,7 @@ impl Matcher {
     pub fn new(needle: &str, config: &Config) -> Self {
         let matcher = Self {
             needle: needle.to_string(),
-            config: config.clone(),
+            config: *config,
             prefilter: Prefilter::new(needle.as_bytes()),
             smith_waterman: SmithWatermanMatcher::new(needle.as_bytes(), &config.scoring),
         };
@@ -32,7 +32,7 @@ impl Matcher {
     }
 
     pub fn set_config(&mut self, config: &Config) {
-        self.config = config.clone();
+        self.config = *config;
         self.smith_waterman =
             SmithWatermanMatcher::new(self.needle.as_bytes(), &self.config.scoring);
         self.guard_against_score_overflow();
@@ -42,8 +42,11 @@ impl Matcher {
         Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
 
         if self.needle.is_empty() {
-            return (0..haystacks.len())
-                .map(|index| Match {
+            return haystacks
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| item.match_str().is_some())
+                .map(|(index, _)| Match {
                     index: index as u32,
                     score: 0,
                     exact: false,
@@ -67,7 +70,12 @@ impl Matcher {
         Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
 
         if self.needle.is_empty() {
-            return (0..haystacks.len()).map(MatchIndices::from_index).collect();
+            return haystacks
+                .iter()
+                .enumerate()
+                .filter(|(_, item)| item.match_str().is_some())
+                .map(|(i, _)| MatchIndices::from_index(i))
+                .collect();
         }
 
         let mut matches = vec![];
@@ -187,7 +195,7 @@ impl Matcher {
     /// The needle must not be empty
     ///
     /// ```rust
-    /// use frizbee::{Config, Match, Matcher};
+    /// use neo_frizbee::{Config, Match, Matcher};
     ///
     /// fn match_list(needle: &str, haystacks: &[&str]) -> Vec<Match> {
     ///     // Must guard against empty needles
@@ -220,7 +228,7 @@ impl Matcher {
     /// The needle must not be empty
     ///
     /// ```rust
-    /// use frizbee::{Config, Matcher, MatchIndices};
+    /// use neo_frizbee::{Config, Matcher, MatchIndices};
     ///
     /// fn match_list_indices(needle: &str, haystacks: &[&str]) -> Vec<MatchIndices> {
     ///     // Must guard against empty needles
@@ -265,7 +273,7 @@ impl Matcher {
         include_exact: bool,
     ) -> Option<Match> {
         #[cfg(feature = "match_end_col")]
-        let (mut score, match_end_col) = self
+        let (mut score, end_col) = self
             .smith_waterman
             .match_haystack_with_end_col(haystack, self.config.max_typos)?;
 
@@ -284,7 +292,45 @@ impl Matcher {
             score,
             exact,
             #[cfg(feature = "match_end_col")]
-            end_col: match_end_col,
+            end_col,
+        })
+    }
+
+    #[inline(always)]
+    pub fn smith_waterman_one_chunked(
+        &mut self,
+        chunk_ptrs: &[*const u8],
+        byte_len: u16,
+        index: u32,
+    ) -> Option<Match> {
+        #[cfg(feature = "match_end_col")]
+        let (mut score, end_col) = self.smith_waterman.match_haystack_chunked_with_end_col(
+            chunk_ptrs,
+            byte_len,
+            self.config.max_typos,
+        )?;
+
+        #[cfg(not(feature = "match_end_col"))]
+        let mut score = self.smith_waterman.match_haystack_chunked(
+            chunk_ptrs,
+            byte_len,
+            self.config.max_typos,
+        )?;
+
+        let exact = chunk_ptrs.len() == 1 && (byte_len as usize) == self.needle.len() && {
+            let haystack = unsafe { core::slice::from_raw_parts(chunk_ptrs[0], byte_len as usize) };
+            self.needle.as_bytes() == haystack
+        };
+        if exact {
+            score += self.config.scoring.exact_match_bonus;
+        }
+
+        Some(Match {
+            index,
+            score,
+            exact,
+            #[cfg(feature = "match_end_col")]
+            end_col,
         })
     }
 
@@ -331,7 +377,7 @@ impl Matcher {
             .max_typos
             .map(|max| needle.len().saturating_sub(max as usize))
             .unwrap_or(0);
-        let config = self.config.clone();
+        let config = self.config;
         let prefilter = self.prefilter.clone();
 
         haystacks
@@ -353,6 +399,138 @@ impl Matcher {
     pub fn iter_alignment_path(&self, skipped_chunks: usize, score: u16) -> AlignmentPathIter<'_> {
         self.smith_waterman
             .iter_alignment_path(skipped_chunks, score, self.config.max_typos)
+    }
+
+    pub fn match_list_chunked_into<C: MatchableChunked>(
+        &mut self,
+        haystacks: &[C],
+        ctx: &C::Ctx,
+        haystack_index_offset: u32,
+        matches: &mut Vec<Match>,
+    ) {
+        Matcher::guard_against_haystack_overflow(haystacks.len(), haystack_index_offset);
+
+        if self.needle.is_empty() {
+            for (i, item) in haystacks.iter().enumerate() {
+                if item.haystack_info(ctx).is_some() {
+                    matches.push(Match::from_index(i + haystack_index_offset as usize));
+                }
+            }
+            return;
+        }
+
+        let needle = self.needle.as_bytes();
+        let min_haystack_len = self
+            .config
+            .max_typos
+            .map(|max| needle.len().saturating_sub(max as usize))
+            .unwrap_or(0);
+
+        for (index, haystack_item) in haystacks.iter().enumerate() {
+            let Some((chunk_count, byte_len)) = haystack_item.haystack_info(ctx) else {
+                continue;
+            };
+
+            let total_len = byte_len as usize;
+            if total_len < min_haystack_len {
+                continue;
+            }
+
+            let mut ptrs_buf = [core::ptr::null::<u8>(); 32];
+            for (i, slot) in ptrs_buf.iter_mut().enumerate().take(chunk_count) {
+                *slot = haystack_item.load_chunk(ctx, i).as_ptr();
+            }
+            let chunk_ptrs = &ptrs_buf[..chunk_count];
+
+            let (prefilter_passed, skipped_chunks) =
+                self.config.max_typos.map_or((true, 0), |max_typos| {
+                    self.prefilter
+                        .match_haystack_chunked(chunk_ptrs, byte_len, max_typos)
+                });
+            if !prefilter_passed {
+                continue;
+            }
+
+            let chunk_ptrs = &chunk_ptrs[skipped_chunks..];
+            let byte_len = byte_len - (skipped_chunks as u16 * 16);
+            if let Some(match_) = self.smith_waterman_one_chunked(
+                chunk_ptrs,
+                byte_len,
+                (index as u32) + haystack_index_offset,
+            ) {
+                matches.push(match_);
+            }
+        }
+    }
+
+    /// Match items using a caller-provided resolver callback.
+    ///
+    /// For each item, `resolve` is called with a stack buffer. It should fill
+    /// the buffer with chunk pointers and return `Some((ptrs_slice, byte_len))`
+    /// or `None` to skip the item (e.g. deleted files).
+    ///
+    /// This avoids the lifetime issue of `MatchableChunked` — the resolver
+    /// writes into a buffer owned by the caller, not by the item.
+    pub fn match_list_resolved_into<T, F>(
+        &mut self,
+        items: &[T],
+        item_index_offset: u32,
+        resolve: &F,
+        matches: &mut Vec<Match>,
+    ) where
+        F: Fn(&T, &mut [*const u8; 32]) -> Option<(usize, u16)>, // (chunk_count, byte_len)
+    {
+        Matcher::guard_against_haystack_overflow(items.len(), item_index_offset);
+
+        if self.needle.is_empty() {
+            let mut ptrs_buf = [core::ptr::null::<u8>(); 32];
+            for (i, item) in items.iter().enumerate() {
+                if resolve(item, &mut ptrs_buf).is_some() {
+                    matches.push(Match::from_index(i + item_index_offset as usize));
+                }
+            }
+            return;
+        }
+
+        let needle = self.needle.as_bytes();
+        let min_haystack_len = self
+            .config
+            .max_typos
+            .map(|max| needle.len().saturating_sub(max as usize))
+            .unwrap_or(0);
+
+        for (index, item) in items.iter().enumerate() {
+            let mut ptrs_buf = [core::ptr::null::<u8>(); 32];
+            let Some((chunk_count, byte_len)) = resolve(item, &mut ptrs_buf) else {
+                continue;
+            };
+
+            let total_len = byte_len as usize;
+            if total_len < min_haystack_len {
+                continue;
+            }
+
+            let chunk_ptrs = &ptrs_buf[..chunk_count];
+
+            let (prefilter_passed, skipped_chunks) =
+                self.config.max_typos.map_or((true, 0), |max_typos| {
+                    self.prefilter
+                        .match_haystack_chunked(chunk_ptrs, byte_len, max_typos)
+                });
+            if !prefilter_passed {
+                continue;
+            }
+
+            let chunk_ptrs = &chunk_ptrs[skipped_chunks..];
+            let byte_len = byte_len - (skipped_chunks as u16 * 16);
+            if let Some(match_) = self.smith_waterman_one_chunked(
+                chunk_ptrs,
+                byte_len,
+                (index as u32) + item_index_offset,
+            ) {
+                matches.push(match_);
+            }
+        }
     }
 
     #[inline(always)]
@@ -489,5 +667,116 @@ mod tests {
         assert_eq!(matches[1].end_col, 2);
         // "abc" in "xxabc" ends at byte position 4
         assert_eq!(matches[2].end_col, 4);
+    }
+
+    /// Pad a string into 16-byte aligned chunks on the heap, returning
+    /// (chunk_ptrs, chunk_count, byte_len). The backing memory is leaked
+    /// so the pointers remain valid for the test lifetime.
+    fn string_to_chunks(s: &str) -> (Vec<*const u8>, usize, u16) {
+        let bytes = s.as_bytes();
+        let n_chunks = if bytes.is_empty() {
+            0
+        } else {
+            bytes.len().div_ceil(16)
+        };
+        let mut arena = vec![[0u8; 16]; n_chunks];
+        for (i, chunk) in arena.iter_mut().enumerate() {
+            let start = i * 16;
+            let take = 16.min(bytes.len() - start);
+            chunk[..take].copy_from_slice(&bytes[start..start + take]);
+        }
+        let ptrs: Vec<*const u8> = arena.iter().map(|c| c.as_ptr()).collect();
+        std::mem::forget(arena);
+        (ptrs, n_chunks, bytes.len() as u16)
+    }
+
+    /// Resolved matching must produce the same set of matched indices and
+    /// scores as contiguous matching for arbitrary needle/haystack pairs.
+    #[test]
+    fn test_resolved_matches_contiguous_parity() {
+        use proptest::prelude::*;
+        use proptest::test_runner::{Config as PropConfig, TestRunner};
+
+        let mut runner = TestRunner::new(PropConfig {
+            cases: 2000,
+            ..PropConfig::default()
+        });
+
+        let strategy = (
+            "[a-z]{2,12}",                                        // needle
+            proptest::collection::vec("[a-z/_\\.]{5,80}", 1..30), // haystacks
+            (0u16..=8u16),                                        // max_typos
+        );
+
+        runner
+            .run(&strategy, |(needle, haystacks, max_typos)| {
+                let config = Config {
+                    max_typos: Some(max_typos),
+                    sort: false,
+                    ..Config::default()
+                };
+
+                // Contiguous path
+                let haystack_refs: Vec<&str> = haystacks.iter().map(String::as_str).collect();
+                let contiguous = match_list(&needle, &haystack_refs, &config);
+
+                // Build chunk data for each haystack
+                let chunk_data: Vec<(Vec<*const u8>, usize, u16)> =
+                    haystacks.iter().map(|s| string_to_chunks(s)).collect();
+
+                // Resolved path
+                let resolve =
+                    |item: &(Vec<*const u8>, usize, u16),
+                     ptrs_buf: &mut [*const u8; 32]|
+                     -> Option<(usize, u16)> {
+                        let (ptrs, count, byte_len) = item;
+                        for (i, &p) in ptrs.iter().enumerate() {
+                            ptrs_buf[i] = p;
+                        }
+
+                        Some((*count, *byte_len))
+                    };
+
+                let mut matcher = Matcher::new(&needle, &config);
+                let mut resolved = Vec::new();
+                matcher.match_list_resolved_into(&chunk_data, 0, &resolve, &mut resolved);
+
+                // Compare: same indices matched
+                let mut contiguous_indices: Vec<u32> =
+                    contiguous.iter().map(|m| m.index).collect();
+                let mut resolved_indices: Vec<u32> =
+                    resolved.iter().map(|m| m.index).collect();
+                contiguous_indices.sort();
+                resolved_indices.sort();
+
+                prop_assert_eq!(
+                    &contiguous_indices,
+                    &resolved_indices,
+                    "needle={:?} max_typos={} contiguous matched {:?} but resolved matched {:?}",
+                    needle,
+                    max_typos,
+                    contiguous_indices,
+                    resolved_indices,
+                );
+
+                // Compare: same scores for each matched index
+                for cm in &contiguous {
+                    if let Some(rm) = resolved.iter().find(|r| r.index == cm.index) {
+                        prop_assert_eq!(
+                            cm.score,
+                            rm.score,
+                            "needle={:?} max_typos={} index={} score mismatch: contiguous={} resolved={}",
+                            needle,
+                            max_typos,
+                            cm.index,
+                            cm.score,
+                            rm.score,
+                        );
+                    }
+                }
+
+                Ok(())
+            })
+            .unwrap();
     }
 }

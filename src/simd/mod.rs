@@ -76,6 +76,14 @@ pub trait Vector128: Vector {
     /// Callers must guarantee that the pointer contains `len` bytes and `start < len`.
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self;
 
+    /// Load exactly 16 bytes from a 16-byte aligned pointer.
+    /// No branching, no partial-load logic — a single SIMD load instruction.
+    ///
+    /// # Safety
+    ///
+    /// `ptr` must point to at least 16 readable bytes and be 16-byte aligned.
+    unsafe fn load_aligned_16(ptr: *const u8) -> Self;
+
     /// Shift `self` right by `L` bytes, filling in the low bytes with the right most values in
     /// `other`
     unsafe fn shift_right_padded_u8<const L: i32>(self, other: Self) -> Self;

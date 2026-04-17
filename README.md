@@ -11,7 +11,7 @@ For commercial support, please [contact me](mailto:liamcdyer@gmail.com). I would
 See [the docs](https://docs.rs/frizbee) for more usage examples.
 
 ```rust
-use frizbee::{match_list, match_list_parallel, Config};
+use neo_frizbee::{match_list, match_list_parallel, Config};
 
 let needle = "fBr";
 let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];

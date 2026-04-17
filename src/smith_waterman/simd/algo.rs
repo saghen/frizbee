@@ -38,7 +38,7 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
         Self {
             needle: String::from_utf8_lossy(needle).to_string(),
             needle_simd: Self::broadcast_needle(needle),
-            scoring: scoring.clone(),
+            scoring: *scoring,
             score_matrix: Matrix::new(needle.len(), MAX_HAYSTACK_LEN),
             match_masks: Matrix::new(needle.len(), MAX_HAYSTACK_LEN),
             haystack_chunks: 0,
@@ -290,6 +290,188 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
             }
 
             max_scores.smax_u16()
+        }
+    }
+
+    /// Score a haystack provided as pre-chunked, 16-byte aligned pointers.
+    ///
+    /// Each pointer in `chunk_ptrs` must point to exactly 16 bytes of aligned
+    /// data (a `SimdChunk`). The last chunk is zero-padded at build time.
+    /// `byte_len` is the actual path length (for DP dimensioning).
+    ///
+    /// This is the fastest scoring path: each column is a single aligned SIMD
+    /// load — no `load_partial`, no segment lookup, no bridge copies.
+    #[inline(always)]
+    pub fn score_haystack_chunked(&mut self, chunk_ptrs: &[*const u8], byte_len: u16) -> u16 {
+        let total_len = byte_len as usize;
+        if total_len == 0 {
+            return 0;
+        }
+        if total_len > MAX_HAYSTACK_LEN {
+            // Reconstruct contiguous buffer for greedy fallback (vanishingly rare)
+            let mut buf = vec![0u8; total_len];
+            for (i, &ptr) in chunk_ptrs.iter().enumerate() {
+                let start = i * 16;
+                let take = 16.min(total_len - start);
+                unsafe {
+                    core::ptr::copy_nonoverlapping(ptr, buf.as_mut_ptr().add(start), take);
+                }
+            }
+            return match_greedy(self.needle.as_bytes(), &buf, &self.scoring)
+                .map(|(score, _)| score)
+                .unwrap_or(0);
+        }
+
+        let scoring = &self.scoring;
+        let haystack_chunks = total_len.div_ceil(16) + 1;
+        self.haystack_chunks = haystack_chunks;
+
+        let score_matrix = &mut self.score_matrix;
+        let match_masks = &mut self.match_masks;
+
+        unsafe {
+            let gap_extend_penalty = Simd256::splat_u16(scoring.gap_extend_penalty);
+            let gap_open_penalty =
+                Simd256::splat_u16(scoring.gap_open_penalty - scoring.gap_extend_penalty);
+            let match_score = Simd256::splat_u16(scoring.match_score + scoring.mismatch_penalty);
+            let mismatch_penalty = Simd256::splat_u16(scoring.mismatch_penalty);
+            let matching_case_bonus = Simd256::splat_u16(scoring.matching_case_bonus);
+            let capitalization_bonus = Simd256::splat_u16(scoring.capitalization_bonus);
+            let delimiter_bonus = Simd256::splat_u16(scoring.delimiter_bonus);
+
+            let mut prefix_bonus_masked =
+                Simd256::splat_u16(scoring.prefix_bonus).and(Simd256::load_unaligned(PREFIX_MASK));
+            let mut prev_chunk_char_is_delimiter_mask = Simd128::zero();
+            let mut prev_chunk_is_lower_mask = Simd128::zero();
+            let mut max_scores = Simd256::zero();
+
+            for (raw_col_idx, &chunk_ptr) in chunk_ptrs.iter().enumerate() {
+                let col_idx = raw_col_idx + 1;
+
+                // Direct aligned load — no load_partial, no branching
+                let haystack = Simd128::load_aligned_16(chunk_ptr);
+
+                let is_upper_mask = Simd128::and(
+                    haystack.lt_u8(Simd128::splat_u8(b'Z' + 1)),
+                    haystack.gt_u8(Simd128::splat_u8(b'A' - 1)),
+                );
+                let is_lower_mask = Simd128::and(
+                    haystack.lt_u8(Simd128::splat_u8(b'z' + 1)),
+                    haystack.gt_u8(Simd128::splat_u8(b'a' - 1)),
+                );
+                let is_letter_mask = is_upper_mask.or(is_lower_mask);
+
+                let capitalization_mask = Simd128::and(
+                    is_upper_mask,
+                    is_lower_mask.shift_right_padded_u8::<1>(prev_chunk_is_lower_mask),
+                )
+                .cast_i8_to_i16();
+                let capitalization_bonus_masked = capitalization_mask.and(capitalization_bonus);
+                prev_chunk_is_lower_mask = is_lower_mask;
+
+                let is_digit_mask = Simd128::and(
+                    haystack.gt_u8(Simd128::splat_u8(b'0' - 1)),
+                    haystack.lt_u8(Simd128::splat_u8(b'9' + 1)),
+                );
+                let char_is_delimiter_mask = is_letter_mask
+                    .or(is_digit_mask)
+                    .or(haystack.gt_u8(Simd128::splat_u8(127)))
+                    .not();
+                let prev_char_is_delimiter_mask = char_is_delimiter_mask
+                    .shift_right_padded_u8::<1>(prev_chunk_char_is_delimiter_mask);
+                let delimiter_mask = prev_char_is_delimiter_mask
+                    .and(char_is_delimiter_mask.not())
+                    .cast_i8_to_i16();
+                let delimiter_bonus_masked = delimiter_mask.and(delimiter_bonus);
+                prev_chunk_char_is_delimiter_mask = char_is_delimiter_mask;
+
+                let match_and_masked_bonuses = delimiter_bonus_masked
+                    .add_u16(capitalization_bonus_masked)
+                    .add_u16(prefix_bonus_masked)
+                    .add_u16(match_score);
+
+                let mut up_gap_mask = Simd256::zero();
+                let mut prev_row_scores = Simd256::zero();
+                let mut row_scores = Simd256::zero();
+
+                for (row_idx, (needle_char, flipped_case_needle_char)) in
+                    self.needle_simd.iter().enumerate().map(|(i, c)| (i + 1, c))
+                {
+                    let exact_case_match_mask = (*needle_char).eq_u8(haystack);
+                    let flipped_case_match_mask = (*flipped_case_needle_char).eq_u8(haystack);
+                    let match_mask = exact_case_match_mask
+                        .or(flipped_case_match_mask)
+                        .cast_i8_to_i16();
+                    let exact_case_match_mask = exact_case_match_mask.cast_i8_to_i16();
+
+                    let diag_scores = {
+                        let diag = prev_row_scores.shift_right_padded_u16::<1>(
+                            score_matrix.get(row_idx - 1, col_idx - 1),
+                        );
+                        let diag = diag.add_u16(match_mask.and(match_and_masked_bonuses));
+                        let diag = diag.subs_u16(mismatch_penalty);
+                        diag.add_u16(exact_case_match_mask.and(matching_case_bonus))
+                    };
+
+                    let up_scores = {
+                        let score_after_gap_extend = prev_row_scores.subs_u16(gap_extend_penalty);
+                        score_after_gap_extend.subs_u16(up_gap_mask.and(gap_open_penalty))
+                    };
+
+                    row_scores = propagate_horizontal_gaps::<Simd256>(
+                        diag_scores.max_u16(up_scores),
+                        score_matrix.get(row_idx, col_idx - 1),
+                        match_mask,
+                        match_masks.get(row_idx, col_idx - 1),
+                        gap_open_penalty,
+                        gap_extend_penalty,
+                    );
+
+                    score_matrix.set(row_idx, col_idx, row_scores);
+                    match_masks.set(row_idx, col_idx, match_mask);
+                    prev_row_scores = row_scores;
+                    up_gap_mask = match_mask;
+                }
+
+                max_scores = max_scores.max_u16(row_scores);
+                prefix_bonus_masked = Simd256::zero();
+            }
+
+            max_scores.smax_u16()
+        }
+    }
+
+    #[inline(always)]
+    pub fn match_haystack_chunked(
+        &mut self,
+        chunk_ptrs: &[*const u8],
+        byte_len: u16,
+        max_typos: Option<u16>,
+    ) -> Option<u16> {
+        let score = self.score_haystack_chunked(chunk_ptrs, byte_len);
+        match max_typos {
+            Some(max_typos) if !self.has_alignment_path(score, max_typos) => None,
+            _ => Some(score),
+        }
+    }
+
+    #[cfg(feature = "match_end_col")]
+    pub fn match_haystack_chunked_with_end_col(
+        &mut self,
+        chunk_ptrs: &[*const u8],
+        byte_len: u16,
+        max_typos: Option<u16>,
+    ) -> Option<(u16, u16)> {
+        let score = self.score_haystack_chunked(chunk_ptrs, byte_len);
+        if score == 0 {
+            return None;
+        }
+        match max_typos {
+            Some(max_typos) if !self.has_alignment_path(score, max_typos) => None,
+            _ => {
+                let end_col = self.get_match_end_col(score);
+                Some((score, end_col))
+            }
         }
     }
 

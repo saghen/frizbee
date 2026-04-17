@@ -93,11 +93,11 @@ pub fn match_list_bench(c: &mut criterion::Criterion, name: &str, needle: &str, 
     );
 }
 
-fn match_list(needle: &str, haystack: &[&str], max_typos: Option<u16>) -> Vec<frizbee::Match> {
-    frizbee::match_list(
+fn match_list(needle: &str, haystack: &[&str], max_typos: Option<u16>) -> Vec<neo_frizbee::Match> {
+    neo_frizbee::match_list(
         black_box(needle),
         black_box(haystack),
-        black_box(&frizbee::Config {
+        black_box(&neo_frizbee::Config {
             max_typos,
             ..Default::default()
         }),
@@ -108,11 +108,11 @@ fn match_list_parallel(
     needle: &str,
     haystack: &[&str],
     max_typos: Option<u16>,
-) -> Vec<frizbee::Match> {
-    frizbee::match_list_parallel(
+) -> Vec<neo_frizbee::Match> {
+    neo_frizbee::match_list_parallel(
         black_box(needle),
         black_box(haystack),
-        black_box(&frizbee::Config {
+        black_box(&neo_frizbee::Config {
             max_typos,
             ..Default::default()
         }),

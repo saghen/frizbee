@@ -180,6 +180,15 @@ impl super::Vector for Scalar128Vector {
 
 impl super::Vector128 for Scalar128Vector {
     #[inline(always)]
+    unsafe fn load_aligned_16(ptr: *const u8) -> Self {
+        let mut arr = [0u8; 16];
+        unsafe {
+            core::ptr::copy_nonoverlapping(ptr, arr.as_mut_ptr(), 16);
+        }
+        Self(arr)
+    }
+
+    #[inline(always)]
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         let mut arr = [0u8; 16];
         let available = len.saturating_sub(start);

@@ -85,6 +85,7 @@ impl Prefilter {
         Prefilter::Scalar(scalar::PrefilterScalar::new(needle))
     }
 
+
     /// Checks if the needle is wholly contained in the haystack, ignoring the exact order of the
     /// bytes. For example, if the needle is "test", the haystack "tset" will return true. However,
     /// the order does matter across 16 byte boundaries. The needle chars must include both the
@@ -114,6 +115,39 @@ impl Prefilter {
             (Prefilter::NEON(p), _) => unsafe { p.match_haystack_typos(haystack, max_typos) },
             (Prefilter::Scalar(p), 0) => p.match_haystack(haystack),
             (Prefilter::Scalar(p), _) => p.match_haystack_typos(haystack, max_typos),
+        }
+    }
+
+    #[inline]
+    pub fn match_haystack_chunked(
+        &self,
+        chunk_ptrs: &[*const u8],
+        byte_len: u16,
+        max_typos: u16,
+    ) -> (bool, usize) {
+        match (self, max_typos) {
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::AVX(p), 0) => unsafe { p.match_haystack_chunked(chunk_ptrs, byte_len) },
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::AVX(p), _) => unsafe {
+                p.match_haystack_typos_chunked(chunk_ptrs, byte_len, max_typos)
+            },
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::SSE(p), 0) => unsafe { p.match_haystack_chunked(chunk_ptrs, byte_len) },
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::SSE(p), _) => unsafe {
+                p.match_haystack_typos_chunked(chunk_ptrs, byte_len, max_typos)
+            },
+            #[cfg(target_arch = "aarch64")]
+            (Prefilter::NEON(p), 0) => unsafe { p.match_haystack_chunked(chunk_ptrs, byte_len) },
+            #[cfg(target_arch = "aarch64")]
+            (Prefilter::NEON(p), _) => unsafe {
+                p.match_haystack_typos_chunked(chunk_ptrs, byte_len, max_typos)
+            },
+            (Prefilter::Scalar(p), 0) => p.match_haystack_chunked(chunk_ptrs, byte_len),
+            (Prefilter::Scalar(p), _) => {
+                p.match_haystack_typos_chunked(chunk_ptrs, byte_len, max_typos)
+            }
         }
     }
 }

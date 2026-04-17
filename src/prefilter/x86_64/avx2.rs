@@ -151,6 +151,102 @@ impl PrefilterAVX {
             }
         }
     }
+
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn match_haystack_chunked(
+        &self,
+        chunk_ptrs: &[*const u8],
+        byte_len: u16,
+    ) -> (bool, usize) {
+        unsafe {
+            if byte_len == 0 || chunk_ptrs.is_empty() {
+                return (true, 0);
+            }
+
+            let mut skipped_chunks = 0;
+            let mut can_skip_chunks = true;
+
+            let mut needle_iter = self.needle_simd.iter();
+            let mut needle_char = *needle_iter.next().unwrap();
+
+            for (chunk_idx, &ptr) in chunk_ptrs.iter().enumerate() {
+                let haystack_chunk = _mm_loadu_si128(ptr as *const __m128i);
+                let haystack_chunk = _mm256_broadcastsi128_si256(haystack_chunk);
+                loop {
+                    if _mm256_movemask_epi8(_mm256_cmpeq_epi8(needle_char, haystack_chunk)) == 0 {
+                        break;
+                    }
+
+                    if let Some(next_needle_char) = needle_iter.next() {
+                        if can_skip_chunks {
+                            skipped_chunks = chunk_idx;
+                        }
+                        can_skip_chunks = false;
+                        needle_char = *next_needle_char;
+                    } else {
+                        return (true, skipped_chunks);
+                    }
+                }
+            }
+
+            (false, skipped_chunks)
+        }
+    }
+
+    #[inline]
+    #[target_feature(enable = "avx2")]
+    pub unsafe fn match_haystack_typos_chunked(
+        &self,
+        chunk_ptrs: &[*const u8],
+        byte_len: u16,
+        max_typos: u16,
+    ) -> (bool, usize) {
+        unsafe {
+            if byte_len == 0 || chunk_ptrs.is_empty() {
+                return (true, 0);
+            }
+
+            if max_typos >= 3 {
+                return (true, 0);
+            }
+
+            let mut needle_iter = self.needle_simd.iter();
+            let mut needle_char = *needle_iter.next().unwrap();
+
+            let mut typos = 0;
+            loop {
+                for &ptr in chunk_ptrs.iter() {
+                    let haystack_chunk = _mm_loadu_si128(ptr as *const __m128i);
+                    let haystack_chunk = _mm256_broadcastsi128_si256(haystack_chunk);
+
+                    loop {
+                        if _mm256_movemask_epi8(_mm256_cmpeq_epi8(needle_char, haystack_chunk)) == 0
+                        {
+                            break;
+                        }
+
+                        if let Some(next_needle_char) = needle_iter.next() {
+                            needle_char = *next_needle_char;
+                        } else {
+                            return (true, 0);
+                        }
+                    }
+                }
+
+                typos += 1;
+                if typos > max_typos as usize {
+                    return (false, 0);
+                }
+
+                if let Some(next_needle_char) = needle_iter.next() {
+                    needle_char = *next_needle_char;
+                } else {
+                    return (true, 0);
+                }
+            }
+        }
+    }
 }
 
 /// Loads the cased needle into a __m256i vector, where the first 16 bytes are the uppercase

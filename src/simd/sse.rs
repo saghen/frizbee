@@ -186,6 +186,11 @@ impl super::Vector for SSEVector {
 
 impl super::Vector128 for SSEVector {
     #[inline(always)]
+    unsafe fn load_aligned_16(ptr: *const u8) -> Self {
+        unsafe { Self(_mm_load_si128(ptr as *const __m128i)) }
+    }
+
+    #[inline(always)]
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         unsafe {
             Self(match len {

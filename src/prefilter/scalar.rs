@@ -51,7 +51,7 @@ pub fn match_haystack_typos(needle: &[(u8, u8)], haystack: &[u8], max_typos: u16
 /// TODO: Replace this with an ordered prefilter following a memchr style approach
 #[derive(Debug, Clone)]
 pub struct PrefilterScalar {
-    needle: Vec<(u8, u8)>,
+    pub(crate) needle: Vec<(u8, u8)>,
 }
 
 impl PrefilterScalar {
@@ -135,6 +135,90 @@ impl PrefilterScalar {
             for start in (0..len).step_by(16) {
                 let (chunk_start, chunk_end) = PrefilterScalar::overlapping_load(start, len);
                 let chunk = &haystack[chunk_start..chunk_end];
+
+                loop {
+                    if needle_idx >= self.needle.len() {
+                        return (true, 0);
+                    }
+
+                    let (c1, c2) = self.needle[needle_idx];
+                    if chunk.iter().any(|&b| b == c1 || b == c2) {
+                        needle_idx += 1;
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            typos += 1;
+            if typos > max_typos as usize {
+                return (false, 0);
+            }
+
+            needle_idx += 1;
+            if needle_idx >= self.needle.len() {
+                return (true, 0);
+            }
+        }
+    }
+
+    pub fn match_haystack_chunked(&self, chunk_ptrs: &[*const u8], byte_len: u16) -> (bool, usize) {
+        if byte_len == 0 || chunk_ptrs.is_empty() {
+            return (true, 0);
+        }
+
+        let total_len = byte_len as usize;
+        let mut can_skip_chunks = true;
+        let mut skipped_chunks = 0;
+        let mut needle_idx = 0;
+
+        for (chunk_idx, &ptr) in chunk_ptrs.iter().enumerate() {
+            let take = 16.min(total_len - chunk_idx * 16);
+            let chunk = unsafe { core::slice::from_raw_parts(ptr, take) };
+
+            loop {
+                if needle_idx >= self.needle.len() {
+                    return (true, skipped_chunks);
+                }
+
+                let (c1, c2) = self.needle[needle_idx];
+                if chunk.iter().any(|&b| b == c1 || b == c2) {
+                    if can_skip_chunks {
+                        skipped_chunks = chunk_idx;
+                    }
+                    can_skip_chunks = false;
+                    needle_idx += 1;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        (needle_idx >= self.needle.len(), skipped_chunks)
+    }
+
+    pub fn match_haystack_typos_chunked(
+        &self,
+        chunk_ptrs: &[*const u8],
+        byte_len: u16,
+        max_typos: u16,
+    ) -> (bool, usize) {
+        if byte_len == 0 || chunk_ptrs.is_empty() {
+            return (true, 0);
+        }
+
+        if max_typos >= 3 {
+            return (true, 0);
+        }
+
+        let total_len = byte_len as usize;
+        let mut needle_idx = 0;
+        let mut typos = 0;
+
+        loop {
+            for (chunk_idx, &ptr) in chunk_ptrs.iter().enumerate() {
+                let take = 16.min(total_len - chunk_idx * 16);
+                let chunk = unsafe { core::slice::from_raw_parts(ptr, take) };
 
                 loop {
                     if needle_idx >= self.needle.len() {

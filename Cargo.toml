@@ -12,6 +12,7 @@ lto = true
 [dev-dependencies]
 criterion = "0.8"
 nucleo = "0.5.0"
+proptest = "1"
 rand = "0.10"
 rand_distr = "0.6"
 

@@ -11,7 +11,7 @@
 //! # Example: using `match_list`
 //!
 //! ```rust
-//! use frizbee::{match_list, match_list_parallel, Config};
+//! use neo_frizbee::{match_list, match_list_parallel, Config};
 //!
 //! let needle = "fBr";
 //! let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
@@ -26,7 +26,7 @@
 //! Useful for when you want to match one needle against more than one haystack.
 //!
 //! ```rust
-//! use frizbee::{Matcher, Config};
+//! use neo_frizbee::{Matcher, Config};
 //!
 //! let needle = "fBr";
 //! let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
@@ -41,7 +41,7 @@
 //! `match_iter` API on the `Matcher`.
 //!
 //! ```rust
-//! use frizbee::{Match, Matcher, Config};
+//! use neo_frizbee::{Match, Matcher, Config};
 //!
 //! let needle = "fBr";
 //! let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
@@ -59,7 +59,7 @@
 //! down to the lower level API
 //!
 //! ```rust
-//! use frizbee::{Config, Match, Matcher, smith_waterman::Alignment};
+//! use neo_frizbee::{Config, Match, Matcher, smith_waterman::Alignment};
 //!
 //! let needle = "fBr";
 //! let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
@@ -126,11 +126,14 @@ mod simd;
 pub mod smith_waterman;
 pub mod sort;
 
-pub use one_shot::{Matcher, match_list, match_list_indices, match_list_parallel};
+pub use one_shot::{
+    Matcher, match_list, match_list_indices, match_list_parallel, match_list_parallel_chunked,
+    match_list_parallel_resolved,
+};
 
+pub use r#const::SIMD_CHUNK_BYTES;
 use r#const::*;
 
-/// This is very fff.nvim specific trait that allows me to do some perfiltering without recollect
 pub trait Matchable {
     fn match_str(&self) -> Option<&str>;
 }
@@ -142,6 +145,25 @@ impl<T: AsRef<str>> Matchable for T {
         Some(self.as_ref())
     }
 }
+
+/// Trait for items whose match data is pre-chunked into 16-byte aligned blocks.
+///
+/// The associated `Ctx` type carries shared state (e.g. an arena base pointer)
+/// that is needed to resolve chunk pointers but is not owned by each item.
+pub trait MatchableChunked {
+    type Ctx;
+
+    /// Number of chunks and total byte length, or `None` to skip this item.
+    fn haystack_info(&self, ctx: &Self::Ctx) -> Option<(usize, u16)>;
+
+    /// Load chunk at `index`. Returns a reference to 16 bytes of aligned data.
+    /// The last chunk is zero-padded at build time.
+    ///
+    /// # Safety contract
+    /// `index` must be < chunk_count returned by `haystack_info()`.
+    fn load_chunk<'a>(&self, ctx: &'a Self::Ctx, index: usize) -> &'a [u8; SIMD_CHUNK_BYTES];
+}
+
 
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]

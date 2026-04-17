@@ -117,6 +117,69 @@ impl SmithWatermanMatcher {
         }
     }
 
+    pub fn score_haystack_chunked(&mut self, chunk_ptrs: &[*const u8], byte_len: u16) -> u16 {
+        match self {
+            #[cfg(target_arch = "x86_64")]
+            Self::AVX2(matcher) => unsafe { matcher.score_haystack_chunked(chunk_ptrs, byte_len) },
+            #[cfg(target_arch = "x86_64")]
+            Self::SSE(matcher) => unsafe { matcher.score_haystack_chunked(chunk_ptrs, byte_len) },
+            #[cfg(target_arch = "aarch64")]
+            Self::NEON(matcher) => unsafe { matcher.score_haystack_chunked(chunk_ptrs, byte_len) },
+            Self::Scalar(matcher) => matcher.score_haystack_chunked(chunk_ptrs, byte_len),
+        }
+    }
+
+    pub fn match_haystack_chunked(
+        &mut self,
+        chunk_ptrs: &[*const u8],
+        byte_len: u16,
+        max_typos: Option<u16>,
+    ) -> Option<u16> {
+        match self {
+            #[cfg(target_arch = "x86_64")]
+            Self::AVX2(matcher) => unsafe {
+                matcher.match_haystack_chunked(chunk_ptrs, byte_len, max_typos)
+            },
+            #[cfg(target_arch = "x86_64")]
+            Self::SSE(matcher) => unsafe {
+                matcher.match_haystack_chunked(chunk_ptrs, byte_len, max_typos)
+            },
+            #[cfg(target_arch = "aarch64")]
+            Self::NEON(matcher) => unsafe {
+                matcher.match_haystack_chunked(chunk_ptrs, byte_len, max_typos)
+            },
+            Self::Scalar(matcher) => {
+                matcher.match_haystack_chunked(chunk_ptrs, byte_len, max_typos)
+            }
+        }
+    }
+
+    #[cfg(feature = "match_end_col")]
+    pub fn match_haystack_chunked_with_end_col(
+        &mut self,
+        chunk_ptrs: &[*const u8],
+        byte_len: u16,
+        max_typos: Option<u16>,
+    ) -> Option<(u16, u16)> {
+        match self {
+            #[cfg(target_arch = "x86_64")]
+            Self::AVX2(matcher) => unsafe {
+                matcher.match_haystack_chunked_with_end_col(chunk_ptrs, byte_len, max_typos)
+            },
+            #[cfg(target_arch = "x86_64")]
+            Self::SSE(matcher) => unsafe {
+                matcher.match_haystack_chunked_with_end_col(chunk_ptrs, byte_len, max_typos)
+            },
+            #[cfg(target_arch = "aarch64")]
+            Self::NEON(matcher) => unsafe {
+                matcher.match_haystack_chunked_with_end_col(chunk_ptrs, byte_len, max_typos)
+            },
+            Self::Scalar(matcher) => {
+                matcher.match_haystack_chunked_with_end_col(chunk_ptrs, byte_len, max_typos)
+            }
+        }
+    }
+
     #[cfg(feature = "match_end_col")]
     pub fn match_end_col(&self, haystack: &[u8]) -> u16 {
         match self {
@@ -266,6 +329,37 @@ macro_rules! define_matcher {
             }
 
             #[doc = concat!(
+                "Score pre-chunked haystack (16-byte aligned chunk pointers)\n\n",
+                "# Safety\n\n",
+                "Caller must ensure that the target feature `", $feature, "` is available"
+            )]
+            #[target_feature(enable = $feature)]
+            pub unsafe fn score_haystack_chunked(&mut self, chunk_ptrs: &[*const u8], byte_len: u16) -> u16 {
+                self.0.score_haystack_chunked(chunk_ptrs, byte_len)
+            }
+
+            #[target_feature(enable = $feature)]
+            pub unsafe fn match_haystack_chunked(
+                &mut self,
+                chunk_ptrs: &[*const u8],
+                byte_len: u16,
+                max_typos: Option<u16>,
+            ) -> Option<u16> {
+                self.0.match_haystack_chunked(chunk_ptrs, byte_len, max_typos)
+            }
+
+            #[cfg(feature = "match_end_col")]
+            #[target_feature(enable = $feature)]
+            pub unsafe fn match_haystack_chunked_with_end_col(
+                &mut self,
+                chunk_ptrs: &[*const u8],
+                byte_len: u16,
+                max_typos: Option<u16>,
+            ) -> Option<(u16, u16)> {
+                self.0.match_haystack_chunked_with_end_col(chunk_ptrs, byte_len, max_typos)
+            }
+
+            #[doc = concat!(
                 "Get the index of the final needle char in the haystack\n\n",
                 "# Safety\n\n",
                 "Caller must ensure that the target feature `", $feature, "` is available"
@@ -342,6 +436,31 @@ impl SmithWatermanMatcherScalar {
 
     pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
         self.0.score_haystack(haystack)
+    }
+
+    pub fn score_haystack_chunked(&mut self, chunk_ptrs: &[*const u8], byte_len: u16) -> u16 {
+        self.0.score_haystack_chunked(chunk_ptrs, byte_len)
+    }
+
+    pub fn match_haystack_chunked(
+        &mut self,
+        chunk_ptrs: &[*const u8],
+        byte_len: u16,
+        max_typos: Option<u16>,
+    ) -> Option<u16> {
+        self.0
+            .match_haystack_chunked(chunk_ptrs, byte_len, max_typos)
+    }
+
+    #[cfg(feature = "match_end_col")]
+    pub fn match_haystack_chunked_with_end_col(
+        &mut self,
+        chunk_ptrs: &[*const u8],
+        byte_len: u16,
+        max_typos: Option<u16>,
+    ) -> Option<(u16, u16)> {
+        self.0
+            .match_haystack_chunked_with_end_col(chunk_ptrs, byte_len, max_typos)
     }
 
     #[cfg(feature = "match_end_col")]
@@ -532,5 +651,111 @@ mod tests {
         assert_eq!(get_indices("c", "abc"), Some(vec![2]));
         assert_eq!(get_indices("ac", "________________abc"), Some(vec![18, 16]));
         assert_eq!(get_indices("foo", "Uf"), Some(vec![1]));
+    }
+
+    /// Wrapper that guarantees 16-byte alignment for chunk data.
+    #[repr(C, align(16))]
+    struct TestChunk([u8; 16]);
+
+    fn make_aligned_chunks(haystack: &str) -> (Vec<TestChunk>, Vec<*const u8>, u16) {
+        let bytes = haystack.as_bytes();
+        let n_chunks = if bytes.is_empty() {
+            0
+        } else {
+            (bytes.len() + 15) / 16
+        };
+        let mut chunks: Vec<TestChunk> = (0..n_chunks).map(|_| TestChunk([0u8; 16])).collect();
+        for (i, chunk) in chunks.iter_mut().enumerate() {
+            let start = i * 16;
+            let end = (start + 16).min(bytes.len());
+            chunk.0[..end - start].copy_from_slice(&bytes[start..end]);
+        }
+        let ptrs: Vec<*const u8> = chunks.iter().map(|c| c.0.as_ptr()).collect();
+        (chunks, ptrs, bytes.len() as u16)
+    }
+
+    fn get_chunked_score(needle: &str, haystack: &str) -> u16 {
+        let mut matcher = SmithWatermanMatcher::new(needle.as_bytes(), &Scoring::default());
+        let (_chunks, ptrs, byte_len) = make_aligned_chunks(haystack);
+        matcher.score_haystack_chunked(&ptrs, byte_len)
+    }
+
+    #[test]
+    fn test_chunked_parity_basic() {
+        // Single chunk paths (< 16 bytes)
+        for (needle, haystack) in [
+            ("b", "abc"),
+            ("a", "abc"),
+            ("abc", "abc"),
+            ("a", "a"),
+            ("b", "a-b"),
+            ("a", "-a--bc"),
+        ] {
+            let contiguous = get_score(needle, haystack);
+            let chunked = get_chunked_score(needle, haystack);
+            assert_eq!(
+                contiguous, chunked,
+                "parity failed: needle={needle:?} haystack={haystack:?} contiguous={contiguous} chunked={chunked}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_chunked_parity_cross_boundary() {
+        // Paths that span multiple chunks (> 16 bytes)
+        let cases = [
+            ("Button", "src/components/Button.tsx"),
+            ("datepckr", "src/components/ui/DatePicker.tsx"),
+            ("main", "very/deeply/nested/directory/main.rs"),
+            ("ents/But", "src/components/Button.tsx"),
+            ("test", "Utooooeoooosoooot"),
+            ("D", "forDist"),
+            ("swap", "swap(test)"),
+        ];
+
+        for (needle, haystack) in cases {
+            let mut m1 = SmithWatermanMatcher::new(needle.as_bytes(), &Scoring::default());
+            let contiguous = m1.score_haystack(haystack.as_bytes());
+
+            let mut m2 = SmithWatermanMatcher::new(needle.as_bytes(), &Scoring::default());
+            let (_chunks, ptrs, byte_len) = make_aligned_chunks(haystack);
+            let chunked = m2.score_haystack_chunked(&ptrs, byte_len);
+
+            assert_eq!(
+                contiguous, chunked,
+                "cross-boundary parity: needle={needle:?} haystack={haystack:?} contiguous={contiguous} chunked={chunked}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_chunked_parity_exactly_16_bytes() {
+        let haystack = "0123456789abcdef"; // exactly 16 bytes
+        assert_eq!(haystack.len(), 16);
+        let mut m1 = SmithWatermanMatcher::new(b"9a", &Scoring::default());
+        let contiguous = m1.score_haystack(haystack.as_bytes());
+        let mut m2 = SmithWatermanMatcher::new(b"9a", &Scoring::default());
+        let (_c, ptrs, bl) = make_aligned_chunks(haystack);
+        let chunked = m2.score_haystack_chunked(&ptrs, bl);
+        assert_eq!(contiguous, chunked);
+    }
+
+    #[test]
+    fn test_chunked_parity_17_bytes() {
+        let haystack = "0123456789abcdefX"; // 17 bytes = 2 chunks
+        assert_eq!(haystack.len(), 17);
+        let mut m1 = SmithWatermanMatcher::new(b"fX", &Scoring::default());
+        let contiguous = m1.score_haystack(haystack.as_bytes());
+        let mut m2 = SmithWatermanMatcher::new(b"fX", &Scoring::default());
+        let (_c, ptrs, bl) = make_aligned_chunks(haystack);
+        let chunked = m2.score_haystack_chunked(&ptrs, bl);
+        assert_eq!(contiguous, chunked);
+    }
+
+    #[test]
+    fn test_chunked_empty() {
+        let mut matcher = SmithWatermanMatcher::new(b"foo", &Scoring::default());
+        let score = matcher.score_haystack_chunked(&[], 0);
+        assert_eq!(score, 0);
     }
 }

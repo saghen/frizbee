@@ -1,3 +1,7 @@
+/// SIMD column width in bytes. All backends (NEON, SSE, AVX2, scalar) process
+/// the haystack in chunks of this size. This is the width of a `Vector128`.
+pub const SIMD_CHUNK_BYTES: usize = 16;
+
 pub const MATCH_SCORE: u16 = 12; // Score for a match
 pub const MISMATCH_PENALTY: u16 = 6; // Penalty for a mismatch (substitution)
 pub const GAP_OPEN_PENALTY: u16 = 5; // Penalty for opening a gap (deletion/insertion)
