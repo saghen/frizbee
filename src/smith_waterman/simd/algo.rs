@@ -456,6 +456,7 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
     }
 
     #[cfg(feature = "match_end_col")]
+    #[inline(always)]
     pub fn match_haystack_chunked_with_end_col(
         &mut self,
         chunk_ptrs: &[*const u8],
