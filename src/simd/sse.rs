@@ -43,12 +43,6 @@ impl SSEVector {
             _mm_cvtsi64_si128(val as i64)
         }
     }
-
-    #[inline(always)]
-    fn can_overread_8(ptr: *const u8) -> bool {
-        // Safe if not in last 7 bytes of a page
-        (ptr as usize & 0xFFF) <= (4096 - 8)
-    }
 }
 
 impl super::Vector for SSEVector {
@@ -193,11 +187,6 @@ impl super::Vector128 for SSEVector {
                 8 => _mm_loadl_epi64(data as *const __m128i),
                 16 => _mm_loadu_si128(data as *const __m128i),
 
-                1..=7 if Self::can_overread_8(data) => {
-                    let lo = _mm_loadl_epi64(data as *const __m128i);
-                    let mask = _mm_set_epi64x(0, (1i64 << (len * 8)) - 1);
-                    _mm_and_si128(lo, mask)
-                }
                 1..=7 => Self::load_partial_safe(data, len),
                 9..=15 => {
                     let lo = _mm_loadl_epi64(data as *const __m128i);
