@@ -33,9 +33,9 @@ impl SSEVector {
                 }
                 7 => {
                     let lo = (ptr as *const u32).read_unaligned() as u64;
-                    let hi = (ptr.add(4) as *const u32).read_unaligned() as u64;
-                    // Mask hi to only 3 bytes (24 bits)
-                    lo | ((hi & 0xFFFFFF) << 32)
+                    let mid = (ptr.add(4) as *const u16).read_unaligned() as u64;
+                    let hi = *ptr.add(6) as u64;
+                    lo | (mid << 32) | (hi << 48)
                 }
                 _ => std::hint::unreachable_unchecked(),
             };
