@@ -33,19 +33,15 @@ impl NEONVector {
                 }
                 7 => {
                     let lo = (ptr as *const u32).read_unaligned() as u64;
-                    let hi = (ptr.add(4) as *const u32).read_unaligned() as u64;
-                    lo | ((hi & 0xFFFFFF) << 32)
+                    let mid = (ptr.add(4) as *const u16).read_unaligned() as u64;
+                    let hi = *ptr.add(6) as u64;
+                    lo | (mid << 32) | (hi << 48)
                 }
                 _ => std::hint::unreachable_unchecked(),
             };
 
             vcombine_u8(vreinterpret_u8_u64(vdup_n_u64(val)), vdup_n_u8(0))
         }
-    }
-
-    #[inline(always)]
-    fn can_overread_8(ptr: *const u8) -> bool {
-        (ptr as usize & 0xFFF) <= (4096 - 8)
     }
 }
 
@@ -189,23 +185,6 @@ impl super::Vector128 for NEONVector {
                 }
                 16 => vld1q_u8(data),
 
-                1..=7 if Self::can_overread_8(data) => {
-                    let lo = vld1_u8(data);
-                    // Create mask: bytes 0..len are 0xFF, rest are 0x00
-                    let mask_vals: [u8; 8] = [
-                        if 0 < len { 0xFF } else { 0 },
-                        if 1 < len { 0xFF } else { 0 },
-                        if 2 < len { 0xFF } else { 0 },
-                        if 3 < len { 0xFF } else { 0 },
-                        if 4 < len { 0xFF } else { 0 },
-                        if 5 < len { 0xFF } else { 0 },
-                        if 6 < len { 0xFF } else { 0 },
-                        if 7 < len { 0xFF } else { 0 },
-                    ];
-                    let mask = vld1_u8(mask_vals.as_ptr());
-                    let masked = vand_u8(lo, mask);
-                    vcombine_u8(masked, vdup_n_u8(0))
-                }
                 1..=7 => Self::load_partial_safe(data, len),
                 9..=15 => {
                     let lo = vld1_u8(data);
