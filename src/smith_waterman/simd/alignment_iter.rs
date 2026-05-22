@@ -87,6 +87,14 @@ impl<'a> AlignmentPathIter<'a> {
         haystack_chunks: usize,
         score: u16,
     ) -> usize {
+        // No haystack data: only the always-zero initial column exists, so the
+        // smith-waterman matrix's "final row" has no real scores to find. The
+        // iterator's `col_idx < 16` early-out at next() handles this cleanly
+        // without yielding any positions. Closes #64 (empty-haystack repro)
+        // and the empty-haystack class of saghen/blink.cmp#2499.
+        if haystack_chunks <= 1 {
+            return 0;
+        }
         for chunk_idx in 1..haystack_chunks {
             let chunk = &score_matrix.get(needle_len, chunk_idx);
             let idx = unsafe { chunk.idx_u16(score) };

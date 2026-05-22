@@ -484,4 +484,46 @@ mod tests {
         assert_eq!(get_indices("ac", "________________abc"), Some(vec![18, 16]));
         assert_eq!(get_indices("foo", "Uf"), Some(vec![1]));
     }
+
+    /// Regression test for the panic at `alignment_iter.rs:97`
+    /// ("could not find max score in score matrix final row").
+    ///
+    /// An empty haystack reaches the smith-waterman matcher through two paths:
+    ///
+    /// - `match_haystack` with `max_typos = Some(_)`, which calls
+    ///   `has_alignment_path` → `AlignmentPathIter::new` → `get_col_idx`.
+    /// - `match_haystack_indices` (always uses `iter_alignment_path`).
+    ///
+    /// In both cases `haystack_chunks` is 1 (only the always-zero initial
+    /// column), so the chunk-search loop in `get_col_idx` ran zero iterations
+    /// and fell through to the panic. Reported in saghen/frizbee#64 and
+    /// surfaced in saghen/blink.cmp#2499 (where blink.cmp passes empty
+    /// completion candidates from cmdline mode).
+    #[test]
+    fn test_score_empty_haystack_with_typos_does_not_panic() {
+        let mut matcher = SmithWatermanMatcher::new(b"h", &Scoring::default());
+        // Pre-fix: this panicked at alignment_iter.rs because get_col_idx had
+        // no chunks to scan. Post-fix: empty haystack with enough typo budget
+        // to skip every needle char returns Some(0).
+        assert_eq!(matcher.match_haystack(b"", Some(1)), Some(0));
+        // max_typos < needle_len correctly rejects the match (no panic).
+        assert_eq!(matcher.match_haystack(b"", Some(0)), None);
+
+        let mut matcher2 = SmithWatermanMatcher::new(b"ab", &Scoring::default());
+        assert_eq!(matcher2.match_haystack(b"", Some(2)), Some(0));
+        assert_eq!(matcher2.match_haystack(b"", Some(1)), None);
+        assert_eq!(matcher2.match_haystack(b"", None), Some(0));
+    }
+
+    #[test]
+    fn test_indices_empty_haystack_does_not_panic() {
+        let mut matcher = SmithWatermanMatcher::new(b"h", &Scoring::default());
+        // match_haystack_indices always walks the alignment iterator, so this
+        // panicked pre-fix regardless of max_typos. Post-fix: returns the
+        // (score, indices) pair with an empty index list.
+        let result = matcher.match_haystack_indices(b"", 0, Some(1));
+        assert_eq!(result, Some((0, vec![])));
+        let result_no_typos = matcher.match_haystack_indices(b"", 0, None);
+        assert_eq!(result_no_typos, Some((0, vec![])));
+    }
 }
