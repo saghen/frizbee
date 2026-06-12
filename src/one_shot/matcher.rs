@@ -184,7 +184,7 @@ impl Matcher {
     }
 
     /// Returns an unsorted iterator over the matches in the haystacks.
-    /// The needle must not be empty
+    /// The needle must not be empty.
     ///
     /// ```rust
     /// use frizbee::{Config, Match, Matcher};
@@ -218,7 +218,7 @@ impl Matcher {
     }
 
     /// Returns an unsorted iterator over the matches in the haystacks with indices.
-    /// The needle must not be empty
+    /// The needle must not be empty.
     ///
     /// ```rust
     /// use frizbee::{Config, Matcher, MatchIndices};
@@ -382,8 +382,10 @@ impl Matcher {
     pub fn guard_against_score_overflow(&self) {
         let scoring = &self.config.scoring;
         let max_per_char_score = scoring.match_score
-            + scoring.capitalization_bonus / 2
-            + scoring.delimiter_bonus / 2
+            + scoring
+                .capitalization_bonus
+                .max(scoring.delimiter_bonus)
+                .saturating_sub(scoring.gap_open_penalty)
             + scoring.matching_case_bonus;
         let max_needle_len =
             (u16::MAX - scoring.prefix_bonus - scoring.exact_match_bonus) / max_per_char_score;
@@ -399,7 +401,7 @@ impl Matcher {
     pub fn guard_against_haystack_overflow(haystack_len: usize, haystack_index_offset: u32) {
         assert!(
             (haystack_len.saturating_add(haystack_index_offset as usize)) <= (u32::MAX as usize),
-            "too many haystack which will overflow the u32 index: {} > {} (index offset: {})",
+            "too many items in haystack, will overflow the u32 index: {} > {} (index offset: {})",
             haystack_len,
             u32::MAX,
             haystack_index_offset

@@ -41,10 +41,11 @@ impl PrefilterAVX {
             .is_some_and(|info| info.has_avx2())
     }
 
-    /// Checks if the needle is wholly contained in the haystack, ignoring the exact order of the
-    /// bytes. For example, if the needle is "test", the haystack "tset" will return true. However,
-    /// the order does matter across 16 byte boundaries. The needle chars must include both the
-    /// uppercase and lowercase variants of the character.
+    /// Checks if the needle is wholly contained in the haystack.
+    ///
+    /// Returns `(matched, start_pos, end_pos)` where `end_pos` is the
+    /// exclusive byte offset just past the rightmost occurrence of the final
+    /// needle char in `haystack[start_pos..end_pos]`.
     ///
     /// # Safety
     /// The caller must ensure that AVX2 is available.

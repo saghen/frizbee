@@ -102,7 +102,7 @@ impl Prefilter {
     pub fn verifies_match(&self, max_typos: u16) -> bool {
         match (self, max_typos) {
             #[cfg(target_arch = "x86_64")]
-            (Prefilter::AVX512(_), 0) => true,
+            (Prefilter::AVX512(_), _) => true,
             #[cfg(target_arch = "x86_64")]
             (Prefilter::AVX(_), 0) => true,
             _ => false,
@@ -134,10 +134,13 @@ impl Prefilter {
             #[cfg(target_arch = "x86_64")]
             (Prefilter::AVX512(p), 0) => unsafe { p.match_haystack(haystack) },
             #[cfg(target_arch = "x86_64")]
-            (Prefilter::AVX512(p), _) => {
-                let (m, s) = unsafe { p.match_haystack_typos(haystack, max_typos) };
-                (m, s, len)
-            }
+            (Prefilter::AVX512(p), 1) => unsafe { p.match_haystack_1_typo(haystack) },
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::AVX512(p), 2) => unsafe { p.match_haystack_typos::<2>(haystack) },
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::AVX512(p), 3) => unsafe { p.match_haystack_typos::<3>(haystack) },
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::AVX512(_), _) => panic!("max_typos >= 8 not supported"),
             #[cfg(target_arch = "x86_64")]
             (Prefilter::AVX(p), 0) => unsafe { p.match_haystack(haystack) },
             #[cfg(target_arch = "x86_64")]
@@ -428,11 +431,17 @@ mod tests {
             if PrefilterAVX512::is_available() {
                 let avx512_result = unsafe {
                     let prefilter = PrefilterAVX512::new(needle.as_bytes());
-                    if max_typos > 0 {
-                        prefilter.match_haystack_typos(haystack, max_typos).0
-                    } else {
-                        prefilter.match_haystack(haystack).0
+                    match max_typos {
+                        0 => prefilter.match_haystack(haystack),
+                        1 => prefilter.match_haystack_1_typo(haystack),
+                        2 => prefilter.match_haystack_typos::<2>(haystack),
+                        3 => prefilter.match_haystack_typos::<3>(haystack),
+                        4 => prefilter.match_haystack_typos::<4>(haystack),
+                        5 => prefilter.match_haystack_typos::<5>(haystack),
+                        6 => prefilter.match_haystack_typos::<6>(haystack),
+                        _ => todo!(),
                     }
+                    .0
                 };
                 assert_eq!(
                     avx512_result, scalar_result,
