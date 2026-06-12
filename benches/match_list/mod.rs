@@ -47,21 +47,6 @@ pub fn match_list_bench(c: &mut criterion::Criterion, name: &str, needle: &str, 
 
     // Sequential
     group.bench_with_input(
-        BenchmarkId::new("Nucleo", median_length),
-        haystack,
-        |b, haystack| {
-            let mut matcher = NucleoMatcher::new(NucleoConfig::DEFAULT);
-            let atom = Atom::new(
-                needle,
-                CaseMatching::Ignore,
-                Normalization::Never,
-                AtomKind::Fuzzy,
-                false,
-            );
-            b.iter(|| atom.match_list(black_box(haystack.iter()), &mut matcher))
-        },
-    );
-    group.bench_with_input(
         BenchmarkId::new("Frizbee", median_length),
         haystack,
         |b, haystack| b.iter(|| match_list(needle, haystack, Some(0))),
@@ -90,6 +75,21 @@ pub fn match_list_bench(c: &mut criterion::Criterion, name: &str, needle: &str, 
         BenchmarkId::new("3 Typos", median_length),
         haystack,
         |b, haystack| b.iter(|| match_list(needle, haystack, Some(3))),
+    );
+    group.bench_with_input(
+        BenchmarkId::new("Nucleo", median_length),
+        haystack,
+        |b, haystack| {
+            let mut matcher = NucleoMatcher::new(NucleoConfig::DEFAULT);
+            let atom = Atom::new(
+                needle,
+                CaseMatching::Ignore,
+                Normalization::Never,
+                AtomKind::Fuzzy,
+                false,
+            );
+            b.iter(|| atom.match_list(black_box(haystack.iter()), &mut matcher))
+        },
     );
 }
 
