@@ -244,36 +244,4 @@ impl<B: Backend> SmithWatermanMatcherInternal<B> {
         }
         match_end_col
     }
-
-    #[cfg(test)]
-    pub fn print_score_matrix(&self, haystack: &str) {
-        let haystack_chunks = haystack.len().div_ceil(B::LANES) + 1;
-        let stride = self.score_matrix.haystack_chunks;
-        let bytes = self.score_matrix.as_byte_slice();
-        let lanes = B::LANES;
-        let lane_bytes = B::LANE_BYTES;
-
-        print!("     ");
-        for char in haystack.chars() {
-            print!("{:<4} ", char);
-        }
-        println!();
-
-        for row in 1..=self.needle.len() {
-            print!("{:<4} ", self.needle.chars().nth(row - 1).unwrap_or(' '));
-            for chunk in 1..haystack_chunks {
-                for lane in 0..lanes {
-                    let offset = (row * stride * lanes + chunk * lanes + lane) * lane_bytes;
-                    let value: u16 = if lane_bytes == 2 {
-                        u16::from_ne_bytes([bytes[offset], bytes[offset + 1]])
-                    } else {
-                        bytes[offset] as u16
-                    };
-                    print!("{:<4} ", value);
-                }
-            }
-            println!();
-        }
-        println!();
-    }
 }

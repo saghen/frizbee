@@ -57,48 +57,48 @@ pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
     }
 }
 
-macro_rules! impl_unsafe_kernel {
+macro_rules! impl_kernel {
     ($ty:ty) => {
         impl Kernel for $ty {
-            #[inline]
+            #[inline(always)]
             fn new(needle: &[u8]) -> Self {
-                unsafe { <$ty>::new(needle) }
+                <$ty>::new(needle)
             }
 
             #[inline(always)]
             fn match_0(&mut self, haystack: &[u8]) -> Window {
-                unsafe { <$ty>::match_haystack(self, haystack) }
+                <$ty>::match_haystack(self, haystack)
             }
 
             #[inline(always)]
             fn match_1(&mut self, haystack: &[u8]) -> Window {
-                unsafe { <$ty>::match_haystack_1_typo(self, haystack) }
+                <$ty>::match_haystack_1_typo(self, haystack)
             }
 
             #[inline(always)]
             fn match_2(&mut self, haystack: &[u8]) -> Window {
-                unsafe { <$ty>::match_haystack_2_typos(self, haystack) }
+                <$ty>::match_haystack_2_typos(self, haystack)
             }
 
             #[inline(always)]
             fn match_many(&mut self, haystack: &[u8], max_typos: u16) -> Window {
-                unsafe { <$ty>::match_haystack_typos(self, haystack, max_typos) }
+                <$ty>::match_haystack_typos(self, haystack, max_typos)
             }
         }
     };
 }
 
 #[cfg(target_arch = "x86_64")]
-impl_unsafe_kernel!(PrefilterAVX512);
+impl_kernel!(PrefilterAVX512);
 #[cfg(target_arch = "x86_64")]
-impl_unsafe_kernel!(PrefilterAVX);
+impl_kernel!(PrefilterAVX);
 #[cfg(target_arch = "x86_64")]
-impl_unsafe_kernel!(PrefilterSSE);
+impl_kernel!(PrefilterSSE);
 #[cfg(target_arch = "aarch64")]
-impl_unsafe_kernel!(PrefilterNEON);
+impl_kernel!(PrefilterNEON);
 
 impl Kernel for PrefilterScalar {
-    #[inline]
+    #[inline(always)]
     fn new(needle: &[u8]) -> Self {
         PrefilterScalar::new(needle)
     }
@@ -225,40 +225,26 @@ mod tests {
         let scalar_result =
             kernel_result::<PrefilterScalar>(needle.as_bytes(), haystack, max_typos);
 
-        let selected = selected_result(needle.as_bytes(), haystack, max_typos);
-        assert_same_result(
-            selected,
-            scalar_result,
-            &format!(
-                "selected backend result mismatch for needle={needle:?} haystack={:?} max_typos={max_typos}",
-                String::from_utf8_lossy(haystack)
-            ),
-        );
-
         #[cfg(target_arch = "x86_64")]
         {
             use crate::prefilter::backend::{PrefilterAVX, PrefilterAVX512, PrefilterSSE};
 
             if PrefilterAVX::is_available() {
-                let avx_result = unsafe {
-                    let mut prefilter = PrefilterAVX::new(needle.as_bytes());
-                    if max_typos == 0 {
-                        prefilter.match_haystack(haystack)
-                    } else {
-                        prefilter.match_haystack_typos(haystack, max_typos)
-                    }
+                let mut prefilter = PrefilterAVX::new(needle.as_bytes());
+                let avx_result = if max_typos == 0 {
+                    prefilter.match_haystack(haystack)
+                } else {
+                    prefilter.match_haystack_typos(haystack, max_typos)
                 };
                 assert_same_result(avx_result, scalar_result, "AVX2 mismatch");
             }
 
             if PrefilterSSE::is_available() {
-                let sse_result = unsafe {
-                    let mut prefilter = PrefilterSSE::new(needle.as_bytes());
-                    if max_typos == 0 {
-                        prefilter.match_haystack(haystack)
-                    } else {
-                        prefilter.match_haystack_typos(haystack, max_typos)
-                    }
+                let mut prefilter = PrefilterSSE::new(needle.as_bytes());
+                let sse_result = if max_typos == 0 {
+                    prefilter.match_haystack(haystack)
+                } else {
+                    prefilter.match_haystack_typos(haystack, max_typos)
                 };
                 assert_same_result(sse_result, scalar_result, "SSE mismatch");
             }
@@ -272,47 +258,18 @@ mod tests {
 
         #[cfg(target_arch = "aarch64")]
         {
-            let neon_result = unsafe {
-                use crate::prefilter::backend::PrefilterNEON;
-                let mut prefilter = PrefilterNEON::new(needle.as_bytes());
-                if max_typos == 0 {
-                    prefilter.match_haystack(haystack)
-                } else {
-                    prefilter.match_haystack_typos(haystack, max_typos)
-                }
+            use crate::prefilter::backend::PrefilterNEON;
+
+            let mut prefilter = PrefilterNEON::new(needle.as_bytes());
+            let neon_result = if max_typos == 0 {
+                prefilter.match_haystack(haystack)
+            } else {
+                prefilter.match_haystack_typos(haystack, max_typos)
             };
             assert_same_result(neon_result, scalar_result, "NEON mismatch");
         }
 
         scalar_result
-    }
-
-    fn selected_result(needle: &[u8], haystack: &[u8], max_typos: u16) -> Window {
-        #[cfg(target_arch = "x86_64")]
-        {
-            use crate::prefilter::backend::{PrefilterAVX, PrefilterAVX512, PrefilterSSE};
-
-            if PrefilterAVX512::is_available() {
-                return kernel_result::<PrefilterAVX512>(needle, haystack, max_typos);
-            }
-            if PrefilterAVX::is_available() {
-                return kernel_result::<PrefilterAVX>(needle, haystack, max_typos);
-            }
-            if PrefilterSSE::is_available() {
-                return kernel_result::<PrefilterSSE>(needle, haystack, max_typos);
-            }
-        }
-
-        #[cfg(target_arch = "aarch64")]
-        {
-            use crate::prefilter::backend::PrefilterNEON;
-
-            if PrefilterNEON::is_available() {
-                return kernel_result::<PrefilterNEON>(needle, haystack, max_typos);
-            }
-        }
-
-        kernel_result::<PrefilterScalar>(needle, haystack, max_typos)
     }
 
     fn kernel_result<P: Kernel>(needle: &[u8], haystack: &[u8], max_typos: u16) -> Window {

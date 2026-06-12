@@ -161,6 +161,152 @@ pub struct BackendMatcher<B: MatcherBackend> {
     core: MatcherCore<B>,
 }
 
+macro_rules! impl_backend_matcher {
+    ($backend:ty $(, target_feature = $feature:literal)?) => {
+        impl BackendMatcher<$backend> {
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn new(needle: &str, config: &Config) -> Self {
+                Self {
+                    core: MatcherCore::new(needle, config),
+                }
+            }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn match_list<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<Match> {
+                self.core.match_list(haystacks)
+            }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn match_list_indices<S: AsRef<str>>(
+                &mut self,
+                haystacks: &[S],
+            ) -> Vec<MatchIndices> {
+                self.core.match_list_indices(haystacks)
+            }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn match_list_into<S: AsRef<str>>(
+                &mut self,
+                haystacks: &[S],
+                haystack_index_offset: u32,
+                matches: &mut Vec<Match>,
+            ) {
+                self.core
+                    .match_list_into(haystacks, haystack_index_offset, matches)
+            }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn match_list_indices_into<S: AsRef<str>>(
+                &mut self,
+                haystacks: &[S],
+                haystack_index_offset: u32,
+                matches: &mut Vec<MatchIndices>,
+            ) {
+                self.core
+                    .match_list_indices_into(haystacks, haystack_index_offset, matches)
+            }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn match_iter<'a, S: AsRef<str> + 'a>(
+                &'a mut self,
+                haystacks: &'a [S],
+            ) -> impl Iterator<Item = Match> + 'a {
+                self.core.match_iter(haystacks)
+            }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn match_iter_indices<'a, S: AsRef<str> + 'a>(
+                &'a mut self,
+                haystacks: &'a [S],
+            ) -> impl Iterator<Item = MatchIndices> + 'a {
+                self.core.match_iter_indices(haystacks)
+            }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn smith_waterman_one(
+                &mut self,
+                haystack: &[u8],
+                index: u32,
+                include_exact: bool,
+            ) -> Match {
+                self.core.smith_waterman_one(haystack, index, include_exact)
+            }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn smith_waterman_indices_one(
+                &mut self,
+                haystack: &[u8],
+                skipped_chars: usize,
+                index: u32,
+                include_exact: bool,
+            ) -> Option<MatchIndices> {
+                self.core.smith_waterman_indices_one(
+                    haystack,
+                    skipped_chars,
+                    index,
+                    include_exact,
+                )
+            }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn prefilter_iter<'a, S: AsRef<str> + 'a>(
+                &self,
+                haystacks: &'a [S],
+            ) -> impl Iterator<Item = (usize, &'a [u8], usize, bool)> + use<'a, S> {
+                self.core.prefilter_iter(haystacks)
+            }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
+                self.core.score_haystack(haystack)
+            }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn iter_alignment_path(
+                &self,
+                skipped_chars: usize,
+                score: u16,
+            ) -> AlignmentPathIter<'_> {
+                self.core.iter_alignment_path(skipped_chars, score)
+            }
+        }
+    };
+}
+
+#[cfg(target_arch = "x86_64")]
+impl_backend_matcher!(
+    Avx512U8,
+    target_feature = "avx512f,avx512bw,avx512vbmi,bmi1,bmi2"
+);
+#[cfg(target_arch = "x86_64")]
+impl_backend_matcher!(Avx512, target_feature = "avx512f,avx512bw,bmi1,bmi2");
+#[cfg(target_arch = "x86_64")]
+impl_backend_matcher!(Avx2U8, target_feature = "avx2");
+#[cfg(target_arch = "x86_64")]
+impl_backend_matcher!(Avx2, target_feature = "avx2");
+#[cfg(target_arch = "x86_64")]
+impl_backend_matcher!(SseU8, target_feature = "sse2,ssse3,sse4.1");
+#[cfg(target_arch = "x86_64")]
+impl_backend_matcher!(Sse, target_feature = "sse2,ssse3,sse4.1");
+#[cfg(target_arch = "aarch64")]
+impl_backend_matcher!(NeonU8, target_feature = "neon");
+#[cfg(target_arch = "aarch64")]
+impl_backend_matcher!(Neon, target_feature = "neon");
+impl_backend_matcher!(ScalarU8);
+impl_backend_matcher!(Scalar);
+
 #[derive(Debug, Clone)]
 pub enum Matcher {
     #[cfg(target_arch = "x86_64")]
@@ -208,16 +354,8 @@ macro_rules! dispatch {
     };
 }
 
-#[allow(private_bounds)]
-impl<B: MatcherBackend> BackendMatcher<B> {
-    fn new(needle: &str, config: &Config) -> Self {
-        Self {
-            core: MatcherCore::new(needle, config),
-        }
-    }
-}
-
 impl<B: MatcherBackend> MatcherCore<B> {
+    #[inline(always)]
     fn new(needle: &str, config: &Config) -> Self {
         let matcher = Self {
             needle: needle.to_string(),
@@ -240,6 +378,7 @@ impl<B: MatcherBackend> MatcherCore<B> {
         &self.config
     }
 
+    #[inline(always)]
     fn match_list<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<Match> {
         Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
 
@@ -265,6 +404,7 @@ impl<B: MatcherBackend> MatcherCore<B> {
         matches
     }
 
+    #[inline(always)]
     fn match_list_indices<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<MatchIndices> {
         Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
 
@@ -282,6 +422,7 @@ impl<B: MatcherBackend> MatcherCore<B> {
         matches
     }
 
+    #[inline(always)]
     fn match_list_into<S: AsRef<str>>(
         &mut self,
         haystacks: &[S],
@@ -439,6 +580,7 @@ impl<B: MatcherBackend> MatcherCore<B> {
         }
     }
 
+    #[inline(always)]
     fn match_list_indices_into<S: AsRef<str>>(
         &mut self,
         haystacks: &[S],
@@ -475,6 +617,7 @@ impl<B: MatcherBackend> MatcherCore<B> {
         }
     }
 
+    #[inline(always)]
     fn match_iter<'a, S: AsRef<str> + 'a>(
         &'a mut self,
         haystacks: &'a [S],
@@ -487,6 +630,7 @@ impl<B: MatcherBackend> MatcherCore<B> {
             })
     }
 
+    #[inline(always)]
     fn match_iter_indices<'a, S: AsRef<str> + 'a>(
         &'a mut self,
         haystacks: &'a [S],
@@ -550,6 +694,7 @@ impl<B: MatcherBackend> MatcherCore<B> {
         })
     }
 
+    #[inline(always)]
     fn prefilter_iter<'a, S: AsRef<str> + 'a>(
         &self,
         haystacks: &'a [S],
@@ -641,23 +786,25 @@ impl Matcher {
         {
             if use_u8 {
                 if Avx512U8::is_available(needle_bytes, config) {
-                    return Self::AVX512U8(BackendMatcher::new(needle, config));
+                    return Self::AVX512U8(unsafe {
+                        BackendMatcher::<Avx512U8>::new(needle, config)
+                    });
                 }
                 if Avx2U8::is_available(needle_bytes, config) {
-                    return Self::AVX2U8(BackendMatcher::new(needle, config));
+                    return Self::AVX2U8(unsafe { BackendMatcher::<Avx2U8>::new(needle, config) });
                 }
                 if SseU8::is_available(needle_bytes, config) {
-                    return Self::SSEU8(BackendMatcher::new(needle, config));
+                    return Self::SSEU8(unsafe { BackendMatcher::<SseU8>::new(needle, config) });
                 }
             } else {
                 if Avx512::is_available(needle_bytes, config) {
-                    return Self::AVX512(BackendMatcher::new(needle, config));
+                    return Self::AVX512(unsafe { BackendMatcher::<Avx512>::new(needle, config) });
                 }
                 if Avx2::is_available(needle_bytes, config) {
-                    return Self::AVX2(BackendMatcher::new(needle, config));
+                    return Self::AVX2(unsafe { BackendMatcher::<Avx2>::new(needle, config) });
                 }
                 if Sse::is_available(needle_bytes, config) {
-                    return Self::SSE(BackendMatcher::new(needle, config));
+                    return Self::SSE(unsafe { BackendMatcher::<Sse>::new(needle, config) });
                 }
             }
         }
@@ -666,17 +813,17 @@ impl Matcher {
         {
             if use_u8 {
                 if NeonU8::is_available(needle_bytes, config) {
-                    return Self::NEONU8(BackendMatcher::new(needle, config));
+                    return Self::NEONU8(unsafe { BackendMatcher::<NeonU8>::new(needle, config) });
                 }
             } else if Neon::is_available(needle_bytes, config) {
-                return Self::NEON(BackendMatcher::new(needle, config));
+                return Self::NEON(unsafe { BackendMatcher::<Neon>::new(needle, config) });
             }
         }
 
         if use_u8 {
-            Self::ScalarU8(BackendMatcher::new(needle, config))
+            Self::ScalarU8(unsafe { BackendMatcher::<ScalarU8>::new(needle, config) })
         } else {
-            Self::Scalar(BackendMatcher::new(needle, config))
+            Self::Scalar(unsafe { BackendMatcher::<Scalar>::new(needle, config) })
         }
     }
 
@@ -701,11 +848,11 @@ impl Matcher {
     }
 
     pub fn match_list<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<Match> {
-        dispatch!(self, matcher => matcher.core.match_list(haystacks))
+        unsafe { dispatch!(self, matcher => matcher.match_list(haystacks)) }
     }
 
     pub fn match_list_indices<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<MatchIndices> {
-        dispatch!(self, matcher => matcher.core.match_list_indices(haystacks))
+        unsafe { dispatch!(self, matcher => matcher.match_list_indices(haystacks)) }
     }
 
     pub fn match_list_into<S: AsRef<str>>(
@@ -714,11 +861,11 @@ impl Matcher {
         haystack_index_offset: u32,
         matches: &mut Vec<Match>,
     ) {
-        dispatch!(self, matcher => {
-            matcher
-                .core
-                .match_list_into(haystacks, haystack_index_offset, matches)
-        })
+        unsafe {
+            dispatch!(self, matcher => {
+                matcher.match_list_into(haystacks, haystack_index_offset, matches)
+            })
+        }
     }
 
     pub fn match_list_indices_into<S: AsRef<str>>(
@@ -727,11 +874,11 @@ impl Matcher {
         haystack_index_offset: u32,
         matches: &mut Vec<MatchIndices>,
     ) {
-        dispatch!(self, matcher => {
-            matcher
-                .core
-                .match_list_indices_into(haystacks, haystack_index_offset, matches)
-        })
+        unsafe {
+            dispatch!(self, matcher => {
+                matcher.match_list_indices_into(haystacks, haystack_index_offset, matches)
+            })
+        }
     }
 
     /// Returns an unsorted iterator over the matches in the haystacks.
@@ -740,7 +887,7 @@ impl Matcher {
         &'a mut self,
         haystacks: &'a [S],
     ) -> Box<dyn Iterator<Item = Match> + 'a> {
-        dispatch!(self, matcher => Box::new(matcher.core.match_iter(haystacks)))
+        unsafe { dispatch!(self, matcher => Box::new(matcher.match_iter(haystacks))) }
     }
 
     /// Returns an unsorted iterator over the matches in the haystacks with indices.
@@ -749,7 +896,11 @@ impl Matcher {
         &'a mut self,
         haystacks: &'a [S],
     ) -> Box<dyn Iterator<Item = MatchIndices> + 'a> {
-        dispatch!(self, matcher => Box::new(matcher.core.match_iter_indices(haystacks)))
+        unsafe {
+            dispatch!(self, matcher => {
+                Box::new(matcher.match_iter_indices(haystacks))
+            })
+        }
     }
 
     #[inline(always)]
@@ -759,11 +910,11 @@ impl Matcher {
         index: u32,
         include_exact: bool,
     ) -> Option<Match> {
-        Some(dispatch!(self, matcher => {
-            matcher
-                .core
-                .smith_waterman_one(haystack, index, include_exact)
-        }))
+        Some(unsafe {
+            dispatch!(self, matcher => {
+                matcher.smith_waterman_one(haystack, index, include_exact)
+            })
+        })
     }
 
     #[inline(always)]
@@ -774,14 +925,11 @@ impl Matcher {
         index: u32,
         include_exact: bool,
     ) -> Option<MatchIndices> {
-        dispatch!(self, matcher => {
-            matcher.core.smith_waterman_indices_one(
-                haystack,
-                skipped_chars,
-                index,
-                include_exact,
-            )
-        })
+        unsafe {
+            dispatch!(self, matcher => {
+                matcher.smith_waterman_indices_one(haystack, skipped_chars, index, include_exact)
+            })
+        }
     }
 
     /// Yields `(index, slice, skipped_chars, is_full_haystack)` for each haystack
@@ -790,17 +938,17 @@ impl Matcher {
         &self,
         haystacks: &'a [S],
     ) -> Box<dyn Iterator<Item = (usize, &'a [u8], usize, bool)> + 'a> {
-        dispatch!(self, matcher => Box::new(matcher.core.prefilter_iter(haystacks)))
+        unsafe { dispatch!(self, matcher => Box::new(matcher.prefilter_iter(haystacks))) }
     }
 
     #[inline(always)]
     pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
-        dispatch!(self, matcher => matcher.core.score_haystack(haystack))
+        unsafe { dispatch!(self, matcher => matcher.score_haystack(haystack)) }
     }
 
     #[inline(always)]
     pub fn iter_alignment_path(&self, skipped_chars: usize, score: u16) -> AlignmentPathIter<'_> {
-        dispatch!(self, matcher => matcher.core.iter_alignment_path(skipped_chars, score))
+        unsafe { dispatch!(self, matcher => matcher.iter_alignment_path(skipped_chars, score)) }
     }
 
     #[inline(always)]
@@ -907,6 +1055,34 @@ mod tests {
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].index, 0);
         assert!(matches[0].exact);
+    }
+
+    #[test]
+    fn u8_path_selected_for_short_needle() {
+        let matcher = Matcher::new("abc", &Config::default());
+        let is_u8 = match matcher {
+            #[cfg(target_arch = "x86_64")]
+            Matcher::AVX512U8(_) | Matcher::AVX2U8(_) | Matcher::SSEU8(_) => true,
+            #[cfg(target_arch = "aarch64")]
+            Matcher::NEONU8(_) => true,
+            Matcher::ScalarU8(_) => true,
+            _ => false,
+        };
+        assert!(is_u8);
+    }
+
+    #[test]
+    fn u16_path_selected_for_long_needle() {
+        let matcher = Matcher::new("abcdefghijklmnopqrst", &Config::default());
+        let is_u16 = match matcher {
+            #[cfg(target_arch = "x86_64")]
+            Matcher::AVX512(_) | Matcher::AVX2(_) | Matcher::SSE(_) => true,
+            #[cfg(target_arch = "aarch64")]
+            Matcher::NEON(_) => true,
+            Matcher::Scalar(_) => true,
+            _ => false,
+        };
+        assert!(is_u16);
     }
 
     #[test]
