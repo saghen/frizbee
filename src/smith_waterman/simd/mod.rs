@@ -136,10 +136,10 @@ impl SmithWatermanMatcher {
     pub fn match_haystack_indices(
         &mut self,
         haystack: &[u8],
-        skipped_chunks: usize,
+        skipped_chars: usize,
         max_typos: Option<u16>,
     ) -> Option<(u16, Vec<usize>)> {
-        dispatch!(self, m => m.match_haystack_indices(haystack, skipped_chunks, max_typos))
+        dispatch!(self, m => m.match_haystack_indices(haystack, skipped_chars, max_typos))
     }
 
     pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
@@ -154,11 +154,11 @@ impl SmithWatermanMatcher {
     #[allow(unused_unsafe)] // body is safe; `dispatch!` wraps uniformly.
     pub fn iter_alignment_path(
         &self,
-        skipped_chunks: usize,
+        skipped_chars: usize,
         score: u16,
         max_typos: Option<u16>,
     ) -> AlignmentPathIter<'_> {
-        dispatch!(self, m => m.0.iter_alignment_path(skipped_chunks, score, max_typos))
+        dispatch!(self, m => m.0.iter_alignment_path(skipped_chars, score, max_typos))
     }
 
     #[cfg(test)]
@@ -207,11 +207,11 @@ macro_rules! define_matcher {
             pub unsafe fn match_haystack_indices(
                 &mut self,
                 haystack: &[u8],
-                skipped_chunks: usize,
+                skipped_chars: usize,
                 max_typos: Option<u16>,
             ) -> Option<(u16, Vec<usize>)> {
                 self.0
-                    .match_haystack_indices(haystack, skipped_chunks, max_typos)
+                    .match_haystack_indices(haystack, skipped_chars, max_typos)
             }
 
             #[doc = concat!(
@@ -335,11 +335,11 @@ macro_rules! define_scalar_matcher {
             pub unsafe fn match_haystack_indices(
                 &mut self,
                 haystack: &[u8],
-                skipped_chunks: usize,
+                skipped_chars: usize,
                 max_typos: Option<u16>,
             ) -> Option<(u16, Vec<usize>)> {
                 self.0
-                    .match_haystack_indices(haystack, skipped_chunks, max_typos)
+                    .match_haystack_indices(haystack, skipped_chars, max_typos)
             }
 
             /// # Safety

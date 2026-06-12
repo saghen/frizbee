@@ -80,12 +80,12 @@
 //! let config = Config::default();
 //! let mut matcher = Matcher::new(needle, &config);
 //! let mut matches = matcher.prefilter_iter(&haystacks)
-//!     .filter_map(|(index, haystack, skipped_chunks)| {
+//!     .filter_map(|(index, haystack, skipped_chars)| {
 //!         let mut score = matcher
 //!             .smith_waterman
 //!             .score_haystack(haystack);
 //!
-//!         for alignment in matcher.iter_alignment_path(skipped_chunks, score) {
+//!         for alignment in matcher.iter_alignment_path(skipped_chars, score) {
 //!              // Return None if Alignment is None (max typos exceeded)
 //!              match alignment? {
 //!                 Alignment::Match((needle_idx, haystack_idx)) => {
@@ -96,7 +96,7 @@
 //!              }
 //!         }
 //!
-//!         let exact = skipped_chunks == 0 && needle.as_bytes() == haystack;
+//!         let exact = skipped_chars == 0 && needle.as_bytes() == haystack;
 //!         if exact {
 //!             score += config.scoring.exact_match_bonus;
 //!         }

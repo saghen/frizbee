@@ -108,18 +108,18 @@ impl Matcher {
                 continue;
             }
 
-            let (matched, skipped_chunks) = self.config.max_typos.map_or((true, 0), |max_typos| {
+            let (matched, skipped_chars) = self.config.max_typos.map_or((true, 0), |max_typos| {
                 self.prefilter.match_haystack(haystack, max_typos)
             });
             if !matched {
                 continue;
             }
 
-            let haystack = &haystack[skipped_chunks * 16..];
+            let haystack = &haystack[skipped_chars..];
             if let Some(match_) = self.smith_waterman_one(
                 haystack,
                 (index as u32) + haystack_index_offset,
-                skipped_chunks == 0,
+                skipped_chars == 0,
             ) {
                 matches.push(match_);
             }
@@ -154,19 +154,19 @@ impl Matcher {
                 continue;
             }
 
-            let (matched, skipped_chunks) = self.config.max_typos.map_or((true, 0), |max_typos| {
+            let (matched, skipped_chars) = self.config.max_typos.map_or((true, 0), |max_typos| {
                 self.prefilter.match_haystack(haystack, max_typos)
             });
             if !matched {
                 continue;
             }
 
-            let haystack = &haystack[skipped_chunks * 16..];
+            let haystack = &haystack[skipped_chars..];
             if let Some(match_) = self.smith_waterman_indices_one(
                 haystack,
-                skipped_chunks,
+                skipped_chars,
                 (index as u32) + haystack_index_offset,
-                skipped_chunks == 0,
+                skipped_chars == 0,
             ) {
                 matches.push(match_);
             }
@@ -201,8 +201,8 @@ impl Matcher {
         Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
 
         self.prefilter_iter(haystacks)
-            .filter_map(|(index, haystack, skipped_chunks)| {
-                self.smith_waterman_one(haystack, index as u32, skipped_chunks == 0)
+            .filter_map(|(index, haystack, skipped_chars)| {
+                self.smith_waterman_one(haystack, index as u32, skipped_chars == 0)
             })
     }
 
@@ -237,12 +237,12 @@ impl Matcher {
         Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
 
         self.prefilter_iter(haystacks)
-            .filter_map(|(index, haystack, skipped_chunks)| {
+            .filter_map(|(index, haystack, skipped_chars)| {
                 self.smith_waterman_indices_one(
                     haystack,
-                    skipped_chunks,
+                    skipped_chars,
                     index as u32,
-                    skipped_chunks == 0,
+                    skipped_chars == 0,
                 )
             })
     }
@@ -277,14 +277,14 @@ impl Matcher {
     pub fn smith_waterman_indices_one(
         &mut self,
         haystack: &[u8],
-        skipped_chunks: usize,
+        skipped_chars: usize,
         index: u32,
         include_exact: bool,
     ) -> Option<MatchIndices> {
         // Haystack too large, fallback to greedy matching
         let (mut score, indices) = self.smith_waterman.match_haystack_indices(
             haystack,
-            skipped_chunks,
+            skipped_chars,
             self.config.max_typos,
         )?;
 
@@ -326,18 +326,18 @@ impl Matcher {
             .filter(move |(_, h)| h.len() >= min_haystack_len)
             // Prefiltering
             .filter_map(move |(i, haystack)| {
-                let (matched, skipped_chunks) = config.max_typos.map_or((true, 0), |max_typos| {
+                let (matched, skipped_chars) = config.max_typos.map_or((true, 0), |max_typos| {
                     prefilter.match_haystack(haystack, max_typos)
                 });
                 // Skip any chunks where we know the needle doesn't match
-                matched.then(|| (i, &haystack[skipped_chunks * 16..], skipped_chunks))
+                matched.then(|| (i, &haystack[skipped_chars..], skipped_chars))
             })
     }
 
     #[inline(always)]
-    pub fn iter_alignment_path(&self, skipped_chunks: usize, score: u16) -> AlignmentPathIter<'_> {
+    pub fn iter_alignment_path(&self, skipped_chars: usize, score: u16) -> AlignmentPathIter<'_> {
         self.smith_waterman
-            .iter_alignment_path(skipped_chunks, score, self.config.max_typos)
+            .iter_alignment_path(skipped_chars, score, self.config.max_typos)
     }
 
     #[inline(always)]

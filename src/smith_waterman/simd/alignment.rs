@@ -6,7 +6,7 @@ impl<B: Backend> SmithWatermanMatcherInternal<B> {
     #[inline(always)]
     pub fn iter_alignment_path(
         &self,
-        skipped_chunks: usize,
+        skipped_chars: usize,
         score: u16,
         max_typos: Option<u16>,
     ) -> AlignmentPathIter<'_> {
@@ -15,7 +15,7 @@ impl<B: Backend> SmithWatermanMatcherInternal<B> {
             &self.match_masks,
             self.needle.len(),
             self.haystack_chunks,
-            skipped_chunks,
+            skipped_chars,
             score,
             max_typos,
         )

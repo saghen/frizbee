@@ -54,7 +54,7 @@ impl PrefilterSSE {
         };
 
         let mut can_skip_chunks = true;
-        let mut skipped_chunks = 0;
+        let mut skipped_chars = 0;
 
         let mut needle_iter = self.needle_simd.iter();
         let mut needle_char = *needle_iter.next().unwrap();
@@ -75,17 +75,17 @@ impl PrefilterSSE {
                 // Progress to next needle char, if available
                 if let Some(next_needle_char) = needle_iter.next() {
                     if can_skip_chunks {
-                        skipped_chunks = start / 16;
+                        skipped_chars = start;
                     }
                     can_skip_chunks = false;
                     needle_char = *next_needle_char;
                 } else {
-                    return (true, skipped_chunks);
+                    return (true, skipped_chars);
                 }
             }
         }
 
-        (false, skipped_chunks)
+        (false, skipped_chars)
     }
 
     /// Checks if the needle is wholly contained in the haystack, ignoring the exact order of the

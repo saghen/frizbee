@@ -93,8 +93,9 @@ impl Prefilter {
     /// Optionally, define the maximum number of typos (missing characters from the needle) before
     /// the haystack is filtered out.
     ///
-    /// Returns the chunk (16 bytes) index of the first match in the haystack (first needle char).
-    /// The haystack can then be sliced to skip empty chunks: `haystack[skipped_chunks * 16..]`
+    /// Returns the byte offset of the first match in the haystack (first needle char), rounded
+    /// down to the nearest 16-byte chunk boundary. The haystack can then be sliced to skip empty
+    /// chunks: `haystack[skipped_chars..]`
     ///
     /// The caller must ensure needle.len() > 0
     #[inline]

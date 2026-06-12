@@ -57,7 +57,7 @@ impl<B: Backend> SmithWatermanMatcherInternal<B> {
     pub fn match_haystack_indices(
         &mut self,
         haystack: &[u8],
-        skipped_chunks: usize,
+        skipped_chars: usize,
         max_typos: Option<u16>,
     ) -> Option<(u16, Vec<usize>)> {
         if haystack.len() > MAX_HAYSTACK_LEN {
@@ -68,7 +68,7 @@ impl<B: Backend> SmithWatermanMatcherInternal<B> {
 
         let mut indices = Vec::with_capacity(self.needle.len());
         let mut prev_haystack_idx = usize::MAX;
-        for pos in self.iter_alignment_path(skipped_chunks, score, max_typos) {
+        for pos in self.iter_alignment_path(skipped_chars, score, max_typos) {
             match pos {
                 Some(Alignment::Match((_, haystack_idx))) => {
                     if prev_haystack_idx != haystack_idx {

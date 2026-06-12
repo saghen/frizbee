@@ -51,7 +51,7 @@ pub struct AlignmentPathIter<'a> {
     lane_bytes: usize,
     row_idx: usize,
     col_idx: usize,
-    skipped_chunks: usize,
+    skipped_chars: usize,
     max_typos: Option<u16>,
     typo_count: u16,
     score: u16,
@@ -65,7 +65,7 @@ impl<'a> AlignmentPathIter<'a> {
         match_masks: &'a Matrix<B>,
         needle_len: usize,
         haystack_chunks: usize,
-        skipped_chunks: usize,
+        skipped_chars: usize,
         score: u16,
         max_typos: Option<u16>,
     ) -> Self {
@@ -79,7 +79,7 @@ impl<'a> AlignmentPathIter<'a> {
             lane_bytes: B::LANE_BYTES,
             row_idx: needle_len,
             col_idx,
-            skipped_chunks,
+            skipped_chars,
             max_typos,
             typo_count: 0,
             score,
@@ -153,11 +153,11 @@ impl<'a> Iterator for AlignmentPathIter<'a> {
         }
 
         // Capture current position to yield (adjusted to 0-indexed haystack
-        // bytes; `skipped_chunks` is in units of 16 since the prefilter
-        // operates on 16-byte chunks).
+        // bytes; `skipped_chars` is a byte offset since the prefilter operates
+        // on 16-byte chunks).
         let current_pos = (
             self.row_idx - 1,
-            self.col_idx - self.lanes_per_chunk + self.skipped_chunks * 16,
+            self.col_idx - self.lanes_per_chunk + self.skipped_chars,
         );
 
         if self.get_is_match(self.row_idx, self.col_idx) {

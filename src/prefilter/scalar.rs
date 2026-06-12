@@ -87,7 +87,7 @@ impl PrefilterScalar {
         }
 
         let mut can_skip_chunks = true;
-        let mut skipped_chunks = 0;
+        let mut skipped_chars = 0;
         let mut needle_idx = 0;
 
         for start in (0..len).step_by(16) {
@@ -96,13 +96,13 @@ impl PrefilterScalar {
 
             loop {
                 if needle_idx >= self.needle.len() {
-                    return (true, skipped_chunks);
+                    return (true, skipped_chars);
                 }
 
                 let (c1, c2) = self.needle[needle_idx];
                 if chunk.iter().any(|&b| b == c1 || b == c2) {
                     if can_skip_chunks {
-                        skipped_chunks = start / 16;
+                        skipped_chars = start;
                     }
                     can_skip_chunks = false;
                     needle_idx += 1;
@@ -112,7 +112,7 @@ impl PrefilterScalar {
             }
         }
 
-        (needle_idx >= self.needle.len(), skipped_chunks)
+        (needle_idx >= self.needle.len(), skipped_chars)
     }
 
     /// Unordered prefilter with typo support, matching SIMD prefilter behavior.
