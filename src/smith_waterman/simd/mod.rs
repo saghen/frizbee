@@ -1,6 +1,8 @@
 use crate::Scoring;
 #[cfg(target_arch = "x86_64")]
-use crate::simd::{Avx512U8Backend, AvxBackend, AvxU8Backend, SseBackend, SseU8Backend};
+use crate::simd::{
+    Avx512Backend, Avx512U8Backend, AvxBackend, AvxU8Backend, SseBackend, SseU8Backend,
+};
 use crate::simd::{Backend, Scalar8Backend, Scalar16U8Backend};
 #[cfg(target_arch = "aarch64")]
 use crate::simd::{NeonBackend, NeonU8Backend};
@@ -16,7 +18,7 @@ pub use alignment_iter::{Alignment, AlignmentPathIter};
 /// Returns true if every possible Smith-Waterman matrix cell value for this
 /// needle length and scoring config fits in a u8. The u8 backends are
 /// otherwise identical to the u16 backends but with double the lane count
-/// (32 cells/chunk on AVX2, 16 on SSE/NEON).
+/// (64 cells/chunk on AVX-512, 32 on AVX2, 16 on SSE/NEON).
 #[inline]
 fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
     let max_per_char = scoring.match_score as usize
@@ -34,6 +36,8 @@ fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
 /// in a u8, doubling effective throughput
 #[derive(Debug, Clone)]
 pub enum SmithWatermanMatcher {
+    #[cfg(target_arch = "x86_64")]
+    AVX512(SmithWatermanMatcherAVX512),
     #[cfg(target_arch = "x86_64")]
     AVX512U8(SmithWatermanMatcherAVX512U8),
     #[cfg(target_arch = "x86_64")]
@@ -59,6 +63,8 @@ pub enum SmithWatermanMatcher {
 macro_rules! dispatch {
     ($self:expr, $m:ident => $body:expr) => {
         match $self {
+            #[cfg(target_arch = "x86_64")]
+            Self::AVX512($m) => unsafe { $body },
             #[cfg(target_arch = "x86_64")]
             Self::AVX512U8($m) => unsafe { $body },
             #[cfg(target_arch = "x86_64")]
@@ -86,6 +92,10 @@ impl SmithWatermanMatcher {
         #[cfg(target_arch = "x86_64")]
         if use_u8 && SmithWatermanMatcherAVX512U8::is_available() {
             return Self::AVX512U8(unsafe { SmithWatermanMatcherAVX512U8::new(needle, scoring) });
+        }
+        #[cfg(target_arch = "x86_64")]
+        if !use_u8 && SmithWatermanMatcherAVX512::is_available() {
+            return Self::AVX512(unsafe { SmithWatermanMatcherAVX512::new(needle, scoring) });
         }
         #[cfg(target_arch = "x86_64")]
         if SmithWatermanMatcherAVX2::is_available() {
@@ -233,6 +243,13 @@ macro_rules! define_matcher {
         }
     };
 }
+
+#[cfg(target_arch = "x86_64")]
+define_matcher!(
+    SmithWatermanMatcherAVX512,
+    backend = Avx512Backend,
+    target_feature = "avx512f,avx512bw",
+);
 
 #[cfg(target_arch = "x86_64")]
 define_matcher!(
@@ -547,6 +564,7 @@ mod tests {
             // long needles (some short enough for u8, some not)
             ("needle", "____________needle____________"),
             ("abcdefghij", "abcdefghij"),
+            ("abcdefghijklmnopqrst", "abcdefghijklmnopqrst"),
         ]
     }
 
@@ -568,6 +586,18 @@ mod tests {
                 assert_eq!(
                     got, want,
                     "SSE-u16 score mismatch for needle={needle:?} haystack={haystack:?}"
+                );
+            }
+
+            #[cfg(target_arch = "x86_64")]
+            if SmithWatermanMatcherAVX512::is_available() {
+                let mut avx = unsafe {
+                    SmithWatermanMatcherAVX512::new(needle.as_bytes(), &Scoring::default())
+                };
+                let got = unsafe { avx.match_haystack(haystack.as_bytes(), None) }.unwrap();
+                assert_eq!(
+                    got, want,
+                    "AVX-512-u16 score mismatch for needle={needle:?} haystack={haystack:?}"
                 );
             }
 
@@ -654,6 +684,19 @@ mod tests {
                 assert_eq!(
                     got, want,
                     "SSE-u16 indices mismatch for needle={needle:?} haystack={haystack:?}"
+                );
+            }
+
+            #[cfg(target_arch = "x86_64")]
+            if SmithWatermanMatcherAVX512::is_available() {
+                let mut avx = unsafe {
+                    SmithWatermanMatcherAVX512::new(needle.as_bytes(), &Scoring::default())
+                };
+                let got = unsafe { avx.match_haystack_indices(haystack.as_bytes(), 0, None) }
+                    .map(|(_, indices)| indices);
+                assert_eq!(
+                    got, want,
+                    "AVX-512-u16 indices mismatch for needle={needle:?} haystack={haystack:?}"
                 );
             }
 
@@ -749,7 +792,9 @@ mod tests {
         let m = SmithWatermanMatcher::new(needle, &Scoring::default());
         let is_u16 = match m {
             #[cfg(target_arch = "x86_64")]
-            SmithWatermanMatcher::AVX2(_) | SmithWatermanMatcher::SSE(_) => true,
+            SmithWatermanMatcher::AVX512(_)
+            | SmithWatermanMatcher::AVX2(_)
+            | SmithWatermanMatcher::SSE(_) => true,
             #[cfg(target_arch = "aarch64")]
             SmithWatermanMatcher::NEON(_) => true,
             SmithWatermanMatcher::Scalar(_) => true,

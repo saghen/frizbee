@@ -4,7 +4,7 @@
 //! three associated vector types: [`BytesVec`] for haystack bytes (LANES bytes
 //! wide), [`MaskVec`] for boolean comparison results, and [`ScoreVec`] for the
 //! score matrix (LANES × u16 or LANES × u8). Keeping masks as a distinct type
-//! lets AVX-512 carry them as native `__mmask64` bitmasks rather than
+//! lets AVX-512 carry them as native `__mmask*` bitmasks rather than
 //! 64-byte vectors, while other backends can alias [`MaskVec`] to their
 //! [`BytesVec`] type with no loss.
 //!
@@ -13,7 +13,7 @@
 //! and the horizontal-gap propagation unroll.
 //!
 //! Availabled backends:
-//!   - AVX-512: LANES = 64    (scoring u8 x 64 = 512-bit, u8 only)
+//!   - AVX-512: LANES = 32/64 (scoring u16 x 32 = 512-bit or u8 x 64 = 512-bit)
 //!   - AVX2:    LANES = 16/32 (scoring u16 x 16 = 256-bit or u8 x 32 = 256-bit)
 //!   - SSE:     LANES = 8/16  (scoring u16 x 8 = 128-bit or u8 x 16 = 128-bit)
 //!   - NEON:    LANES = 8/16  (scoring u16 x 8 = 128-bit or u8 x 16 = 128-bit)
@@ -32,7 +32,7 @@ mod sse;
 #[cfg(target_arch = "x86_64")]
 pub use avx::{AvxBackend, AvxU8Backend};
 #[cfg(target_arch = "x86_64")]
-pub use avx512::Avx512U8Backend;
+pub use avx512::{Avx512Backend, Avx512U8Backend};
 #[cfg(target_arch = "aarch64")]
 pub use neon::{NeonBackend, NeonU8Backend};
 pub use scalar::{Scalar8Backend, Scalar16U8Backend};
@@ -70,8 +70,8 @@ pub trait Backend: Sized + 'static {
     /// Propagate horizontal (left-direction) gaps across a score row.
     ///
     /// The number of unrolled stages is fixed per backend: 8-lane backends do
-    /// 3 stages (shifts of 1, 2, 4 lanes); 16-lane backends do 4 stages (1, 2,
-    /// 4, 8).
+    /// 3 stages (shifts of 1, 2, 4 lanes), 16-lane backends do 4 stages (1, 2,
+    /// 4, 8), 32-lane backends do 5 stages, and 64-lane backends do 6 stages.
     ///
     /// # Safety
     /// The backend's required target features must be enabled at the call site.
@@ -831,6 +831,8 @@ mod tests {
     backend_tests!(avx_u8, super::AvxU8Backend);
     #[cfg(target_arch = "x86_64")]
     backend_tests_32_lane!(avx_u8_extra, super::AvxU8Backend);
+    #[cfg(target_arch = "x86_64")]
+    backend_tests_runtime_gated!(avx512, super::Avx512Backend);
     #[cfg(target_arch = "x86_64")]
     backend_tests_runtime_gated!(avx512_u8, super::Avx512U8Backend);
     #[cfg(target_arch = "aarch64")]
