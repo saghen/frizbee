@@ -59,6 +59,8 @@ pub(crate) fn case_needle(needle: &[u8]) -> Vec<(u8, u8)> {
 #[derive(Debug, Clone)]
 pub enum Prefilter {
     #[cfg(target_arch = "x86_64")]
+    AVX512(x86_64::PrefilterAVX512),
+    #[cfg(target_arch = "x86_64")]
     AVX(x86_64::PrefilterAVX),
     #[cfg(target_arch = "x86_64")]
     SSE(x86_64::PrefilterSSE),
@@ -69,6 +71,10 @@ pub enum Prefilter {
 
 impl Prefilter {
     pub fn new(needle: &[u8]) -> Self {
+        #[cfg(target_arch = "x86_64")]
+        if x86_64::PrefilterAVX512::is_available() {
+            return Prefilter::AVX512(unsafe { x86_64::PrefilterAVX512::new(needle) });
+        }
         #[cfg(target_arch = "x86_64")]
         if x86_64::PrefilterAVX::is_available() {
             return Prefilter::AVX(unsafe { x86_64::PrefilterAVX::new(needle) });
@@ -83,6 +89,22 @@ impl Prefilter {
 
         #[cfg(not(target_arch = "aarch64"))]
         Prefilter::Scalar(scalar::PrefilterScalar::new(needle))
+    }
+
+    /// Whether a `true` result from [`Self::match_haystack`] for the given
+    /// `max_typos` guarantees an ordered alignment exists, allowing Smith
+    /// Waterman to skip its typo-verification pass.
+    ///
+    /// Only the AVX-512 prefilter with `max_typos = 0` provides this guarantee;
+    /// the other prefilters are unordered within their SIMD chunks and can
+    /// produce false positives that Smith Waterman must catch.
+    #[inline]
+    pub fn verifies_match(&self, max_typos: u16) -> bool {
+        match (self, max_typos) {
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::AVX512(_), 0) => true,
+            _ => false,
+        }
     }
 
     /// Checks if the needle is wholly contained in the haystack, ignoring the exact order of the
@@ -101,6 +123,10 @@ impl Prefilter {
     #[inline]
     pub fn match_haystack(&self, haystack: &[u8], max_typos: u16) -> (bool, usize) {
         match (self, max_typos) {
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::AVX512(p), 0) => unsafe { p.match_haystack(haystack) },
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::AVX512(p), _) => unsafe { p.match_haystack_typos(haystack, max_typos) },
             #[cfg(target_arch = "x86_64")]
             (Prefilter::AVX(p), 0) => unsafe { p.match_haystack(haystack) },
             #[cfg(target_arch = "x86_64")]
@@ -341,7 +367,7 @@ mod tests {
 
         #[cfg(target_arch = "x86_64")]
         return {
-            use crate::prefilter::x86_64::{PrefilterAVX, PrefilterSSE};
+            use crate::prefilter::x86_64::{PrefilterAVX, PrefilterAVX512, PrefilterSSE};
 
             let avx_result = unsafe {
                 let prefilter = PrefilterAVX::new(needle.as_bytes());
@@ -367,6 +393,20 @@ mod tests {
                 avx_result, scalar_result,
                 "avx and scalar results should be the same"
             );
+            if PrefilterAVX512::is_available() {
+                let avx512_result = unsafe {
+                    let prefilter = PrefilterAVX512::new(needle.as_bytes());
+                    if max_typos > 0 {
+                        prefilter.match_haystack_typos(haystack, max_typos).0
+                    } else {
+                        prefilter.match_haystack(haystack).0
+                    }
+                };
+                assert_eq!(
+                    avx512_result, scalar_result,
+                    "avx512 and scalar results should be the same"
+                );
+            }
             avx_result
         };
 

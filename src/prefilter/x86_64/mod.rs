@@ -1,9 +1,11 @@
 use std::arch::x86_64::*;
 
 mod avx2;
+mod avx512;
 mod sse;
 
 pub use avx2::*;
+pub use avx512::*;
 pub use sse::*;
 
 /// Loads a chunk of 16 bytes from the haystack, with overlap when remaining bytes < 16,
