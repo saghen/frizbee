@@ -122,7 +122,6 @@ use serde::{Deserialize, Serialize};
 mod r#const;
 mod one_shot;
 pub mod prefilter;
-mod simd;
 pub mod smith_waterman;
 pub mod sort;
 

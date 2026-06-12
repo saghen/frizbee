@@ -1,7 +1,6 @@
-use crate::{
-    simd::Backend,
-    smith_waterman::simd::{AlignmentPathIter, algo::SmithWatermanMatcherInternal},
-};
+use crate::smith_waterman::simd::{AlignmentPathIter, algo::SmithWatermanMatcherInternal};
+
+use super::backend::Backend;
 
 impl<B: Backend> SmithWatermanMatcherInternal<B> {
     #[inline(always)]

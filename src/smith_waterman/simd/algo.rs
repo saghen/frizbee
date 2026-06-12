@@ -1,11 +1,7 @@
-use crate::{
-    Scoring,
-    prefilter::case_needle,
-    simd::{Backend, BytesVec, MaskVec, ScoreVec},
-    smith_waterman::greedy::match_greedy,
-};
+use crate::{Scoring, prefilter::case_needle, smith_waterman::greedy::match_greedy};
 
 use super::alignment_iter::Alignment;
+use super::backend::{Backend, BytesVec, MaskVec, ScoreVec};
 use super::matrix::Matrix;
 
 const MAX_HAYSTACK_LEN: usize = 512;
@@ -226,6 +222,7 @@ impl<B: Backend> SmithWatermanMatcherInternal<B> {
         }
     }
 
+    #[cfg(feature = "match_end_col")]
     pub fn match_end_col(&self, haystack: &[u8]) -> u16 {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(self.needle.as_bytes(), haystack, &self.scoring)

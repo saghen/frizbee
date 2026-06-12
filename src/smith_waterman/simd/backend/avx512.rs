@@ -142,6 +142,9 @@ impl BytesVec for Avx512Bytes {
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         unsafe {
             let remaining = len.saturating_sub(start).min(32);
+            if remaining == 0 {
+                return Self(_mm512_setzero_si512());
+            }
             let ptr = data.add(start);
             let mask: __mmask64 = ((1u64 << remaining).wrapping_sub(1)) as __mmask64;
             Self(_mm512_maskz_loadu_epi8(mask, ptr as *const i8))
@@ -191,9 +194,12 @@ impl BytesVec for Avx512U8Bytes {
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         unsafe {
             let remaining = len.saturating_sub(start);
+            if remaining == 0 {
+                return Self(_mm512_setzero_si512());
+            }
             let ptr = data.add(start);
             Self(match remaining {
-                0 => _mm512_setzero_si512(),
+                0 => unreachable!(),
                 1..64 => {
                     // lanes outside mask are zeroed and don't access memory,
                     // so a partial chunk at the haystack tail is page-safe

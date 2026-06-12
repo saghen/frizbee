@@ -1,15 +1,15 @@
 use crate::Scoring;
+use backend::Backend as _;
 #[cfg(target_arch = "x86_64")]
-use crate::simd::{
-    Avx512Backend, Avx512U8Backend, AvxBackend, AvxU8Backend, SseBackend, SseU8Backend,
-};
-use crate::simd::{Backend, Scalar8Backend, Scalar16U8Backend};
+use backend::{Avx512Backend, Avx512U8Backend, AvxBackend, AvxU8Backend, SseBackend, SseU8Backend};
 #[cfg(target_arch = "aarch64")]
-use crate::simd::{NeonBackend, NeonU8Backend};
+use backend::{NeonBackend, NeonU8Backend};
+use backend::{Scalar8Backend, Scalar16U8Backend};
 
 mod algo;
 mod alignment;
 mod alignment_iter;
+pub(crate) mod backend;
 mod matrix;
 
 use algo::SmithWatermanMatcherInternal;
@@ -229,6 +229,7 @@ macro_rules! define_matcher {
                 "# Safety\n\n",
                 "Caller must ensure that the target feature `", $feature, "` is available"
             )]
+            #[cfg(feature = "match_end_col")]
             #[target_feature(enable = $feature)]
             pub unsafe fn match_end_col(&self, haystack: &[u8]) -> u16 {
                 self.0.match_end_col(haystack)

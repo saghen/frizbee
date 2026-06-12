@@ -1,5 +1,5 @@
+use super::backend::{Backend, ScoreVec};
 use super::matrix::Matrix;
-use crate::simd::{Backend, ScoreVec};
 
 pub enum Alignment {
     Left((usize, usize)),

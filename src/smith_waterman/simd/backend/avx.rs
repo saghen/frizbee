@@ -100,9 +100,12 @@ fn can_overread_8(ptr: *const u8) -> bool {
 pub(crate) unsafe fn load_partial_m128i(data: *const u8, start: usize, len: usize) -> __m128i {
     unsafe {
         let remaining = len.saturating_sub(start);
+        if remaining == 0 {
+            return _mm_setzero_si128();
+        }
         let ptr = data.add(start);
         match remaining {
-            0 => _mm_setzero_si128(),
+            0 => unreachable!(),
             8 => _mm_loadl_epi64(ptr as *const __m128i),
             16.. => _mm_loadu_si128(ptr as *const __m128i),
             1..=7 if can_overread_8(ptr) => {

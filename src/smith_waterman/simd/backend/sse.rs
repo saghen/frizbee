@@ -140,9 +140,11 @@ impl BytesVec for SseBytes {
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         unsafe {
             let remaining = len.saturating_sub(start);
+            if remaining == 0 {
+                return Self(_mm_setzero_si128());
+            }
             let ptr = data.add(start);
             Self(match remaining {
-                0 => _mm_setzero_si128(),
                 8.. => _mm_loadl_epi64(ptr as *const __m128i),
                 1..=7 if Self::can_overread_8(ptr) => {
                     let lo = _mm_loadl_epi64(ptr as *const __m128i);

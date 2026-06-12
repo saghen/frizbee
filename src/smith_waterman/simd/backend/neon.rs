@@ -120,9 +120,11 @@ impl BytesVec for NeonBytes {
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         unsafe {
             let remaining = len.saturating_sub(start);
+            if remaining == 0 {
+                return Self(vdup_n_u8(0));
+            }
             let ptr = data.add(start);
             Self(match remaining {
-                0 => vdup_n_u8(0),
                 8.. => vld1_u8(ptr),
                 1..=7 if Self::can_overread_8(ptr) => {
                     let lo = vld1_u8(ptr);
@@ -387,9 +389,11 @@ impl BytesVec for NeonU8Bytes {
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         unsafe {
             let remaining = len.saturating_sub(start);
+            if remaining == 0 {
+                return Self(vdupq_n_u8(0));
+            }
             let ptr = data.add(start);
             Self(match remaining {
-                0 => vdupq_n_u8(0),
                 16.. => vld1q_u8(ptr),
                 1..=15 if Self::can_overread_16(ptr) => {
                     let loaded = vld1q_u8(ptr);

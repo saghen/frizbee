@@ -261,28 +261,16 @@ pub trait ScoreVec: Copy + core::fmt::Debug {
 macro_rules! gap_step {
     ($B:ty, $shift:literal, $row:ident, $adj:ident, $mm:ident, $amm:ident, $gop:ident, $gex:ident) => {
         let shifted_row =
-            <<$B as $crate::simd::Backend>::Score as $crate::simd::ScoreVec>::shift_right_padded::<
-                $shift,
-            >($row, $adj);
+            <<$B as Backend>::Score as ScoreVec>::shift_right_padded::<$shift>($row, $adj);
         let shifted_match_mask =
-            <<$B as $crate::simd::Backend>::Score as $crate::simd::ScoreVec>::shift_right_padded::<
-                $shift,
-            >($mm, $amm);
-        let gap_penalty = <<$B as $crate::simd::Backend>::Score as $crate::simd::ScoreVec>::add(
+            <<$B as Backend>::Score as ScoreVec>::shift_right_padded::<$shift>($mm, $amm);
+        let gap_penalty = <<$B as Backend>::Score as ScoreVec>::add(
             $gex,
-            <<$B as $crate::simd::Backend>::Score as $crate::simd::ScoreVec>::and(
-                $gop,
-                shifted_match_mask,
-            ),
+            <<$B as Backend>::Score as ScoreVec>::and($gop, shifted_match_mask),
         );
-        let decayed = <<$B as $crate::simd::Backend>::Score as $crate::simd::ScoreVec>::subs(
-            shifted_row,
-            gap_penalty,
-        );
-        let $row =
-            <<$B as $crate::simd::Backend>::Score as $crate::simd::ScoreVec>::max($row, decayed);
-        let $gex =
-            <<$B as $crate::simd::Backend>::Score as $crate::simd::ScoreVec>::add($gex, $gex);
+        let decayed = <<$B as Backend>::Score as ScoreVec>::subs(shifted_row, gap_penalty);
+        let $row = <<$B as Backend>::Score as ScoreVec>::max($row, decayed);
+        let $gex = <<$B as Backend>::Score as ScoreVec>::add($gex, $gex);
     };
 }
 

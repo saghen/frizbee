@@ -1,4 +1,4 @@
-use crate::simd::{Backend, ScoreVec};
+use super::backend::{Backend, ScoreVec};
 
 #[derive(Debug, Clone)]
 pub struct Matrix<B: Backend> {
