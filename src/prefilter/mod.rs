@@ -2,36 +2,16 @@
 //! a small percentage of the haystack will match the needle. Automatically used by the Matcher
 //! and match_list APIs.
 //!
-//! Unordered algorithms are much faster than ordered algorithms, but allow for false positives.
-//! As a result, a backwards pass must be performed after Smith Waterman to verify the number of typos.
-//! But the faster prefilter outweighs this extra cost. The algorithm also checks both lowercase and
-//! uppercase needle chars in the same comparison (when AVX2 is available).
-//!
-//! ```text
-//! needle: "foo"
-//! haystack: "Fo_o"
-//!
-//! // assuming 4 and 8 byte SIMD widths for simplicity
-//! // in reality, the widths are 16 and 32 bytes
-//!
-//! needle[0]: [f, f, f, f, F, F, F, F]
-//!
-//! haystack: [F, o, _, o]
-//! // expand to 8 bytes by broadcasting lo to hi
-//! haystack: [F, o, _, o, F, o, _, o]
-//!
-//! needle == haystack
-//! mask: [00, 00, 00, 00, FF, 00, 00, 00]
-//! bitmask: 0b00001000 // movemask(mask)
-//! bitmask > 0 // needle found in haystack, check next needle char
-//! ```
-//!
-//! See the full implementation in [`src/prefilter/backend/avx.rs`](src/prefilter/backend/avx.rs). When 256-bit SIMD is not available (no AVX2 or ARM), we simply check the uppercase and lowercase separately.
+//! The prefilter proves that an ordered alignment exists after deleting at
+//! most `max_typos` needle bytes. Substitution is relaxed to deletion here:
+//! any alignment with a mismatched byte is also accepted by deleting that
+//! needle byte. This can still produce score-level false positives, but it
+//! cannot reject a haystack that Smith-Waterman could accept.
 //!
 //! The `Prefilter` struct chooses the fastest algorithm via runtime feature detection.
-//! SIMD algorithms only apply to haystack.len() >= 16.
 //! All algorithms assume that needle.len() > 0
 
+pub(crate) mod algo;
 pub(crate) mod backend;
 
 #[cfg(target_arch = "aarch64")]
@@ -56,8 +36,8 @@ pub(crate) fn case_needle(needle: &[u8]) -> Vec<(u8, u8)> {
         .collect()
 }
 
-/// SIMD unordered prefiltering algorithm which allows for false positives.
-/// Chooses the fastest algorithm via runtime feature detection.
+/// Ordered prefiltering algorithm which allows score-level false positives.
+/// Chooses the fastest implementation via runtime feature detection.
 #[derive(Debug, Clone)]
 pub enum Prefilter {
     #[cfg(target_arch = "x86_64")]
@@ -93,398 +73,212 @@ impl Prefilter {
         Prefilter::Scalar(PrefilterScalar::new(needle))
     }
 
-    /// Whether a `true` result from [`Self::match_haystack`] for the given
-    /// `max_typos` guarantees an ordered alignment exists, allowing Smith
-    /// Waterman to skip its typo-verification pass.
-    ///
-    /// Only the AVX-512 prefilter with `max_typos = 0` provides this guarantee;
-    /// the other prefilters are unordered within their SIMD chunks and can
-    /// produce false positives that Smith Waterman must catch.
-    #[inline]
-    pub fn verifies_match(&self, max_typos: u16) -> bool {
-        match (self, max_typos) {
-            #[cfg(target_arch = "x86_64")]
-            (Prefilter::AVX512(_), _) => true,
-            #[cfg(target_arch = "x86_64")]
-            (Prefilter::AVX(_), 0) => true,
-            _ => false,
-        }
-    }
-
-    /// Checks if the needle is wholly contained in the haystack, ignoring the exact order of the
-    /// bytes. For example, if the needle is "test", the haystack "tset" will return true. However,
-    /// the order does matter across 16 byte boundaries. The needle chars must include both the
-    /// uppercase and lowercase variants of the character.
-    ///
-    /// Optionally, define the maximum number of typos (missing characters from the needle) before
-    /// the haystack is filtered out.
+    /// Checks whether the needle can be aligned to the haystack after deleting
+    /// at most `max_typos` needle bytes.
     ///
     /// Returns `(matched, skipped_chars, end_pos)`:
-    /// - `skipped_chars`: byte offset of the first needle char in the haystack
-    /// - `end_pos`: exclusive byte offset just past the last needle char's match.
-    ///   Only the AVX-512 prefilter with `max_typos = 0` computes a meaningful
-    ///   tail trim; all other variants return `haystack.len()`.
+    /// - `skipped_chars`: conservative byte offset of the first possible matched
+    ///   needle byte.
+    /// - `end_pos`: conservative exclusive byte offset after the final possible
+    ///   matched needle byte.
     ///
-    /// The caller can slice `haystack[skipped_chars..end_pos]` to drop both
-    /// the unmatched prefix and (when supported) the unmatched suffix.
+    /// The caller can slice `haystack[skipped_chars..end_pos]` to drop unmatched
+    /// prefix and suffix bytes before scoring. If all needle bytes may be
+    /// deleted, the full haystack is returned so scoring and exact matching can
+    /// still use the original bytes.
     ///
     /// The caller must ensure needle.len() > 0
     #[inline]
-    pub fn match_haystack(&self, haystack: &[u8], max_typos: u16) -> (bool, usize, usize) {
-        let len = haystack.len();
+    pub fn match_haystack(&mut self, haystack: &[u8], max_typos: u16) -> (bool, usize, usize) {
         match (self, max_typos) {
             #[cfg(target_arch = "x86_64")]
             (Prefilter::AVX512(p), 0) => unsafe { p.match_haystack(haystack) },
             #[cfg(target_arch = "x86_64")]
             (Prefilter::AVX512(p), 1) => unsafe { p.match_haystack_1_typo(haystack) },
             #[cfg(target_arch = "x86_64")]
-            (Prefilter::AVX512(p), 2) => unsafe { p.match_haystack_typos::<2>(haystack) },
+            (Prefilter::AVX512(p), 2) => unsafe { p.match_haystack_2_typos(haystack) },
             #[cfg(target_arch = "x86_64")]
-            (Prefilter::AVX512(p), 3) => unsafe { p.match_haystack_typos::<3>(haystack) },
-            #[cfg(target_arch = "x86_64")]
-            (Prefilter::AVX512(_), _) => panic!("max_typos >= 8 not supported"),
+            (Prefilter::AVX512(p), _) => unsafe { p.match_haystack_typos(haystack, max_typos) },
             #[cfg(target_arch = "x86_64")]
             (Prefilter::AVX(p), 0) => unsafe { p.match_haystack(haystack) },
             #[cfg(target_arch = "x86_64")]
-            (Prefilter::AVX(p), _) => {
-                let (m, s) = unsafe { p.match_haystack_typos(haystack, max_typos) };
-                (m, s, len)
-            }
+            (Prefilter::AVX(p), 1) => unsafe { p.match_haystack_1_typo(haystack) },
             #[cfg(target_arch = "x86_64")]
-            (Prefilter::SSE(p), 0) => {
-                let (m, s) = unsafe { p.match_haystack(haystack) };
-                (m, s, len)
-            }
+            (Prefilter::AVX(p), 2) => unsafe { p.match_haystack_2_typos(haystack) },
             #[cfg(target_arch = "x86_64")]
-            (Prefilter::SSE(p), _) => {
-                let (m, s) = unsafe { p.match_haystack_typos(haystack, max_typos) };
-                (m, s, len)
-            }
+            (Prefilter::AVX(p), _) => unsafe { p.match_haystack_typos(haystack, max_typos) },
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::SSE(p), 0) => unsafe { p.match_haystack(haystack) },
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::SSE(p), 1) => unsafe { p.match_haystack_1_typo(haystack) },
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::SSE(p), 2) => unsafe { p.match_haystack_2_typos(haystack) },
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::SSE(p), _) => unsafe { p.match_haystack_typos(haystack, max_typos) },
             #[cfg(target_arch = "aarch64")]
-            (Prefilter::NEON(p), 0) => {
-                let (m, s) = unsafe { p.match_haystack(haystack) };
-                (m, s, len)
-            }
+            (Prefilter::NEON(p), 0) => unsafe { p.match_haystack(haystack) },
             #[cfg(target_arch = "aarch64")]
-            (Prefilter::NEON(p), _) => {
-                let (m, s) = unsafe { p.match_haystack_typos(haystack, max_typos) };
-                (m, s, len)
-            }
-            (Prefilter::Scalar(p), 0) => {
-                let (m, s) = p.match_haystack(haystack);
-                (m, s, len)
-            }
-            (Prefilter::Scalar(p), _) => {
-                let (m, s) = p.match_haystack_typos(haystack, max_typos);
-                (m, s, len)
-            }
+            (Prefilter::NEON(p), 1) => unsafe { p.match_haystack_1_typo(haystack) },
+            #[cfg(target_arch = "aarch64")]
+            (Prefilter::NEON(p), 2) => unsafe { p.match_haystack_2_typos(haystack) },
+            #[cfg(target_arch = "aarch64")]
+            (Prefilter::NEON(p), _) => unsafe { p.match_haystack_typos(haystack, max_typos) },
+            (Prefilter::Scalar(p), 0) => p.match_haystack(haystack),
+            (Prefilter::Scalar(p), _) => p.match_haystack_typos(haystack, max_typos),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    fn match_haystack(needle: &str, haystack: &str) -> bool {
-        match_haystack_generic(needle, haystack, 0)
+    use super::{Prefilter, backend::PrefilterScalar};
+
+    fn result(needle: &str, haystack: &str, max_typos: u16) -> (bool, usize, usize) {
+        result_generic(needle, haystack, max_typos)
     }
 
-    fn match_haystack_typos(needle: &str, haystack: &str, max_typos: u16) -> bool {
-        match_haystack_generic(needle, haystack, max_typos)
-    }
-
-    #[test]
-    fn test_exact_match() {
-        assert!(match_haystack("foo", "foo"));
-        assert!(match_haystack("a", "a"));
-        assert!(match_haystack("hello", "hello"));
+    fn matched(needle: &str, haystack: &str, max_typos: u16) -> bool {
+        result(needle, haystack, max_typos).0
     }
 
     #[test]
-    fn test_fuzzy_match_with_gaps() {
-        assert!(match_haystack("foo", "f_o_o"));
-        assert!(match_haystack("foo", "f__o__o"));
-        assert!(match_haystack("abc", "a_b_c"));
-        assert!(match_haystack("test", "t_e_s_t"));
-    }
-
-    #[test]
-    fn test_unordered_within_chunk() {
-        assert!(match_haystack("foo", "oof"));
-        assert!(match_haystack("abc", "cba"));
-        assert!(match_haystack("test", "tset"));
-        assert!(match_haystack("hello", "olleh"));
-    }
-
-    #[test]
-    fn test_case_insensitivity() {
-        assert!(match_haystack("foo", "FOO"));
-        assert!(match_haystack("Foo", "foo"));
-        assert!(match_haystack("ABC", "abc"));
-    }
-
-    #[test]
-    fn test_chunk_boundary() {
-        // Characters must be within same 16-byte chunk
-        let haystack = "oo_______________f"; // 'f' is at position 17 (18th byte)
-        assert!(!match_haystack("foo", haystack));
-
-        // But if all within one chunk, should work
-        let haystack = "oof_____________"; // All within first 16 bytes
-        assert!(match_haystack("foo", haystack));
-    }
-
-    #[test]
-    fn test_overlapping_load() {
-        // Because we load the last 16 bytes of the haystack in the final iteration,
-        // when the haystack.len() % 16 != 0, we end up matching on the 'o' twice
-        assert!(match_haystack("foo", "f_________________________o______"));
-    }
-
-    #[test]
-    fn test_multiple_chunks() {
-        assert!(match_haystack("foo", "f_______________o_______________o"));
-        assert!(match_haystack(
-            "abc",
-            "a_______________b_______________c_______________"
-        ));
-    }
-
-    #[test]
-    fn test_partial_matches() {
-        assert!(!match_haystack("fob", "fo"));
-        assert!(!match_haystack("test", "tet"));
-        assert!(!match_haystack("abc", "a"));
-    }
-
-    #[test]
-    fn test_duplicate_characters_in_needle() {
-        assert!(match_haystack("foo", "foo"));
-        assert!(match_haystack("foo", "ofo"));
-        assert!(match_haystack("foo", "fo")); // Missing one 'o'
-
-        assert!(match_haystack("aaa", "aaa"));
-        assert!(match_haystack("aaa", "aa"));
-    }
-
-    #[test]
-    fn test_haystack_with_extra_characters() {
-        assert!(match_haystack("foo", "foobar"));
-        assert!(match_haystack("foo", "prefoobar"));
-        assert!(match_haystack("abc", "xaxbxcx"));
-    }
-
-    #[test]
-    fn test_edge_cases_at_16_byte_boundary() {
-        let haystack = "123456789012345f"; // 'f' at position 15 (last position in chunk)
-        assert!(match_haystack("f", haystack));
-
-        let haystack = "o_______________of"; // Two 'o's in first chunk, 'f' in second
-        // Due to overlapping loads, we end up loading the 'of' in the final chunk
-        assert!(match_haystack("foo", haystack));
-    }
-
-    #[test]
-    fn test_overlapping_chunks() {
-        // The function uses overlapping loads, so test edge cases
-        // where characters might be found in overlapping regions
-        let haystack = "_______________fo"; // 'f' at position 15, 'o' at position 16
-        assert!(match_haystack("fo", haystack));
-    }
-
-    #[test]
-    fn test_single_character_needle() {
-        // Single character needles
-        assert!(match_haystack("a", "a"));
-        assert!(match_haystack("a", "ba"));
-        assert!(match_haystack("a", "_______________a"));
-        assert!(!match_haystack("a", ""));
-    }
-
-    #[test]
-    fn test_repeated_character_haystack() {
-        // Haystack with repeated characters
-        assert!(match_haystack("abc", "aaabbbccc"));
-        assert!(match_haystack("foo", "fofofoooo"));
-    }
-
-    #[test]
-    fn test_typos_single_missing_character() {
-        // One character missing from haystack
-        assert!(match_haystack_typos("bar", "ba", 1));
-        assert!(match_haystack_typos("bar", "ar", 1));
-        assert!(match_haystack_typos("hello", "hllo", 1));
-        assert!(match_haystack_typos("test", "tst", 1));
-
-        // Should fail with 0 typos allowed
-        assert!(!match_haystack_typos("bar", "ba", 0));
-        assert!(!match_haystack_typos("hello", "hllo", 0));
-    }
-
-    #[test]
-    fn test_typos_multiple_missing_characters() {
-        assert!(match_haystack_typos("hello", "hll", 2));
-        assert!(match_haystack_typos("testing", "tstng", 2));
-        assert!(match_haystack_typos("abcdef", "abdf", 2));
-
-        assert!(!match_haystack_typos("hello", "hll", 1));
-        assert!(!match_haystack_typos("testing", "tstng", 1));
-    }
-
-    #[test]
-    fn test_typos_with_gaps() {
-        assert!(match_haystack_typos("bar", "b_r", 1));
-        assert!(match_haystack_typos("test", "t__s_t", 1));
-        assert!(match_haystack_typos("helo", "h_l_", 2));
-    }
-
-    #[test]
-    fn test_typos_unordered_permutations() {
-        assert!(match_haystack_typos("bar", "rb", 1));
-        assert!(match_haystack_typos("abcdef", "fcda", 2));
-    }
-
-    #[test]
-    fn test_typos_case_insensitive() {
-        // Case insensitive with typos
-        assert!(match_haystack_typos("BAR", "ba", 1));
-        assert!(match_haystack_typos("Hello", "HLL", 2));
-        assert!(match_haystack_typos("TeSt", "ES", 2));
-        assert!(!match_haystack_typos("TeSt", "ES", 1));
-    }
-
-    #[test]
-    fn test_typos_edge_cases() {
-        // All characters missing (typos == needle length)
-        assert!(match_haystack_typos("abc", "", 3));
-
-        // More typos allowed than necessary
-        assert!(match_haystack_typos("foo", "fo", 5));
-    }
-
-    #[test]
-    fn test_typos_across_chunks() {
-        assert!(match_haystack_typos("abc", "a_______________b", 1));
-
-        assert!(match_haystack_typos(
-            "test",
-            "t_______________s_______________t",
-            1
-        ));
-    }
-
-    #[test]
-    fn test_typos_single_character_needle() {
-        assert!(match_haystack_typos("a", "a", 0));
-        assert!(match_haystack_typos("a", "", 1));
-        assert!(!match_haystack_typos("a", "", 0));
-    }
-
-    fn normalize_haystack(haystack: &str) -> String {
-        if haystack.len() < 8 {
-            "_".repeat(8 - haystack.len()) + haystack
-        } else {
-            haystack.to_string()
+    fn ordered_matching_cases() {
+        for (needle, haystack, max_typos, want) in [
+            ("foo", "foo", 0, true),
+            ("foo", "f_o_o", 0, true),
+            ("foo", "FOO", 0, true),
+            ("abc", "xaxbxcx", 0, true),
+            ("fo", "_______________fo", 0, true),
+            ("foo", "f_______________o_______________o", 0, true),
+            ("foo", "oof", 0, false),
+            ("abc", "cba", 0, false),
+            ("foo", "fo", 0, false),
+            ("foo", "f_________________________o______", 0, false),
+            ("a", "", 0, false),
+            ("\0", "abc", 0, false),
+            ("aa", "a", 0, false),
+        ] {
+            assert_eq!(
+                matched(needle, haystack, max_typos),
+                want,
+                "needle={needle:?} haystack={haystack:?} max_typos={max_typos}"
+            );
         }
     }
 
-    fn match_haystack_generic(needle: &str, haystack: &str, max_typos: u16) -> bool {
-        use crate::prefilter::backend::PrefilterScalar;
+    #[test]
+    fn typo_matching_cases() {
+        for (needle, haystack, max_typos, want) in [
+            ("bar", "ba", 1, true),
+            ("bar", "ar", 1, true),
+            ("hello", "hll", 2, true),
+            ("abcdef", "abdf", 2, true),
+            ("TeSt", "ES", 2, true),
+            ("abc", "c", 2, true),
+            ("a\0b", "ab", 1, true),
+            ("abc", "", 3, true),
+            ("foo", "fo", 5, true),
+            ("abc", "a_______________b", 1, true),
+            ("test", "t_______________s_______________t", 1, true),
+            ("bar", "rb", 1, false),
+            ("abcdef", "fcda", 2, false),
+            ("TeSt", "ES", 1, false),
+            ("abc", "", 2, false),
+        ] {
+            assert_eq!(
+                matched(needle, haystack, max_typos),
+                want,
+                "needle={needle:?} haystack={haystack:?} max_typos={max_typos}"
+            );
+        }
+    }
 
-        let haystack = normalize_haystack(haystack);
+    #[test]
+    fn returned_windows_are_conservative() {
+        assert_eq!(result("foo", "xxfooxfoo", 0), (true, 2, 9));
+        assert_eq!(result("abc", "xxaybzczz", 0), (true, 2, 7));
+        assert_eq!(result("abcd", "xxaydz", 2), (true, 2, 5));
+        assert_eq!(result("abc", "xyz", 3), (true, 0, 3));
+    }
+
+    fn result_generic(needle: &str, haystack: &str, max_typos: u16) -> (bool, usize, usize) {
         let haystack = haystack.as_bytes();
-
-        let scalar_result = {
-            let prefilter = PrefilterScalar::new(needle.as_bytes());
-            if max_typos > 0 {
-                prefilter.match_haystack_typos(haystack, max_typos).0
-            } else {
-                prefilter.match_haystack(haystack).0
-            }
+        let scalar_result = PrefilterScalar::new(needle.as_bytes()).match_haystack(haystack);
+        let scalar_result = if max_typos == 0 {
+            scalar_result
+        } else {
+            PrefilterScalar::new(needle.as_bytes()).match_haystack_typos(haystack, max_typos)
         };
+
+        let mut selected_prefilter = Prefilter::new(needle.as_bytes());
+        let selected = selected_prefilter.match_haystack(haystack, max_typos);
+        assert_same_result(
+            selected,
+            scalar_result,
+            &format!(
+                "selected backend result mismatch for needle={needle:?} haystack={:?} max_typos={max_typos}",
+                String::from_utf8_lossy(haystack)
+            ),
+        );
 
         #[cfg(target_arch = "x86_64")]
-        return {
+        {
             use crate::prefilter::backend::{PrefilterAVX, PrefilterAVX512, PrefilterSSE};
 
-            let avx_result = unsafe {
-                let prefilter = PrefilterAVX::new(needle.as_bytes());
-                if max_typos > 0 {
-                    prefilter.match_haystack_typos(haystack, max_typos).0
-                } else {
-                    prefilter.match_haystack(haystack).0
-                }
-            };
-            let sse_result = unsafe {
-                let prefilter = PrefilterSSE::new(needle.as_bytes());
-                if max_typos > 0 {
-                    prefilter.match_haystack_typos(haystack, max_typos).0
-                } else {
-                    prefilter.match_haystack(haystack).0
-                }
-            };
-            assert_eq!(
-                avx_result, sse_result,
-                "avx and sse results should be the same"
-            );
-            assert_eq!(
-                avx_result, scalar_result,
-                "avx and scalar results should be the same"
-            );
-            if PrefilterAVX512::is_available() {
-                let avx512_result = unsafe {
-                    let prefilter = PrefilterAVX512::new(needle.as_bytes());
-                    match max_typos {
-                        0 => prefilter.match_haystack(haystack),
-                        1 => prefilter.match_haystack_1_typo(haystack),
-                        2 => prefilter.match_haystack_typos::<2>(haystack),
-                        3 => prefilter.match_haystack_typos::<3>(haystack),
-                        4 => prefilter.match_haystack_typos::<4>(haystack),
-                        5 => prefilter.match_haystack_typos::<5>(haystack),
-                        6 => prefilter.match_haystack_typos::<6>(haystack),
-                        _ => todo!(),
+            if PrefilterAVX::is_available() {
+                let avx_result = unsafe {
+                    let mut prefilter = PrefilterAVX::new(needle.as_bytes());
+                    if max_typos == 0 {
+                        prefilter.match_haystack(haystack)
+                    } else {
+                        prefilter.match_haystack_typos(haystack, max_typos)
                     }
-                    .0
                 };
-                assert_eq!(
-                    avx512_result, scalar_result,
-                    "avx512 and scalar results should be the same"
-                );
+                assert_same_result(avx_result, scalar_result, "AVX2 mismatch");
             }
-            avx_result
-        };
+
+            if PrefilterSSE::is_available() {
+                let sse_result = unsafe {
+                    let mut prefilter = PrefilterSSE::new(needle.as_bytes());
+                    if max_typos == 0 {
+                        prefilter.match_haystack(haystack)
+                    } else {
+                        prefilter.match_haystack_typos(haystack, max_typos)
+                    }
+                };
+                assert_same_result(sse_result, scalar_result, "SSE mismatch");
+            }
+
+            if PrefilterAVX512::is_available() {
+                let mut prefilter =
+                    Prefilter::AVX512(unsafe { PrefilterAVX512::new(needle.as_bytes()) });
+                let avx512_result = prefilter.match_haystack(haystack, max_typos);
+                assert_same_result(avx512_result, scalar_result, "AVX-512 mismatch");
+            }
+        }
 
         #[cfg(target_arch = "aarch64")]
-        return {
+        {
             let neon_result = unsafe {
                 use crate::prefilter::backend::PrefilterNEON;
-
-                if max_typos > 0 {
-                    PrefilterNEON::new(needle.as_bytes())
-                        .match_haystack_typos(haystack, max_typos)
-                        .0
+                let mut prefilter = PrefilterNEON::new(needle.as_bytes());
+                if max_typos == 0 {
+                    prefilter.match_haystack(haystack)
                 } else {
-                    PrefilterNEON::new(needle.as_bytes())
-                        .match_haystack(haystack)
-                        .0
+                    prefilter.match_haystack_typos(haystack, max_typos)
                 }
             };
-            assert_eq!(
-                neon_result, scalar_result,
-                "neon and scalar results should be the same"
-            );
-            neon_result
-        };
+            assert_same_result(neon_result, scalar_result, "NEON mismatch");
+        }
 
-        #[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
-        return {
-            use crate::prefilter::PrefilterScalar;
+        scalar_result
+    }
 
-            let prefilter = PrefilterScalar::new(needle.as_bytes());
-            if max_typos > 0 {
-                prefilter.match_haystack_typos(haystack, max_typos).0
-            } else {
-                prefilter.match_haystack(haystack).0
-            }
-        };
+    fn assert_same_result(got: (bool, usize, usize), want: (bool, usize, usize), context: &str) {
+        if want.0 {
+            assert_eq!(got, want, "{context}");
+        } else {
+            assert_eq!(got.0, want.0, "{context}");
+        }
     }
 }

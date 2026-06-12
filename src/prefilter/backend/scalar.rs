@@ -1,164 +1,94 @@
-use super::case_needle;
+use crate::prefilter::algo::PrefilterImpl;
 
-#[inline(always)]
-pub fn match_haystack(needle: &[(u8, u8)], haystack: &[u8]) -> bool {
-    let mut haystack_idx = 0;
-    for needle in needle.iter() {
-        loop {
-            if haystack_idx == haystack.len() {
-                return false;
-            }
+use super::Backend;
 
-            if needle.0 == haystack[haystack_idx] || needle.1 == haystack[haystack_idx] {
-                haystack_idx += 1;
-                break;
-            }
-            haystack_idx += 1;
-        }
-    }
-
-    true
-}
-
-#[inline(always)]
-pub fn match_haystack_typos(needle: &[(u8, u8)], haystack: &[u8], max_typos: u16) -> bool {
-    let mut haystack_idx = 0;
-    let mut typos = 0;
-    for needle in needle.iter() {
-        loop {
-            if haystack_idx == haystack.len() {
-                typos += 1;
-                if typos > max_typos as usize {
-                    return false;
-                }
-
-                haystack_idx = 0;
-                break;
-            }
-
-            if needle.0 == haystack[haystack_idx] || needle.1 == haystack[haystack_idx] {
-                haystack_idx += 1;
-                break;
-            }
-            haystack_idx += 1;
-        }
-    }
-
-    true
-}
-
-/// Replicates the SIMD prefilter behavior in scalar for unsupported platforms.
-/// TODO: Replace this with an ordered prefilter following a memchr style approach
 #[derive(Debug, Clone)]
-pub struct PrefilterScalar {
-    needle: Vec<(u8, u8)>,
-}
+pub struct PrefilterScalar(PrefilterImpl<PrefilterScalarBackend>);
 
 impl PrefilterScalar {
     pub fn new(needle: &[u8]) -> Self {
-        Self {
-            needle: case_needle(needle),
-        }
+        Self(unsafe { PrefilterImpl::new(needle) })
     }
 
-    /// Determines the byte range to check for a given chunk, replicating SIMD
-    /// overlapping load behavior where when reaching the last chunk, the last
-    /// 16 bytes are loaded (overlapping with the previous chunk).
+    pub fn is_available() -> bool {
+        PrefilterImpl::<PrefilterScalarBackend>::is_available()
+    }
+
+    #[inline(never)]
+    pub fn match_haystack(&self, haystack: &[u8]) -> (bool, usize, usize) {
+        unsafe { self.0.match_haystack(haystack) }
+    }
+
+    #[inline(never)]
+    pub fn match_haystack_1_typo(&self, haystack: &[u8]) -> (bool, usize, usize) {
+        unsafe { self.0.match_haystack_1_typo(haystack) }
+    }
+
+    #[inline(never)]
+    pub fn match_haystack_2_typos(&self, haystack: &[u8]) -> (bool, usize, usize) {
+        unsafe { self.0.match_haystack_2_typos(haystack) }
+    }
+
+    #[inline(never)]
+    pub fn match_haystack_typos(
+        &mut self,
+        haystack: &[u8],
+        max_typos: u16,
+    ) -> (bool, usize, usize) {
+        match max_typos {
+            0 => self.match_haystack(haystack),
+            1 => self.match_haystack_1_typo(haystack),
+            2 => self.match_haystack_2_typos(haystack),
+            _ => unsafe { self.0.match_haystack_typos(haystack, max_typos) },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PrefilterScalarBackend;
+
+impl Backend for PrefilterScalarBackend {
+    const LANES: usize = 16;
+
+    type Chunk = [u8; 16];
+    type Needle = (u8, u8);
+    type Mask = u16;
+
+    fn is_available() -> bool {
+        true
+    }
+
     #[inline(always)]
-    fn overlapping_load(start: usize, len: usize) -> (usize, usize) {
-        if len <= 16 {
-            (0, len)
-        } else if start + 16 <= len {
-            (start, start + 16)
-        } else {
-            (len - 16, len)
+    unsafe fn broadcast(c1: u8, c2: u8) -> Self::Needle {
+        (c1, c2)
+    }
+
+    #[inline(always)]
+    unsafe fn load(ptr: *const u8) -> Self::Chunk {
+        unsafe {
+            let mut chunk = [0u8; 16];
+            std::ptr::copy_nonoverlapping(ptr, chunk.as_mut_ptr(), 16);
+            chunk
         }
     }
 
-    /// Unordered prefilter matching SIMD prefilter behavior: checks each needle
-    /// char exists somewhere in the current 16-byte chunk (unordered, with
-    /// replacement). Matches across chunks must appear in increasing chunk order.
-    pub fn match_haystack(&self, haystack: &[u8]) -> (bool, usize) {
-        let len = haystack.len();
-        match len {
-            0 => return (true, 0),
-            1..=7 => return (match_haystack(&self.needle, haystack), 0),
-            _ => {}
+    #[inline(always)]
+    unsafe fn load_partial(ptr: *const u8, remaining: usize, _mask: Self::Mask) -> Self::Chunk {
+        unsafe {
+            let mut chunk = [0u8; 16];
+            std::ptr::copy_nonoverlapping(ptr, chunk.as_mut_ptr(), remaining);
+            chunk
         }
-
-        let mut can_skip_chunks = true;
-        let mut skipped_chars = 0;
-        let mut needle_idx = 0;
-
-        for start in (0..len).step_by(16) {
-            let (chunk_start, chunk_end) = PrefilterScalar::overlapping_load(start, len);
-            let chunk = &haystack[chunk_start..chunk_end];
-
-            loop {
-                if needle_idx >= self.needle.len() {
-                    return (true, skipped_chars);
-                }
-
-                let (c1, c2) = self.needle[needle_idx];
-                if chunk.iter().any(|&b| b == c1 || b == c2) {
-                    if can_skip_chunks {
-                        skipped_chars = start;
-                    }
-                    can_skip_chunks = false;
-                    needle_idx += 1;
-                } else {
-                    break;
-                }
-            }
-        }
-
-        (needle_idx >= self.needle.len(), skipped_chars)
     }
 
-    /// Unordered prefilter with typo support, matching SIMD prefilter behavior.
-    pub fn match_haystack_typos(&self, haystack: &[u8], max_typos: u16) -> (bool, usize) {
-        let len = haystack.len();
-        match len {
-            0 => return (true, 0),
-            1..=7 => return (match_haystack_typos(&self.needle, haystack, max_typos), 0),
-            _ => {}
-        }
-
-        if max_typos >= 3 {
-            return (true, 0);
-        }
-
-        let mut needle_idx = 0;
-        let mut typos = 0;
-
-        loop {
-            for start in (0..len).step_by(16) {
-                let (chunk_start, chunk_end) = PrefilterScalar::overlapping_load(start, len);
-                let chunk = &haystack[chunk_start..chunk_end];
-
-                loop {
-                    if needle_idx >= self.needle.len() {
-                        return (true, 0);
-                    }
-
-                    let (c1, c2) = self.needle[needle_idx];
-                    if chunk.iter().any(|&b| b == c1 || b == c2) {
-                        needle_idx += 1;
-                    } else {
-                        break;
-                    }
-                }
-            }
-
-            typos += 1;
-            if typos > max_typos as usize {
-                return (false, 0);
-            }
-
-            needle_idx += 1;
-            if needle_idx >= self.needle.len() {
-                return (true, 0);
+    #[inline(always)]
+    unsafe fn occ(chunk: Self::Chunk, needle: Self::Needle) -> Self::Mask {
+        let mut mask = 0u16;
+        for (idx, &byte) in chunk.iter().enumerate() {
+            if byte == needle.0 || byte == needle.1 {
+                mask |= 1u16 << idx;
             }
         }
+        mask
     }
 }
