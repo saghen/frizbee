@@ -46,7 +46,7 @@ pub use sse::{SseBackend, SseU8Backend};
 /// [`BytesVec`] holds `LANES` meaningful bytes (one per lane); comparisons
 /// produce a [`MaskVec`] which can be widened element-wise to the [`ScoreVec`]
 /// via [`Backend::widen_mask`].
-pub trait Backend: Sized + 'static {
+pub trait Backend: Sized + core::fmt::Debug + Clone + 'static {
     const LANES: usize;
     /// Size of a single score lane in bytes. 1 for u8-element backends,
     /// 2 for u16-element backends. Used by the alignment-path iterator to

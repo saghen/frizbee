@@ -1,10 +1,6 @@
 use crate::Scoring;
-use backend::Backend as _;
-#[cfg(target_arch = "x86_64")]
-use backend::{Avx512Backend, Avx512U8Backend, AvxBackend, AvxU8Backend, SseBackend, SseU8Backend};
-#[cfg(target_arch = "aarch64")]
-use backend::{NeonBackend, NeonU8Backend};
-use backend::{Scalar8Backend, Scalar16U8Backend};
+use backend::Backend;
+use matrix::Matrix;
 
 mod algo;
 mod alignment;
@@ -12,7 +8,6 @@ mod alignment_iter;
 pub(crate) mod backend;
 mod matrix;
 
-use algo::SmithWatermanMatcherInternal;
 pub use alignment_iter::{Alignment, AlignmentPathIter};
 
 /// Returns true if every possible Smith-Waterman matrix cell value for this
@@ -31,269 +26,48 @@ pub(crate) fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
     max_matrix_score <= u8::MAX as usize
 }
 
-pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
-    fn new(needle: &[u8], scoring: &Scoring) -> Self;
-    fn match_haystack_indices(
-        &mut self,
-        haystack: &[u8],
-        skipped_chars: usize,
-        max_typos: Option<u16>,
-    ) -> Option<(u16, Vec<usize>)>;
-    fn score_haystack(&mut self, haystack: &[u8]) -> u16;
-    #[cfg(feature = "match_end_col")]
-    fn match_end_col(&self, haystack: &[u8]) -> u16;
-    fn iter_alignment_path(
-        &self,
-        skipped_chars: usize,
-        score: u16,
-        max_typos: Option<u16>,
-    ) -> AlignmentPathIter<'_>;
+#[derive(Debug, Clone)]
+pub(crate) struct SmithWaterman<B: Backend> {
+    needle: String,
+    needle_simd: Vec<(B::Bytes, B::Bytes)>,
+    scoring: Scoring,
+    score_matrix: Matrix<B>,
+    match_masks: Matrix<B>,
+    /// Number of LANES-wide chunks (incl. the leading zero column) actually
+    /// consumed by the most recent `score_haystack` call. The matrix stride is
+    /// always sized for `MAX_HAYSTACK_LEN` for zero-free reuse.
+    haystack_chunks: usize,
 }
-
-macro_rules! define_matcher {
-    (
-        $name:ident,
-        backend = $backend:ty,
-    ) => {
-        #[derive(Debug, Clone)]
-        pub struct $name(SmithWatermanMatcherInternal<$backend>);
-
-        impl $name {
-            #[inline(always)]
-            pub fn new(needle: &[u8], scoring: &Scoring) -> Self {
-                Self(SmithWatermanMatcherInternal::new(needle, scoring))
-            }
-
-            pub fn is_available() -> bool {
-                <$backend>::is_available()
-            }
-
-            #[cfg(test)]
-            #[inline(always)]
-            pub fn match_haystack(
-                &mut self,
-                haystack: &[u8],
-                max_typos: Option<u16>,
-            ) -> Option<u16> {
-                self.0.match_haystack(haystack, max_typos)
-            }
-
-            #[inline(always)]
-            pub fn match_haystack_indices(
-                &mut self,
-                haystack: &[u8],
-                skipped_chars: usize,
-                max_typos: Option<u16>,
-            ) -> Option<(u16, Vec<usize>)> {
-                self.0
-                    .match_haystack_indices(haystack, skipped_chars, max_typos)
-            }
-
-            #[inline(always)]
-            pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
-                self.0.score_haystack(haystack)
-            }
-
-            #[cfg(feature = "match_end_col")]
-            #[inline(always)]
-            pub fn match_end_col(&self, haystack: &[u8]) -> u16 {
-                self.0.match_end_col(haystack)
-            }
-
-            #[inline(always)]
-            pub fn iter_alignment_path(
-                &self,
-                skipped_chars: usize,
-                score: u16,
-                max_typos: Option<u16>,
-            ) -> AlignmentPathIter<'_> {
-                self.0.iter_alignment_path(skipped_chars, score, max_typos)
-            }
-        }
-
-        impl Kernel for $name {
-            #[inline]
-            fn new(needle: &[u8], scoring: &Scoring) -> Self {
-                <$name>::new(needle, scoring)
-            }
-
-            #[inline(always)]
-            fn match_haystack_indices(
-                &mut self,
-                haystack: &[u8],
-                skipped_chars: usize,
-                max_typos: Option<u16>,
-            ) -> Option<(u16, Vec<usize>)> {
-                <$name>::match_haystack_indices(self, haystack, skipped_chars, max_typos)
-            }
-
-            #[inline(always)]
-            fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
-                <$name>::score_haystack(self, haystack)
-            }
-
-            #[cfg(feature = "match_end_col")]
-            #[inline(always)]
-            fn match_end_col(&self, haystack: &[u8]) -> u16 {
-                <$name>::match_end_col(self, haystack)
-            }
-
-            #[inline(always)]
-            fn iter_alignment_path(
-                &self,
-                skipped_chars: usize,
-                score: u16,
-                max_typos: Option<u16>,
-            ) -> AlignmentPathIter<'_> {
-                <$name>::iter_alignment_path(self, skipped_chars, score, max_typos)
-            }
-        }
-    };
-}
-
-#[cfg(target_arch = "x86_64")]
-define_matcher!(SmithWatermanMatcherAVX512, backend = Avx512Backend,);
-
-#[cfg(target_arch = "x86_64")]
-define_matcher!(SmithWatermanMatcherAVX512U8, backend = Avx512U8Backend,);
-
-#[cfg(target_arch = "x86_64")]
-define_matcher!(SmithWatermanMatcherAVX2, backend = AvxBackend,);
-
-#[cfg(target_arch = "x86_64")]
-define_matcher!(SmithWatermanMatcherAVX2U8, backend = AvxU8Backend,);
-
-#[cfg(target_arch = "x86_64")]
-define_matcher!(SmithWatermanMatcherSSE, backend = SseBackend,);
-
-#[cfg(target_arch = "x86_64")]
-define_matcher!(SmithWatermanMatcherSSEU8, backend = SseU8Backend,);
-
-#[cfg(target_arch = "aarch64")]
-define_matcher!(SmithWatermanMatcherNEON, backend = NeonBackend,);
-
-#[cfg(target_arch = "aarch64")]
-define_matcher!(SmithWatermanMatcherNEONU8, backend = NeonU8Backend,);
-
-/// Scalar fallback. Always available, no target_feature needed.
-macro_rules! define_scalar_matcher {
-    ($name:ident, backend = $backend:ty) => {
-        #[derive(Debug, Clone)]
-        pub struct $name(SmithWatermanMatcherInternal<$backend>);
-
-        impl $name {
-            #[inline(always)]
-            pub fn new(needle: &[u8], scoring: &Scoring) -> Self {
-                Self(SmithWatermanMatcherInternal::new(needle, scoring))
-            }
-
-            #[cfg(test)]
-            #[inline(always)]
-            pub fn match_haystack(
-                &mut self,
-                haystack: &[u8],
-                max_typos: Option<u16>,
-            ) -> Option<u16> {
-                self.0.match_haystack(haystack, max_typos)
-            }
-
-            #[inline(always)]
-            pub fn match_haystack_indices(
-                &mut self,
-                haystack: &[u8],
-                skipped_chars: usize,
-                max_typos: Option<u16>,
-            ) -> Option<(u16, Vec<usize>)> {
-                self.0
-                    .match_haystack_indices(haystack, skipped_chars, max_typos)
-            }
-
-            #[inline(always)]
-            pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
-                self.0.score_haystack(haystack)
-            }
-
-            #[cfg(feature = "match_end_col")]
-            #[inline(always)]
-            pub fn match_end_col(&self, haystack: &[u8]) -> u16 {
-                self.0.match_end_col(haystack)
-            }
-
-            #[inline(always)]
-            pub fn iter_alignment_path(
-                &self,
-                skipped_chars: usize,
-                score: u16,
-                max_typos: Option<u16>,
-            ) -> AlignmentPathIter<'_> {
-                self.0.iter_alignment_path(skipped_chars, score, max_typos)
-            }
-        }
-
-        impl Kernel for $name {
-            #[inline]
-            fn new(needle: &[u8], scoring: &Scoring) -> Self {
-                <$name>::new(needle, scoring)
-            }
-
-            #[inline(always)]
-            fn match_haystack_indices(
-                &mut self,
-                haystack: &[u8],
-                skipped_chars: usize,
-                max_typos: Option<u16>,
-            ) -> Option<(u16, Vec<usize>)> {
-                <$name>::match_haystack_indices(self, haystack, skipped_chars, max_typos)
-            }
-
-            #[inline(always)]
-            fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
-                <$name>::score_haystack(self, haystack)
-            }
-
-            #[cfg(feature = "match_end_col")]
-            #[inline(always)]
-            fn match_end_col(&self, haystack: &[u8]) -> u16 {
-                <$name>::match_end_col(self, haystack)
-            }
-
-            #[inline(always)]
-            fn iter_alignment_path(
-                &self,
-                skipped_chars: usize,
-                score: u16,
-                max_typos: Option<u16>,
-            ) -> AlignmentPathIter<'_> {
-                <$name>::iter_alignment_path(self, skipped_chars, score, max_typos)
-            }
-        }
-    };
-}
-
-define_scalar_matcher!(SmithWatermanMatcherScalar, backend = Scalar8Backend);
-define_scalar_matcher!(SmithWatermanMatcherScalarU8, backend = Scalar16U8Backend);
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::r#const::*;
+    #[cfg(target_arch = "x86_64")]
+    use crate::smith_waterman::simd::backend::{
+        Avx512Backend, Avx512U8Backend, AvxBackend, AvxU8Backend, SseBackend, SseU8Backend,
+    };
+    use crate::smith_waterman::simd::backend::{Backend, Scalar8Backend, Scalar16U8Backend};
 
     const CHAR_SCORE: u16 = MATCH_SCORE + MATCHING_CASE_BONUS;
 
     fn get_score(needle: &str, haystack: &str) -> u16 {
-        let mut matcher = SmithWatermanMatcherScalar::new(needle.as_bytes(), &Scoring::default());
+        let mut matcher =
+            SmithWaterman::<Scalar8Backend>::new(needle.as_bytes(), &Scoring::default());
         let score = matcher.match_haystack(haystack.as_bytes(), Some(0));
         score.unwrap()
     }
 
     fn get_score_typos(needle: &str, haystack: &str, max_typos: u16) -> Option<u16> {
-        let mut matcher = SmithWatermanMatcherScalar::new(needle.as_bytes(), &Scoring::default());
+        let mut matcher =
+            SmithWaterman::<Scalar8Backend>::new(needle.as_bytes(), &Scoring::default());
         let score = matcher.match_haystack(haystack.as_bytes(), Some(max_typos));
         score
     }
 
     fn get_indices(needle: &str, haystack: &str) -> Option<Vec<usize>> {
-        let mut matcher = SmithWatermanMatcherScalar::new(needle.as_bytes(), &Scoring::default());
+        let mut matcher =
+            SmithWaterman::<Scalar8Backend>::new(needle.as_bytes(), &Scoring::default());
         let indices = matcher
             .match_haystack_indices(haystack.as_bytes(), 0, None)
             .map(|(_, indices)| indices);
@@ -388,7 +162,8 @@ mod tests {
 
     #[cfg(feature = "match_end_col")]
     fn get_end_col(needle: &str, haystack: &str) -> u16 {
-        let mut matcher = SmithWatermanMatcherScalar::new(needle.as_bytes(), &Scoring::default());
+        let mut matcher =
+            SmithWaterman::<Scalar8Backend>::new(needle.as_bytes(), &Scoring::default());
         matcher.match_haystack(haystack.as_bytes(), None);
         matcher.match_end_col(haystack.as_bytes())
     }
@@ -473,219 +248,111 @@ mod tests {
         ]
     }
 
-    #[test]
-    fn cross_backend_parity_score() {
-        let reference = |needle: &str, haystack: &str| {
-            let mut m = SmithWatermanMatcherScalar::new(needle.as_bytes(), &Scoring::default());
-            m.match_haystack(haystack.as_bytes(), None).unwrap()
-        };
+    fn score_with<B: Backend>(needle: &str, haystack: &str) -> u16 {
+        let mut matcher = SmithWaterman::<B>::new(needle.as_bytes(), &Scoring::default());
+        matcher.match_haystack(haystack.as_bytes(), None).unwrap()
+    }
 
-        for (needle, haystack) in cases() {
-            let want = reference(needle, haystack);
+    fn indices_with<B: Backend>(needle: &str, haystack: &str) -> Option<Vec<usize>> {
+        let mut matcher = SmithWaterman::<B>::new(needle.as_bytes(), &Scoring::default());
+        matcher
+            .match_haystack_indices(haystack.as_bytes(), 0, None)
+            .map(|(_, indices)| indices)
+    }
 
-            #[cfg(target_arch = "x86_64")]
-            if SmithWatermanMatcherSSE::is_available() {
-                let mut sse = SmithWatermanMatcherSSE::new(needle.as_bytes(), &Scoring::default());
-                let got = sse.match_haystack(haystack.as_bytes(), None).unwrap();
-                assert_eq!(
-                    got, want,
-                    "SSE-u16 score mismatch for needle={needle:?} haystack={haystack:?}"
-                );
-            }
-
-            #[cfg(target_arch = "x86_64")]
-            if SmithWatermanMatcherAVX512::is_available() {
-                let mut avx =
-                    SmithWatermanMatcherAVX512::new(needle.as_bytes(), &Scoring::default());
-                let got = avx.match_haystack(haystack.as_bytes(), None).unwrap();
-                assert_eq!(
-                    got, want,
-                    "AVX-512-u16 score mismatch for needle={needle:?} haystack={haystack:?}"
-                );
-            }
-
-            #[cfg(target_arch = "x86_64")]
-            if SmithWatermanMatcherAVX2::is_available() {
-                let mut avx = SmithWatermanMatcherAVX2::new(needle.as_bytes(), &Scoring::default());
-                let got = avx.match_haystack(haystack.as_bytes(), None).unwrap();
-                assert_eq!(
-                    got, want,
-                    "AVX-u16 score mismatch for needle={needle:?} haystack={haystack:?}"
-                );
-            }
-
-            #[cfg(target_arch = "x86_64")]
-            if SmithWatermanMatcherSSEU8::is_available()
-                && score_fits_in_u8(needle.len(), &Scoring::default())
-            {
-                let mut sse =
-                    SmithWatermanMatcherSSEU8::new(needle.as_bytes(), &Scoring::default());
-                let got = sse.match_haystack(haystack.as_bytes(), None).unwrap();
-                assert_eq!(
-                    got, want,
-                    "SSE-u8 score mismatch for needle={needle:?} haystack={haystack:?}"
-                );
-            }
-
-            #[cfg(target_arch = "x86_64")]
-            if SmithWatermanMatcherAVX2U8::is_available()
-                && score_fits_in_u8(needle.len(), &Scoring::default())
-            {
-                let mut avx =
-                    SmithWatermanMatcherAVX2U8::new(needle.as_bytes(), &Scoring::default());
-                let got = avx.match_haystack(haystack.as_bytes(), None).unwrap();
-                assert_eq!(
-                    got, want,
-                    "AVX-u8 score mismatch for needle={needle:?} haystack={haystack:?}"
-                );
-            }
-
-            #[cfg(target_arch = "x86_64")]
-            if SmithWatermanMatcherAVX512U8::is_available()
-                && score_fits_in_u8(needle.len(), &Scoring::default())
-            {
-                let mut avx =
-                    SmithWatermanMatcherAVX512U8::new(needle.as_bytes(), &Scoring::default());
-                let got = avx.match_haystack(haystack.as_bytes(), None).unwrap();
-                assert_eq!(
-                    got, want,
-                    "AVX-512-u8 score mismatch for needle={needle:?} haystack={haystack:?}"
-                );
-            }
-
-            let mut scalar =
-                SmithWatermanMatcherScalar::new(needle.as_bytes(), &Scoring::default());
-            let got = scalar.match_haystack(haystack.as_bytes(), None).unwrap();
+    fn assert_score_backend<B: Backend>(label: &str, needle: &str, haystack: &str, want: u16) {
+        if B::is_available() {
+            let got = score_with::<B>(needle, haystack);
             assert_eq!(
                 got, want,
-                "Scalar-u16 score mismatch for needle={needle:?} haystack={haystack:?}"
+                "{label} score mismatch for needle={needle:?} haystack={haystack:?}"
             );
+        }
+    }
+
+    fn assert_indices_backend<B: Backend>(
+        label: &str,
+        needle: &str,
+        haystack: &str,
+        want: Option<Vec<usize>>,
+    ) {
+        if B::is_available() {
+            let got = indices_with::<B>(needle, haystack);
+            assert_eq!(
+                got, want,
+                "{label} indices mismatch for needle={needle:?} haystack={haystack:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn cross_backend_parity_score() {
+        for (needle, haystack) in cases() {
+            let want = score_with::<Scalar8Backend>(needle, haystack);
+
+            #[cfg(target_arch = "x86_64")]
+            {
+                assert_score_backend::<SseBackend>("SSE-u16", needle, haystack, want);
+                assert_score_backend::<Avx512Backend>("AVX-512-u16", needle, haystack, want);
+                assert_score_backend::<AvxBackend>("AVX-u16", needle, haystack, want);
+
+                if score_fits_in_u8(needle.len(), &Scoring::default()) {
+                    assert_score_backend::<SseU8Backend>("SSE-u8", needle, haystack, want);
+                    assert_score_backend::<AvxU8Backend>("AVX-u8", needle, haystack, want);
+                    assert_score_backend::<Avx512U8Backend>("AVX-512-u8", needle, haystack, want);
+                }
+            }
+
+            assert_score_backend::<Scalar8Backend>("Scalar-u16", needle, haystack, want);
 
             if score_fits_in_u8(needle.len(), &Scoring::default()) {
-                let mut scalar_u8 =
-                    SmithWatermanMatcherScalarU8::new(needle.as_bytes(), &Scoring::default());
-                let got = scalar_u8.match_haystack(haystack.as_bytes(), None).unwrap();
-                assert_eq!(
-                    got, want,
-                    "Scalar-u8 score mismatch for needle={needle:?} haystack={haystack:?}"
-                );
+                assert_score_backend::<Scalar16U8Backend>("Scalar-u8", needle, haystack, want);
             }
         }
     }
 
     #[test]
     fn cross_backend_parity_indices() {
-        let reference = |needle: &str, haystack: &str| {
-            let mut m = SmithWatermanMatcherScalar::new(needle.as_bytes(), &Scoring::default());
-            m.match_haystack_indices(haystack.as_bytes(), 0, None)
-                .map(|(_, indices)| indices)
-        };
-
         for (needle, haystack) in cases() {
-            let want = reference(needle, haystack);
+            let want = indices_with::<Scalar8Backend>(needle, haystack);
 
             #[cfg(target_arch = "x86_64")]
-            if SmithWatermanMatcherSSE::is_available() {
-                let mut sse = SmithWatermanMatcherSSE::new(needle.as_bytes(), &Scoring::default());
-                let got = sse
-                    .match_haystack_indices(haystack.as_bytes(), 0, None)
-                    .map(|(_, indices)| indices);
-                assert_eq!(
-                    got, want,
-                    "SSE-u16 indices mismatch for needle={needle:?} haystack={haystack:?}"
-                );
-            }
-
-            #[cfg(target_arch = "x86_64")]
-            if SmithWatermanMatcherAVX512::is_available() {
-                let mut avx =
-                    SmithWatermanMatcherAVX512::new(needle.as_bytes(), &Scoring::default());
-                let got = avx
-                    .match_haystack_indices(haystack.as_bytes(), 0, None)
-                    .map(|(_, indices)| indices);
-                assert_eq!(
-                    got, want,
-                    "AVX-512-u16 indices mismatch for needle={needle:?} haystack={haystack:?}"
-                );
-            }
-
-            #[cfg(target_arch = "x86_64")]
-            if SmithWatermanMatcherAVX2::is_available() {
-                let mut avx = SmithWatermanMatcherAVX2::new(needle.as_bytes(), &Scoring::default());
-                let got = avx
-                    .match_haystack_indices(haystack.as_bytes(), 0, None)
-                    .map(|(_, indices)| indices);
-                assert_eq!(
-                    got, want,
-                    "AVX-u16 indices mismatch for needle={needle:?} haystack={haystack:?}"
-                );
-            }
-
-            #[cfg(target_arch = "x86_64")]
-            if SmithWatermanMatcherSSEU8::is_available()
-                && score_fits_in_u8(needle.len(), &Scoring::default())
             {
-                let mut sse =
-                    SmithWatermanMatcherSSEU8::new(needle.as_bytes(), &Scoring::default());
-                let got = sse
-                    .match_haystack_indices(haystack.as_bytes(), 0, None)
-                    .map(|(_, indices)| indices);
-                assert_eq!(
-                    got, want,
-                    "SSE-u8 indices mismatch for needle={needle:?} haystack={haystack:?}"
+                assert_indices_backend::<SseBackend>("SSE-u16", needle, haystack, want.clone());
+                assert_indices_backend::<Avx512Backend>(
+                    "AVX-512-u16",
+                    needle,
+                    haystack,
+                    want.clone(),
                 );
+                assert_indices_backend::<AvxBackend>("AVX-u16", needle, haystack, want.clone());
+
+                if score_fits_in_u8(needle.len(), &Scoring::default()) {
+                    assert_indices_backend::<SseU8Backend>(
+                        "SSE-u8",
+                        needle,
+                        haystack,
+                        want.clone(),
+                    );
+                    assert_indices_backend::<AvxU8Backend>(
+                        "AVX-u8",
+                        needle,
+                        haystack,
+                        want.clone(),
+                    );
+                    assert_indices_backend::<Avx512U8Backend>(
+                        "AVX-512-u8",
+                        needle,
+                        haystack,
+                        want.clone(),
+                    );
+                }
             }
 
-            #[cfg(target_arch = "x86_64")]
-            if SmithWatermanMatcherAVX2U8::is_available()
-                && score_fits_in_u8(needle.len(), &Scoring::default())
-            {
-                let mut avx =
-                    SmithWatermanMatcherAVX2U8::new(needle.as_bytes(), &Scoring::default());
-                let got = avx
-                    .match_haystack_indices(haystack.as_bytes(), 0, None)
-                    .map(|(_, indices)| indices);
-                assert_eq!(
-                    got, want,
-                    "AVX-u8 indices mismatch for needle={needle:?} haystack={haystack:?}"
-                );
-            }
-
-            #[cfg(target_arch = "x86_64")]
-            if SmithWatermanMatcherAVX512U8::is_available()
-                && score_fits_in_u8(needle.len(), &Scoring::default())
-            {
-                let mut avx =
-                    SmithWatermanMatcherAVX512U8::new(needle.as_bytes(), &Scoring::default());
-                let got = avx
-                    .match_haystack_indices(haystack.as_bytes(), 0, None)
-                    .map(|(_, indices)| indices);
-                assert_eq!(
-                    got, want,
-                    "AVX-512-u8 indices mismatch for needle={needle:?} haystack={haystack:?}"
-                );
-            }
-
-            let mut scalar =
-                SmithWatermanMatcherScalar::new(needle.as_bytes(), &Scoring::default());
-            let got = scalar
-                .match_haystack_indices(haystack.as_bytes(), 0, None)
-                .map(|(_, indices)| indices);
-            assert_eq!(
-                got, want,
-                "Scalar-u16 indices mismatch for needle={needle:?} haystack={haystack:?}"
-            );
+            assert_indices_backend::<Scalar8Backend>("Scalar-u16", needle, haystack, want.clone());
 
             if score_fits_in_u8(needle.len(), &Scoring::default()) {
-                let mut scalar_u8 =
-                    SmithWatermanMatcherScalarU8::new(needle.as_bytes(), &Scoring::default());
-                let got = scalar_u8
-                    .match_haystack_indices(haystack.as_bytes(), 0, None)
-                    .map(|(_, indices)| indices);
-                assert_eq!(
-                    got, want,
-                    "Scalar-u8 indices mismatch for needle={needle:?} haystack={haystack:?}"
-                );
+                assert_indices_backend::<Scalar16U8Backend>("Scalar-u8", needle, haystack, want);
             }
         }
     }

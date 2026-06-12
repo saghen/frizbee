@@ -1,8 +1,8 @@
-use crate::smith_waterman::simd::{AlignmentPathIter, algo::SmithWatermanMatcherInternal};
+use crate::smith_waterman::simd::{AlignmentPathIter, SmithWaterman};
 
 use super::backend::Backend;
 
-impl<B: Backend> SmithWatermanMatcherInternal<B> {
+impl<B: Backend> SmithWaterman<B> {
     #[inline(always)]
     pub fn iter_alignment_path(
         &self,
