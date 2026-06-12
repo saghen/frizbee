@@ -26,17 +26,19 @@
 //! bitmask > 0 // needle found in haystack, check next needle char
 //! ```
 //!
-//! See the full implementation in [`src/prefilter/x86_64/avx2.rs`](src/prefilter/x86_64/avx2.rs). When 256-bit SIMD is not available (no AVX2 or ARM), we simply check the uppercase and lowercase separately.
+//! See the full implementation in [`src/prefilter/backend/avx.rs`](src/prefilter/backend/avx.rs). When 256-bit SIMD is not available (no AVX2 or ARM), we simply check the uppercase and lowercase separately.
 //!
 //! The `Prefilter` struct chooses the fastest algorithm via runtime feature detection.
 //! SIMD algorithms only apply to haystack.len() >= 16.
 //! All algorithms assume that needle.len() > 0
 
+pub(crate) mod backend;
+
 #[cfg(target_arch = "aarch64")]
-pub mod aarch64;
-pub mod scalar;
+use backend::PrefilterNEON;
+use backend::PrefilterScalar;
 #[cfg(target_arch = "x86_64")]
-pub mod x86_64;
+use backend::{PrefilterAVX, PrefilterAVX512, PrefilterSSE};
 
 pub(crate) fn case_needle(needle: &[u8]) -> Vec<(u8, u8)> {
     needle
@@ -59,36 +61,36 @@ pub(crate) fn case_needle(needle: &[u8]) -> Vec<(u8, u8)> {
 #[derive(Debug, Clone)]
 pub enum Prefilter {
     #[cfg(target_arch = "x86_64")]
-    AVX512(x86_64::PrefilterAVX512),
+    AVX512(PrefilterAVX512),
     #[cfg(target_arch = "x86_64")]
-    AVX(x86_64::PrefilterAVX),
+    AVX(PrefilterAVX),
     #[cfg(target_arch = "x86_64")]
-    SSE(x86_64::PrefilterSSE),
+    SSE(PrefilterSSE),
     #[cfg(target_arch = "aarch64")]
-    NEON(aarch64::PrefilterNEON),
-    Scalar(scalar::PrefilterScalar),
+    NEON(PrefilterNEON),
+    Scalar(PrefilterScalar),
 }
 
 impl Prefilter {
     pub fn new(needle: &[u8]) -> Self {
         #[cfg(target_arch = "x86_64")]
-        if x86_64::PrefilterAVX512::is_available() {
-            return Prefilter::AVX512(unsafe { x86_64::PrefilterAVX512::new(needle) });
+        if PrefilterAVX512::is_available() {
+            return Prefilter::AVX512(unsafe { PrefilterAVX512::new(needle) });
         }
         #[cfg(target_arch = "x86_64")]
-        if x86_64::PrefilterAVX::is_available() {
-            return Prefilter::AVX(unsafe { x86_64::PrefilterAVX::new(needle) });
+        if PrefilterAVX::is_available() {
+            return Prefilter::AVX(unsafe { PrefilterAVX::new(needle) });
         }
         #[cfg(target_arch = "x86_64")]
-        if x86_64::PrefilterSSE::is_available() {
-            return Prefilter::SSE(unsafe { x86_64::PrefilterSSE::new(needle) });
+        if PrefilterSSE::is_available() {
+            return Prefilter::SSE(unsafe { PrefilterSSE::new(needle) });
         }
 
         #[cfg(target_arch = "aarch64")]
-        return Prefilter::NEON(aarch64::PrefilterNEON::new(needle));
+        return Prefilter::NEON(PrefilterNEON::new(needle));
 
         #[cfg(not(target_arch = "aarch64"))]
-        Prefilter::Scalar(scalar::PrefilterScalar::new(needle))
+        Prefilter::Scalar(PrefilterScalar::new(needle))
     }
 
     /// Whether a `true` result from [`Self::match_haystack`] for the given
@@ -386,7 +388,7 @@ mod tests {
     }
 
     fn match_haystack_generic(needle: &str, haystack: &str, max_typos: u16) -> bool {
-        use crate::prefilter::scalar::PrefilterScalar;
+        use crate::prefilter::backend::PrefilterScalar;
 
         let haystack = normalize_haystack(haystack);
         let haystack = haystack.as_bytes();
@@ -402,7 +404,7 @@ mod tests {
 
         #[cfg(target_arch = "x86_64")]
         return {
-            use crate::prefilter::x86_64::{PrefilterAVX, PrefilterAVX512, PrefilterSSE};
+            use crate::prefilter::backend::{PrefilterAVX, PrefilterAVX512, PrefilterSSE};
 
             let avx_result = unsafe {
                 let prefilter = PrefilterAVX::new(needle.as_bytes());
@@ -454,7 +456,7 @@ mod tests {
         #[cfg(target_arch = "aarch64")]
         return {
             let neon_result = unsafe {
-                use crate::prefilter::aarch64::PrefilterNEON;
+                use crate::prefilter::backend::PrefilterNEON;
 
                 if max_typos > 0 {
                     PrefilterNEON::new(needle.as_bytes())

@@ -1,11 +1,24 @@
+#[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
-mod avx2;
+#[cfg(target_arch = "x86_64")]
+mod avx;
+#[cfg(target_arch = "x86_64")]
 mod avx512;
+#[cfg(target_arch = "aarch64")]
+mod neon;
+mod scalar;
+#[cfg(target_arch = "x86_64")]
 mod sse;
 
-pub use avx2::*;
+#[cfg(target_arch = "x86_64")]
+pub use avx::*;
+#[cfg(target_arch = "x86_64")]
 pub use avx512::*;
+#[cfg(target_arch = "aarch64")]
+pub use neon::*;
+pub use scalar::*;
+#[cfg(target_arch = "x86_64")]
 pub use sse::*;
 
 /// Loads a chunk of 16 bytes from the haystack, with overlap when remaining bytes < 16,
@@ -20,6 +33,7 @@ pub use sse::*;
 /// # Safety
 /// Caller must ensure that haystack length >= 8
 #[inline(always)]
+#[cfg(target_arch = "x86_64")]
 pub unsafe fn overlapping_load(haystack: &[u8], start: usize, len: usize) -> __m128i {
     unsafe {
         match len {
