@@ -1,16 +1,75 @@
+//! SSE backend: 8-lane Score (128-bit __m128i), 8-byte Bytes (low half of __m128i).
+//!
+//! The Bytes vector physically occupies a full 128-bit register, but only the
+//! low 8 bytes are meaningful. Upper bytes are don't-care; the kernel never
+//! reads them (it widens via `_mm_cvtepi8_epi16` which only consumes the low 8
+//! bytes), and the cross-chunk carry in `shift_right_padded_1` works entirely
+//! within the meaningful region.
+
 use std::arch::x86_64::*;
 
-use crate::simd::{AVXVector, SSE256Vector};
+use super::{Backend, BytesVec, ScoreVec};
 
 #[derive(Debug, Clone, Copy)]
-pub struct SSEVector(__m128i);
+pub struct SseBytes(__m128i);
 
-impl SSEVector {
+#[derive(Debug, Clone, Copy)]
+pub struct SseScore(__m128i);
+
+#[derive(Debug, Clone, Copy)]
+pub struct SseBackend;
+
+impl Backend for SseBackend {
+    const LANES: usize = 8;
+    const LANE_BYTES: usize = 2;
+    type Bytes = SseBytes;
+    type Score = SseScore;
+
+    fn is_available() -> bool {
+        // SSE 4.1 covers _mm_minpos_epu16, _mm_cvtepi8_epi16, _mm_max_epu16,
+        // _mm_alignr_epi8.
+        raw_cpuid::CpuId::new()
+            .get_feature_info()
+            .is_some_and(|info| info.has_sse41())
+    }
+
+    #[inline(always)]
+    unsafe fn widen(b: Self::Bytes) -> Self::Score {
+        unsafe { SseScore(_mm_cvtepi8_epi16(b.0)) }
+    }
+
+    #[inline(always)]
+    unsafe fn propagate_horizontal_gaps(
+        row: Self::Score,
+        adjacent_row: Self::Score,
+        match_mask: Self::Score,
+        adjacent_match_mask: Self::Score,
+        gap_open_penalty: Self::Score,
+        gap_extend_penalty: Self::Score,
+    ) -> Self::Score {
+        unsafe {
+            super::propagate_8_lane::<SseBackend>(
+                row,
+                adjacent_row,
+                match_mask,
+                adjacent_match_mask,
+                gap_open_penalty,
+                gap_extend_penalty,
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SseBytes (8 bytes meaningful, __m128i)
+// ---------------------------------------------------------------------------
+
+impl SseBytes {
+    /// Safe page-bounded read of 0..8 bytes into the low 64 bits of an __m128i.
     #[inline(always)]
     unsafe fn load_partial_safe(ptr: *const u8, len: usize) -> __m128i {
         unsafe {
             debug_assert!(len < 8);
-
             let val: u64 = match len {
                 0 => 0,
                 1 => *ptr as u64,
@@ -34,264 +93,406 @@ impl SSEVector {
                 7 => {
                     let lo = (ptr as *const u32).read_unaligned() as u64;
                     let hi = (ptr.add(4) as *const u32).read_unaligned() as u64;
-                    // Mask hi to only 3 bytes (24 bits)
                     lo | ((hi & 0xFFFFFF) << 32)
                 }
                 _ => std::hint::unreachable_unchecked(),
             };
-
             _mm_cvtsi64_si128(val as i64)
         }
     }
 
     #[inline(always)]
     fn can_overread_8(ptr: *const u8) -> bool {
-        // Safe if not in last 7 bytes of a page
         (ptr as usize & 0xFFF) <= (4096 - 8)
     }
 }
 
-impl super::Vector for SSEVector {
-    #[inline]
-    fn is_available() -> bool {
-        raw_cpuid::CpuId::new()
-            .get_feature_info()
-            .is_some_and(|info| info.has_sse41())
-    }
-
+impl BytesVec for SseBytes {
     #[inline(always)]
     unsafe fn zero() -> Self {
         unsafe { Self(_mm_setzero_si128()) }
     }
-
     #[inline(always)]
-    unsafe fn splat_u8(value: u8) -> Self {
+    unsafe fn splat(value: u8) -> Self {
         unsafe { Self(_mm_set1_epi8(value as i8)) }
     }
-
     #[inline(always)]
-    unsafe fn splat_u16(value: u16) -> Self {
-        unsafe { Self(_mm_set1_epi16(value as i16)) }
-    }
-
-    #[inline(always)]
-    unsafe fn eq_u8(self, other: Self) -> Self {
+    unsafe fn eq(self, other: Self) -> Self {
         unsafe { Self(_mm_cmpeq_epi8(self.0, other.0)) }
     }
-
     #[inline(always)]
-    unsafe fn gt_u8(self, other: Self) -> Self {
+    unsafe fn gt(self, other: Self) -> Self {
         unsafe {
-            let sign_bit = _mm_set1_epi8(-128i8);
-            let a_flipped = _mm_xor_si128(self.0, sign_bit);
-            let b_flipped = _mm_xor_si128(other.0, sign_bit);
-            Self(_mm_cmpgt_epi8(a_flipped, b_flipped))
+            let sign = _mm_set1_epi8(-128i8);
+            Self(_mm_cmpgt_epi8(
+                _mm_xor_si128(self.0, sign),
+                _mm_xor_si128(other.0, sign),
+            ))
         }
     }
-
     #[inline(always)]
-    unsafe fn lt_u8(self, other: Self) -> Self {
+    unsafe fn lt(self, other: Self) -> Self {
         unsafe {
-            let sign_bit = _mm_set1_epi8(-128i8);
-            let a_flipped = _mm_xor_si128(self.0, sign_bit);
-            let b_flipped = _mm_xor_si128(other.0, sign_bit);
-            Self(_mm_cmplt_epi8(a_flipped, b_flipped))
+            let sign = _mm_set1_epi8(-128i8);
+            Self(_mm_cmplt_epi8(
+                _mm_xor_si128(self.0, sign),
+                _mm_xor_si128(other.0, sign),
+            ))
         }
     }
-
-    #[inline(always)]
-    unsafe fn max_u16(self, other: Self) -> Self {
-        unsafe { Self(_mm_max_epu16(self.0, other.0)) }
-    }
-
-    #[inline(always)]
-    unsafe fn smax_u16(self) -> u16 {
-        unsafe {
-            // PHMINPOSUW finds minimum, so we invert to find maximum
-            let all_ones = _mm_set1_epi16(-1); // 0xFFFF
-            let inverted = _mm_xor_si128(self.0, all_ones); // ~v
-
-            // Find minimum of inverted values (= maximum of original)
-            let min_pos = _mm_minpos_epu16(inverted);
-
-            // Extract and invert back
-            let min_val = _mm_extract_epi16(min_pos, 0) as u16;
-            !min_val // Invert to get original max
-        }
-    }
-
-    #[inline(always)]
-    unsafe fn add_u16(self, other: Self) -> Self {
-        unsafe { Self(_mm_add_epi16(self.0, other.0)) }
-    }
-
-    #[inline(always)]
-    unsafe fn subs_u16(self, other: Self) -> Self {
-        unsafe { Self(_mm_subs_epu16(self.0, other.0)) }
-    }
-
     #[inline(always)]
     unsafe fn and(self, other: Self) -> Self {
         unsafe { Self(_mm_and_si128(self.0, other.0)) }
     }
-
     #[inline(always)]
     unsafe fn or(self, other: Self) -> Self {
         unsafe { Self(_mm_or_si128(self.0, other.0)) }
     }
-
     #[inline(always)]
     unsafe fn not(self) -> Self {
         unsafe { Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1))) }
     }
 
     #[inline(always)]
-    unsafe fn shift_right_padded_u16<const L: i32>(self, other: Self) -> Self {
-        unsafe {
-            match L {
-                0 => self,
-                1 => Self(_mm_alignr_epi8::<14>(self.0, other.0)),
-                2 => Self(_mm_alignr_epi8::<12>(self.0, other.0)),
-                3 => Self(_mm_alignr_epi8::<10>(self.0, other.0)),
-                4 => Self(_mm_alignr_epi8::<8>(self.0, other.0)),
-                5 => Self(_mm_alignr_epi8::<6>(self.0, other.0)),
-                6 => Self(_mm_alignr_epi8::<4>(self.0, other.0)),
-                7 => Self(_mm_alignr_epi8::<2>(self.0, other.0)),
-                _ => unreachable!(),
-            }
-        }
-    }
-
-    #[cfg(test)]
-    fn from_array(arr: [u8; 16]) -> Self {
-        Self(unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) })
-    }
-    #[cfg(test)]
-    fn to_array(self) -> [u8; 16] {
-        let mut arr = [0u8; 16];
-        unsafe { _mm_storeu_si128(arr.as_mut_ptr() as *mut __m128i, self.0) };
-        arr
-    }
-    #[cfg(test)]
-    fn from_array_u16(arr: [u16; 8]) -> Self {
-        Self(unsafe { _mm_loadu_si128(arr.as_ptr() as *const __m128i) })
-    }
-    #[cfg(test)]
-    fn to_array_u16(self) -> [u16; 8] {
-        let mut arr = [0u16; 8];
-        unsafe { _mm_storeu_si128(arr.as_mut_ptr() as *mut __m128i, self.0) };
-        arr
-    }
-}
-
-impl super::Vector128 for SSEVector {
-    #[inline(always)]
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         unsafe {
-            Self(match len {
+            let remaining = len.saturating_sub(start);
+            let ptr = data.add(start);
+            Self(match remaining {
                 0 => _mm_setzero_si128(),
-                8 => _mm_loadl_epi64(data as *const __m128i),
-                16 => _mm_loadu_si128(data as *const __m128i),
-
-                1..=7 if Self::can_overread_8(data) => {
-                    let lo = _mm_loadl_epi64(data as *const __m128i);
-                    let mask = _mm_set_epi64x(0, (1i64 << (len * 8)) - 1);
+                8.. => _mm_loadl_epi64(ptr as *const __m128i),
+                1..=7 if Self::can_overread_8(ptr) => {
+                    let lo = _mm_loadl_epi64(ptr as *const __m128i);
+                    let mask = _mm_set_epi64x(0, (1i64 << (remaining * 8)) - 1);
                     _mm_and_si128(lo, mask)
                 }
-                1..=7 => Self::load_partial_safe(data, len),
-                9..=15 => {
-                    let lo = _mm_loadl_epi64(data as *const __m128i);
-
-                    let hi_start = len - 8;
-                    let hi = _mm_loadl_epi64(data.add(hi_start) as *const __m128i);
-                    let hi = match 16 - len {
-                        1 => _mm_srli_si128(hi, 1),
-                        2 => _mm_srli_si128(hi, 2),
-                        3 => _mm_srli_si128(hi, 3),
-                        4 => _mm_srli_si128(hi, 4),
-                        5 => _mm_srli_si128(hi, 5),
-                        6 => _mm_srli_si128(hi, 6),
-                        7 => _mm_srli_si128(hi, 7),
-                        _ => unreachable!(),
-                    };
-
-                    _mm_unpacklo_epi64(lo, hi)
-                }
-
-                _ if start + 16 <= len => _mm_loadu_si128(data.add(start) as *const __m128i),
-                _ => {
-                    let overlap = start + 16 - len; // bytes we need to shift out
-                    let data = _mm_loadu_si128(data.add(len - 16) as *const __m128i);
-
-                    // Shift left by 'overlap' bytes to align data to start position
-                    // This zeros out the rightmost 'overlap' bytes and shifts content left
-                    match overlap {
-                        1 => _mm_srli_si128(data, 1),
-                        2 => _mm_srli_si128(data, 2),
-                        3 => _mm_srli_si128(data, 3),
-                        4 => _mm_srli_si128(data, 4),
-                        5 => _mm_srli_si128(data, 5),
-                        6 => _mm_srli_si128(data, 6),
-                        7 => _mm_srli_si128(data, 7),
-                        8 => _mm_srli_si128(data, 8),
-                        9 => _mm_srli_si128(data, 9),
-                        10 => _mm_srli_si128(data, 10),
-                        11 => _mm_srli_si128(data, 11),
-                        12 => _mm_srli_si128(data, 12),
-                        13 => _mm_srli_si128(data, 13),
-                        14 => _mm_srli_si128(data, 14),
-                        15 => _mm_srli_si128(data, 15),
-                        _ => _mm_setzero_si128(),
-                    }
-                }
+                _ => Self::load_partial_safe(ptr, remaining),
             })
         }
     }
 
     #[inline(always)]
-    unsafe fn shift_right_padded_u8<const L: i32>(self, other: Self) -> Self {
+    unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         unsafe {
-            match L {
-                0 => self,
-                1 => Self(_mm_alignr_epi8::<15>(self.0, other.0)),
-                2 => Self(_mm_alignr_epi8::<14>(self.0, other.0)),
-                3 => Self(_mm_alignr_epi8::<13>(self.0, other.0)),
-                4 => Self(_mm_alignr_epi8::<12>(self.0, other.0)),
-                5 => Self(_mm_alignr_epi8::<11>(self.0, other.0)),
-                6 => Self(_mm_alignr_epi8::<10>(self.0, other.0)),
-                7 => Self(_mm_alignr_epi8::<9>(self.0, other.0)),
-                8 => Self(_mm_alignr_epi8::<8>(self.0, other.0)),
-                9 => Self(_mm_alignr_epi8::<7>(self.0, other.0)),
-                10 => Self(_mm_alignr_epi8::<6>(self.0, other.0)),
-                11 => Self(_mm_alignr_epi8::<5>(self.0, other.0)),
-                12 => Self(_mm_alignr_epi8::<4>(self.0, other.0)),
-                13 => Self(_mm_alignr_epi8::<3>(self.0, other.0)),
-                14 => Self(_mm_alignr_epi8::<2>(self.0, other.0)),
-                15 => Self(_mm_alignr_epi8::<1>(self.0, other.0)),
-                _ => unreachable!(),
-            }
+            // Want low 8 bytes = [prev[7], self[0..7]].
+            // Move prev's low 8 bytes to bytes 8..16 so prev[7] lands at byte 15.
+            let shifted = _mm_slli_si128::<8>(prev.0);
+            // alignr<15>(self, shifted) = (self || shifted)[15..31]
+            //   = [shifted[15], self[0..15]]
+            //   = [prev[7], self[0..15]]
+            // Low 8 bytes: [prev[7], self[0..7]]. Upper 8 are don't-care.
+            Self(_mm_alignr_epi8::<15>(self.0, shifted))
+        }
+    }
+
+    #[cfg(test)]
+    fn from_lanes(values: &[u8]) -> Self {
+        assert_eq!(values.len(), 8);
+        // Place values in low 8 bytes; zero the high 8.
+        let mut buf = [0u8; 16];
+        buf[..8].copy_from_slice(values);
+        Self(unsafe { _mm_loadu_si128(buf.as_ptr() as *const __m128i) })
+    }
+    #[cfg(test)]
+    fn to_lanes(self) -> Vec<u8> {
+        let mut buf = [0u8; 16];
+        unsafe { _mm_storeu_si128(buf.as_mut_ptr() as *mut __m128i, self.0) };
+        buf[..8].to_vec()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SseScore (8 × u16, __m128i)
+// ---------------------------------------------------------------------------
+
+impl ScoreVec for SseScore {
+    #[inline(always)]
+    unsafe fn zero() -> Self {
+        unsafe { Self(_mm_setzero_si128()) }
+    }
+    #[inline(always)]
+    unsafe fn splat(value: u16) -> Self {
+        unsafe { Self(_mm_set1_epi16(value as i16)) }
+    }
+    #[inline(always)]
+    unsafe fn first_lane(value: u16) -> Self {
+        unsafe { Self(_mm_cvtsi32_si128(value as i32)) }
+    }
+    #[inline(always)]
+    unsafe fn max(self, other: Self) -> Self {
+        unsafe { Self(_mm_max_epu16(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn horizontal_max(self) -> u16 {
+        unsafe {
+            // PHMINPOSUW finds the minimum; invert to find the max.
+            let all_ones = _mm_set1_epi16(-1);
+            let inverted = _mm_xor_si128(self.0, all_ones);
+            let min_pos = _mm_minpos_epu16(inverted);
+            let min_val = _mm_extract_epi16::<0>(min_pos) as u16;
+            !min_val
+        }
+    }
+    #[inline(always)]
+    unsafe fn add(self, other: Self) -> Self {
+        unsafe { Self(_mm_add_epi16(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn subs(self, other: Self) -> Self {
+        unsafe { Self(_mm_subs_epu16(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn and(self, other: Self) -> Self {
+        unsafe { Self(_mm_and_si128(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn shift_right_padded<const L: i32>(self, prev: Self) -> Self {
+        unsafe {
+            const { assert!(L >= 0 && L <= 8) };
+            Self(match L {
+                0 => self.0,
+                1 => _mm_alignr_epi8::<14>(self.0, prev.0),
+                2 => _mm_alignr_epi8::<12>(self.0, prev.0),
+                3 => _mm_alignr_epi8::<10>(self.0, prev.0),
+                4 => _mm_alignr_epi8::<8>(self.0, prev.0),
+                5 => _mm_alignr_epi8::<6>(self.0, prev.0),
+                6 => _mm_alignr_epi8::<4>(self.0, prev.0),
+                7 => _mm_alignr_epi8::<2>(self.0, prev.0),
+                8 => prev.0,
+                _ => std::hint::unreachable_unchecked(),
+            })
+        }
+    }
+    #[inline(always)]
+    unsafe fn find_lane(self, search: u16) -> usize {
+        unsafe {
+            let cmp = _mm_cmpeq_epi16(self.0, _mm_set1_epi16(search as i16));
+            let mask = _mm_movemask_epi8(cmp) as u32;
+            (mask.trailing_zeros() as usize / 2).min(8)
+        }
+    }
+
+    #[cfg(test)]
+    fn from_lanes(values: &[u16]) -> Self {
+        assert_eq!(values.len(), 8);
+        Self(unsafe { _mm_loadu_si128(values.as_ptr() as *const __m128i) })
+    }
+    #[cfg(test)]
+    fn to_lanes(self) -> Vec<u16> {
+        let mut buf = [0u16; 8];
+        unsafe { _mm_storeu_si128(buf.as_mut_ptr() as *mut __m128i, self.0) };
+        buf.to_vec()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SSE u8-scoring backend: 16-lane Score (128-bit __m128i, 16 × u8), 16-byte
+// Bytes (128-bit __m128i). Selected when the max possible score fits in u8.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy)]
+pub struct SseU8Bytes(__m128i);
+
+#[derive(Debug, Clone, Copy)]
+pub struct SseU8Score(__m128i);
+
+#[derive(Debug, Clone, Copy)]
+pub struct SseU8Backend;
+
+impl Backend for SseU8Backend {
+    const LANES: usize = 16;
+    const LANE_BYTES: usize = 1;
+    type Bytes = SseU8Bytes;
+    type Score = SseU8Score;
+
+    fn is_available() -> bool {
+        SseBackend::is_available()
+    }
+
+    #[inline(always)]
+    unsafe fn widen(b: Self::Bytes) -> Self::Score {
+        SseU8Score(b.0)
+    }
+
+    #[inline(always)]
+    unsafe fn propagate_horizontal_gaps(
+        row: Self::Score,
+        adjacent_row: Self::Score,
+        match_mask: Self::Score,
+        adjacent_match_mask: Self::Score,
+        gap_open_penalty: Self::Score,
+        gap_extend_penalty: Self::Score,
+    ) -> Self::Score {
+        unsafe {
+            super::propagate_16_lane::<SseU8Backend>(
+                row,
+                adjacent_row,
+                match_mask,
+                adjacent_match_mask,
+                gap_open_penalty,
+                gap_extend_penalty,
+            )
         }
     }
 }
 
-impl super::Vector128Expansion<AVXVector> for SSEVector {
+impl BytesVec for SseU8Bytes {
     #[inline(always)]
-    unsafe fn cast_i8_to_i16(self) -> AVXVector {
-        unsafe { AVXVector(_mm256_cvtepi8_epi16(self.0)) }
+    unsafe fn zero() -> Self {
+        unsafe { Self(_mm_setzero_si128()) }
+    }
+    #[inline(always)]
+    unsafe fn splat(value: u8) -> Self {
+        unsafe { Self(_mm_set1_epi8(value as i8)) }
+    }
+    #[inline(always)]
+    unsafe fn eq(self, other: Self) -> Self {
+        unsafe { Self(_mm_cmpeq_epi8(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn gt(self, other: Self) -> Self {
+        unsafe {
+            let sign = _mm_set1_epi8(-128i8);
+            Self(_mm_cmpgt_epi8(
+                _mm_xor_si128(self.0, sign),
+                _mm_xor_si128(other.0, sign),
+            ))
+        }
+    }
+    #[inline(always)]
+    unsafe fn lt(self, other: Self) -> Self {
+        unsafe {
+            let sign = _mm_set1_epi8(-128i8);
+            Self(_mm_cmplt_epi8(
+                _mm_xor_si128(self.0, sign),
+                _mm_xor_si128(other.0, sign),
+            ))
+        }
+    }
+    #[inline(always)]
+    unsafe fn and(self, other: Self) -> Self {
+        unsafe { Self(_mm_and_si128(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn or(self, other: Self) -> Self {
+        unsafe { Self(_mm_or_si128(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn not(self) -> Self {
+        unsafe { Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1))) }
+    }
+    #[inline(always)]
+    unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
+        unsafe { Self(super::avx::load_partial_m128i(data, start, len)) }
+    }
+    #[inline(always)]
+    unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
+        // Full 16-byte register, full 16 meaningful bytes. alignr_epi8::<15>
+        // gives [prev[15], self[0..15]] which is the desired result.
+        unsafe { Self(_mm_alignr_epi8::<15>(self.0, prev.0)) }
+    }
+
+    #[cfg(test)]
+    fn from_lanes(values: &[u8]) -> Self {
+        assert_eq!(values.len(), 16);
+        Self(unsafe { _mm_loadu_si128(values.as_ptr() as *const __m128i) })
+    }
+    #[cfg(test)]
+    fn to_lanes(self) -> Vec<u8> {
+        let mut buf = [0u8; 16];
+        unsafe { _mm_storeu_si128(buf.as_mut_ptr() as *mut __m128i, self.0) };
+        buf.to_vec()
     }
 }
 
-impl super::Vector128Expansion<SSE256Vector> for SSEVector {
+impl ScoreVec for SseU8Score {
     #[inline(always)]
-    unsafe fn cast_i8_to_i16(self) -> SSE256Vector {
+    unsafe fn zero() -> Self {
+        unsafe { Self(_mm_setzero_si128()) }
+    }
+    #[inline(always)]
+    unsafe fn splat(value: u16) -> Self {
+        unsafe { Self(_mm_set1_epi8(value as i8)) }
+    }
+    #[inline(always)]
+    unsafe fn first_lane(value: u16) -> Self {
+        unsafe { Self(_mm_cvtsi32_si128((value & 0xFF) as i32)) }
+    }
+    #[inline(always)]
+    unsafe fn max(self, other: Self) -> Self {
+        unsafe { Self(_mm_max_epu8(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn horizontal_max(self) -> u16 {
         unsafe {
-            // Lower 8 bytes → 8 x i16
-            let lo = _mm_cvtepi8_epi16(self.0);
-
-            // Shift upper 8 bytes to lower position, then expand
-            let hi = _mm_cvtepi8_epi16(_mm_srli_si128(self.0, 8));
-
-            SSE256Vector((lo, hi))
+            // Cascade of pairwise maxes halving the lane count each step.
+            let m = _mm_max_epu8(self.0, _mm_srli_si128::<8>(self.0));
+            let m = _mm_max_epu8(m, _mm_srli_si128::<4>(m));
+            let m = _mm_max_epu8(m, _mm_srli_si128::<2>(m));
+            let m = _mm_max_epu8(m, _mm_srli_si128::<1>(m));
+            (_mm_extract_epi8::<0>(m) as u8) as u16
         }
+    }
+    #[inline(always)]
+    unsafe fn add(self, other: Self) -> Self {
+        unsafe { Self(_mm_add_epi8(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn subs(self, other: Self) -> Self {
+        unsafe { Self(_mm_subs_epu8(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn and(self, other: Self) -> Self {
+        unsafe { Self(_mm_and_si128(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn shift_right_padded<const L: i32>(self, prev: Self) -> Self {
+        unsafe {
+            const { assert!(L >= 0 && L <= 16) };
+            Self(match L {
+                0 => self.0,
+                1 => _mm_alignr_epi8::<15>(self.0, prev.0),
+                2 => _mm_alignr_epi8::<14>(self.0, prev.0),
+                3 => _mm_alignr_epi8::<13>(self.0, prev.0),
+                4 => _mm_alignr_epi8::<12>(self.0, prev.0),
+                5 => _mm_alignr_epi8::<11>(self.0, prev.0),
+                6 => _mm_alignr_epi8::<10>(self.0, prev.0),
+                7 => _mm_alignr_epi8::<9>(self.0, prev.0),
+                8 => _mm_alignr_epi8::<8>(self.0, prev.0),
+                9 => _mm_alignr_epi8::<7>(self.0, prev.0),
+                10 => _mm_alignr_epi8::<6>(self.0, prev.0),
+                11 => _mm_alignr_epi8::<5>(self.0, prev.0),
+                12 => _mm_alignr_epi8::<4>(self.0, prev.0),
+                13 => _mm_alignr_epi8::<3>(self.0, prev.0),
+                14 => _mm_alignr_epi8::<2>(self.0, prev.0),
+                15 => _mm_alignr_epi8::<1>(self.0, prev.0),
+                16 => prev.0,
+                _ => std::hint::unreachable_unchecked(),
+            })
+        }
+    }
+    #[inline(always)]
+    unsafe fn find_lane(self, search: u16) -> usize {
+        unsafe {
+            let cmp = _mm_cmpeq_epi8(self.0, _mm_set1_epi8(search as i8));
+            let mask = _mm_movemask_epi8(cmp) as u32;
+            (mask.trailing_zeros() as usize).min(16)
+        }
+    }
+
+    #[cfg(test)]
+    fn from_lanes(values: &[u16]) -> Self {
+        assert_eq!(values.len(), 16);
+        let mut buf = [0u8; 16];
+        for i in 0..16 {
+            buf[i] = values[i] as u8;
+        }
+        Self(unsafe { _mm_loadu_si128(buf.as_ptr() as *const __m128i) })
+    }
+    #[cfg(test)]
+    fn to_lanes(self) -> Vec<u16> {
+        let mut buf = [0u8; 16];
+        unsafe { _mm_storeu_si128(buf.as_mut_ptr() as *mut __m128i, self.0) };
+        buf.iter().map(|&v| v as u16).collect()
     }
 }
