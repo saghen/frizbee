@@ -201,6 +201,30 @@ mod tests {
         assert_eq!(result("abc", "xyz", 3), (true, 0, 3));
     }
 
+    #[test]
+    fn backend_parity_suite() {
+        for (needle, haystack, max_typos) in [
+            ("foo", "foo", 0),
+            ("foo", "oof", 0),
+            ("foo", "f_o_o", 0),
+            ("foo", "f_______________o_______________o", 0),
+            ("\0", "abc", 0),
+            ("a", "", 0),
+            ("bar", "ba", 1),
+            ("abc", "c", 2),
+            ("bar", "rb", 1),
+            ("a\0b", "ab", 1),
+            ("abcdef", "abdf", 2),
+            ("abcdef", "fcda", 2),
+            ("abc", "", 3),
+            ("abcdefghij", "abxxcxxdxxe", 5),
+            ("abcdefghij", "jihgfedcba", 5),
+            ("abcdefghij", "abc", 8),
+        ] {
+            result_generic(needle, haystack, max_typos);
+        }
+    }
+
     fn result_generic(needle: &str, haystack: &str, max_typos: u16) -> (bool, usize, usize) {
         let haystack = haystack.as_bytes();
         let scalar_result = PrefilterScalar::new(needle.as_bytes()).match_haystack(haystack);
