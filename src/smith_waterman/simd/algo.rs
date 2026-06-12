@@ -1,25 +1,13 @@
 use crate::{Scoring, prefilter::case_needle, smith_waterman::greedy::match_greedy};
 
+use super::SmithWaterman;
 use super::alignment_iter::Alignment;
 use super::backend::{Backend, BytesVec, MaskVec, ScoreVec};
 use super::matrix::Matrix;
 
 const MAX_HAYSTACK_LEN: usize = 512;
 
-#[derive(Debug, Clone)]
-pub struct SmithWatermanMatcherInternal<B: Backend> {
-    pub needle: String,
-    pub needle_simd: Vec<(B::Bytes, B::Bytes)>,
-    pub scoring: Scoring,
-    pub score_matrix: Matrix<B>,
-    pub match_masks: Matrix<B>,
-    /// Number of LANES-wide chunks (incl. the leading zero column) actually
-    /// consumed by the most recent `score_haystack` call. The matrix stride is
-    /// always sized for `MAX_HAYSTACK_LEN` for zero-free reuse.
-    pub haystack_chunks: usize,
-}
-
-impl<B: Backend> SmithWatermanMatcherInternal<B> {
+impl<B: Backend> SmithWaterman<B> {
     pub fn new(needle: &[u8], scoring: &Scoring) -> Self {
         Self {
             needle: String::from_utf8_lossy(needle).to_string(),

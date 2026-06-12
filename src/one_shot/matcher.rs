@@ -5,36 +5,35 @@ use crate::prefilter::backend::PrefilterScalar;
 #[cfg(target_arch = "x86_64")]
 use crate::prefilter::backend::{PrefilterAVX, PrefilterAVX512, PrefilterSSE};
 use crate::smith_waterman::AlignmentPathIter;
-use crate::smith_waterman::simd::{
-    Kernel as SmithWatermanKernel, SmithWatermanMatcherScalar, SmithWatermanMatcherScalarU8,
-    score_fits_in_u8,
-};
 #[cfg(target_arch = "x86_64")]
-use crate::smith_waterman::simd::{
-    SmithWatermanMatcherAVX2, SmithWatermanMatcherAVX2U8, SmithWatermanMatcherAVX512,
-    SmithWatermanMatcherAVX512U8, SmithWatermanMatcherSSE, SmithWatermanMatcherSSEU8,
+use crate::smith_waterman::simd::backend::{
+    Avx512Backend, Avx512U8Backend, AvxBackend, AvxU8Backend, SseBackend, SseU8Backend,
+};
+use crate::smith_waterman::simd::backend::{
+    Backend as SmithWatermanBackendTrait, Scalar8Backend, Scalar16U8Backend,
 };
 #[cfg(target_arch = "aarch64")]
-use crate::smith_waterman::simd::{SmithWatermanMatcherNEON, SmithWatermanMatcherNEONU8};
+use crate::smith_waterman::simd::backend::{NeonBackend, NeonU8Backend};
+use crate::smith_waterman::simd::{SmithWaterman, score_fits_in_u8};
 use crate::sort::radix_sort_matches;
 use crate::{Config, Match, MatchIndices};
 use std::marker::PhantomData;
 
 trait MatcherBackend: Clone + std::fmt::Debug + 'static {
     type Prefilter: PrefilterKernel;
-    type SmithWaterman: SmithWatermanKernel;
+    type SmithWatermanBackend: SmithWatermanBackendTrait;
 
     fn is_available(needle: &[u8], config: &Config) -> bool;
 }
 
 macro_rules! define_backend {
-    ($name:ident, $prefilter:ty, $smith_waterman:ty, $available:expr) => {
+    ($name:ident, $prefilter:ty, $smith_waterman_backend:ty, $available:expr) => {
         #[derive(Debug, Clone)]
         pub struct $name;
 
         impl MatcherBackend for $name {
             type Prefilter = $prefilter;
-            type SmithWaterman = $smith_waterman;
+            type SmithWatermanBackend = $smith_waterman_backend;
 
             #[inline]
             fn is_available(needle: &[u8], config: &Config) -> bool {
@@ -48,10 +47,10 @@ macro_rules! define_backend {
 define_backend!(
     Avx512U8,
     PrefilterAVX512,
-    SmithWatermanMatcherAVX512U8,
+    Avx512U8Backend,
     |needle: &[u8], config: &Config| {
         PrefilterAVX512::is_available()
-            && SmithWatermanMatcherAVX512U8::is_available()
+            && Avx512U8Backend::is_available()
             && score_fits_in_u8(needle.len(), &config.scoring)
     }
 );
@@ -60,9 +59,9 @@ define_backend!(
 define_backend!(
     Avx512,
     PrefilterAVX512,
-    SmithWatermanMatcherAVX512,
+    Avx512Backend,
     |_needle: &[u8], _config: &Config| {
-        PrefilterAVX512::is_available() && SmithWatermanMatcherAVX512::is_available()
+        PrefilterAVX512::is_available() && Avx512Backend::is_available()
     }
 );
 
@@ -70,10 +69,10 @@ define_backend!(
 define_backend!(
     Avx2U8,
     PrefilterAVX,
-    SmithWatermanMatcherAVX2U8,
+    AvxU8Backend,
     |needle: &[u8], config: &Config| {
         PrefilterAVX::is_available()
-            && SmithWatermanMatcherAVX2U8::is_available()
+            && AvxU8Backend::is_available()
             && score_fits_in_u8(needle.len(), &config.scoring)
     }
 );
@@ -82,9 +81,9 @@ define_backend!(
 define_backend!(
     Avx2,
     PrefilterAVX,
-    SmithWatermanMatcherAVX2,
+    AvxBackend,
     |_needle: &[u8], _config: &Config| {
-        PrefilterAVX::is_available() && SmithWatermanMatcherAVX2::is_available()
+        PrefilterAVX::is_available() && AvxBackend::is_available()
     }
 );
 
@@ -92,10 +91,10 @@ define_backend!(
 define_backend!(
     SseU8,
     PrefilterSSE,
-    SmithWatermanMatcherSSEU8,
+    SseU8Backend,
     |needle: &[u8], config: &Config| {
         PrefilterSSE::is_available()
-            && SmithWatermanMatcherSSEU8::is_available()
+            && SseU8Backend::is_available()
             && score_fits_in_u8(needle.len(), &config.scoring)
     }
 );
@@ -104,9 +103,9 @@ define_backend!(
 define_backend!(
     Sse,
     PrefilterSSE,
-    SmithWatermanMatcherSSE,
+    SseBackend,
     |_needle: &[u8], _config: &Config| {
-        PrefilterSSE::is_available() && SmithWatermanMatcherSSE::is_available()
+        PrefilterSSE::is_available() && SseBackend::is_available()
     }
 );
 
@@ -114,10 +113,10 @@ define_backend!(
 define_backend!(
     NeonU8,
     PrefilterNEON,
-    SmithWatermanMatcherNEONU8,
+    NeonU8Backend,
     |needle: &[u8], config: &Config| {
         PrefilterNEON::is_available()
-            && SmithWatermanMatcherNEONU8::is_available()
+            && NeonU8Backend::is_available()
             && score_fits_in_u8(needle.len(), &config.scoring)
     }
 );
@@ -126,23 +125,23 @@ define_backend!(
 define_backend!(
     Neon,
     PrefilterNEON,
-    SmithWatermanMatcherNEON,
+    NeonBackend,
     |_needle: &[u8], _config: &Config| {
-        PrefilterNEON::is_available() && SmithWatermanMatcherNEON::is_available()
+        PrefilterNEON::is_available() && NeonBackend::is_available()
     }
 );
 
 define_backend!(
     ScalarU8,
     PrefilterScalar,
-    SmithWatermanMatcherScalarU8,
+    Scalar16U8Backend,
     |needle: &[u8], config: &Config| score_fits_in_u8(needle.len(), &config.scoring)
 );
 
 define_backend!(
     Scalar,
     PrefilterScalar,
-    SmithWatermanMatcherScalar,
+    Scalar8Backend,
     |_needle: &[u8], _config: &Config| true
 );
 
@@ -151,7 +150,7 @@ struct MatcherCore<B: MatcherBackend> {
     needle: String,
     config: Config,
     prefilter: B::Prefilter,
-    smith_waterman: B::SmithWaterman,
+    smith_waterman: SmithWaterman<B::SmithWatermanBackend>,
     _backend: PhantomData<B>,
 }
 
@@ -361,7 +360,7 @@ impl<B: MatcherBackend> MatcherCore<B> {
             needle: needle.to_string(),
             config: config.clone(),
             prefilter: B::Prefilter::new(needle.as_bytes()),
-            smith_waterman: B::SmithWaterman::new(needle.as_bytes(), &config.scoring),
+            smith_waterman: SmithWaterman::new(needle.as_bytes(), &config.scoring),
             _backend: PhantomData,
         };
         matcher.guard_against_score_overflow();
