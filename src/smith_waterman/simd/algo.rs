@@ -39,6 +39,7 @@ impl<B: Backend> SmithWatermanMatcherInternal<B> {
             .collect()
     }
 
+    #[cfg(test)]
     #[inline(always)]
     pub fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
         if haystack.len() > MAX_HAYSTACK_LEN {

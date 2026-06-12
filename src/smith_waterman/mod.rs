@@ -52,4 +52,4 @@ mod greedy;
 pub(crate) mod simd;
 
 pub use greedy::match_greedy;
-pub use simd::{Alignment, AlignmentPathIter, SmithWatermanMatcher};
+pub use simd::{Alignment, AlignmentPathIter};
