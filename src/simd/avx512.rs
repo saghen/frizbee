@@ -217,11 +217,7 @@ impl ScoreVec for Avx512U8Score {
         unsafe {
             let target = _mm512_set1_epi8(search as i8);
             let mask = _mm512_cmpeq_epi8_mask(self.0, target);
-            if mask == 0 {
-                64
-            } else {
-                mask.trailing_zeros() as usize
-            }
+            mask.trailing_zeros() as usize
         }
     }
 
@@ -242,27 +238,32 @@ impl ScoreVec for Avx512U8Score {
     }
 }
 
-/// Cross-lane byte shift used by both BytesVec and ScoreVec
-/// Uses one VBMI vpermt2b with an idx vector unlike AVX2/SSE impls
+/// Cross-lane byte shift used by both BytesVec and ScoreVec.
 #[inline(always)]
 unsafe fn shift_right_lanes<const L: i32>(prev: __m512i, cur: __m512i) -> __m512i {
     const { assert!(L >= 0 && L <= 32) };
-    if L == 0 {
-        return cur;
-    }
-    // idx[i] = (64 - L) + i. For i < L this is in 0..64 (selects prev[64 - L + i]);
-    // for i >= L this is in 64..128 (selects cur[i - L]).
-    let idx_arr: [u8; 64] = const {
-        let mut arr = [0u8; 64];
-        let mut i = 0usize;
-        while i < 64 {
-            arr[i] = ((64 - L) + i as i32) as u8;
-            i += 1;
+    match L {
+        0 => cur,
+
+        // use native cross-lane byte shifts when available
+        4 => unsafe { _mm512_alignr_epi32::<15>(cur, prev) },
+        8 => unsafe { _mm512_alignr_epi64::<7>(cur, prev) },
+        16 => unsafe { _mm512_alignr_epi64::<6>(cur, prev) },
+        32 => unsafe { _mm512_alignr_epi64::<4>(cur, prev) },
+
+        // fallback to byte permute
+        _ => {
+            let idx_arr: [u8; 64] = const {
+                let mut arr = [0u8; 64];
+                let mut i = 0usize;
+                while i < 64 {
+                    arr[i] = ((64 - L) + i as i32) as u8;
+                    i += 1;
+                }
+                arr
+            };
+            let idx = unsafe { _mm512_loadu_si512(idx_arr.as_ptr() as *const __m512i) };
+            unsafe { _mm512_permutex2var_epi8(prev, idx, cur) }
         }
-        arr
-    };
-    unsafe {
-        let idx = _mm512_loadu_si512(idx_arr.as_ptr() as *const __m512i);
-        _mm512_permutex2var_epi8(prev, idx, cur)
     }
 }
