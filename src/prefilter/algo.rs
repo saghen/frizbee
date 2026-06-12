@@ -10,12 +10,12 @@ pub(crate) struct LaneState<M> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct PrefilterImpl<B: Backend> {
+pub(crate) struct Prefilter<B: Backend> {
     needle: Vec<B::Needle>,
     lanes: Vec<LaneState<B::Mask>>,
 }
 
-impl<B: Backend> PrefilterImpl<B> {
+impl<B: Backend> Prefilter<B> {
     /// # Safety
     /// The backend's target features must be enabled.
     #[inline(always)]
@@ -92,17 +92,12 @@ impl<B: Backend> PrefilterImpl<B> {
     }
 
     #[inline(always)]
-    pub unsafe fn match_haystack_typos(
+    pub unsafe fn match_haystack_many_typos(
         &mut self,
         haystack: &[u8],
         max_typos: u16,
     ) -> (bool, usize, usize) {
-        match max_typos {
-            0 => unsafe { self.match_haystack(haystack) },
-            1 => unsafe { self.match_haystack_1_typo(haystack) },
-            2 => unsafe { self.match_haystack_2_typos(haystack) },
-            _ => unsafe { self.match_haystack_typos_impl(haystack, max_typos as usize) },
-        }
+        unsafe { self.match_haystack_many_typos_impl(haystack, max_typos as usize) }
     }
 
     #[inline(always)]
@@ -316,7 +311,7 @@ impl<B: Backend> PrefilterImpl<B> {
     }
 
     #[inline(always)]
-    unsafe fn match_haystack_typos_impl(
+    unsafe fn match_haystack_many_typos_impl(
         &mut self,
         haystack: &[u8],
         max_typos: usize,
