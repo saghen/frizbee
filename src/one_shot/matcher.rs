@@ -266,17 +266,7 @@ impl Matcher {
         index: u32,
         include_exact: bool,
     ) -> Option<Match> {
-        // if the prefilter verifies order, we can skip the typo verification pass
-        let mut score = if self
-            .config
-            .max_typos
-            .is_some_and(|max_typos| self.prefilter.verifies_match(max_typos))
-        {
-            self.smith_waterman.score_haystack(haystack)
-        } else {
-            self.smith_waterman
-                .match_haystack(haystack, self.config.max_typos)?
-        };
+        let mut score = self.smith_waterman.score_haystack(haystack);
 
         let exact = include_exact && self.needle.as_bytes() == haystack;
         if exact {
@@ -344,7 +334,7 @@ impl Matcher {
             .map(|max| needle.len().saturating_sub(max as usize))
             .unwrap_or(0);
         let config = self.config.clone();
-        let prefilter = self.prefilter.clone();
+        let mut prefilter = self.prefilter.clone();
 
         haystacks
             .iter()
