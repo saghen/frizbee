@@ -19,7 +19,9 @@ pub fn radix_sort_matches(matches: &mut [Match]) {
         Match {
             score: 0,
             index: 0,
-            exact: false
+            exact: false,
+            #[cfg(feature = "match_end_col")]
+            end_col: 0,
         };
         matches.len()
     ];
@@ -59,6 +61,8 @@ mod test {
                 score: rng.random::<u16>(),
                 index,
                 exact: rng.random_bool(0.5),
+                #[cfg(feature = "match_end_col")]
+                end_col: 0,
             })
             .collect::<Vec<_>>();
 
