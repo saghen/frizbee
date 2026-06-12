@@ -81,9 +81,7 @@
 //! let mut matcher = Matcher::new(needle, &config);
 //! let mut matches = matcher.prefilter_iter(&haystacks)
 //!     .filter_map(|(index, haystack, skipped_chars, is_full_haystack)| {
-//!         let mut score = matcher
-//!             .smith_waterman
-//!             .score_haystack(haystack);
+//!         let mut score = matcher.score_haystack(haystack);
 //!
 //!         for alignment in matcher.iter_alignment_path(skipped_chars, score) {
 //!              // Return None if Alignment is None (max typos exceeded)

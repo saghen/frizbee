@@ -10,10 +10,6 @@ impl PrefilterScalar {
         Self(unsafe { PrefilterImpl::new(needle) })
     }
 
-    pub fn is_available() -> bool {
-        PrefilterImpl::<PrefilterScalarBackend>::is_available()
-    }
-
     #[inline(never)]
     pub fn match_haystack(&self, haystack: &[u8]) -> (bool, usize, usize) {
         unsafe { self.0.match_haystack(haystack) }

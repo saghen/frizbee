@@ -21,6 +21,7 @@ impl<B: Backend> SmithWatermanMatcherInternal<B> {
         )
     }
 
+    #[cfg(test)]
     #[inline(always)]
     pub fn has_alignment_path(&self, score: u16, max_typos: u16) -> bool {
         let iter = AlignmentPathIter::new::<B>(

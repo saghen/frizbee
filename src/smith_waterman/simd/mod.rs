@@ -20,7 +20,7 @@ pub use alignment_iter::{Alignment, AlignmentPathIter};
 /// otherwise identical to the u16 backends but with double the lane count
 /// (64 cells/chunk on AVX-512, 32 on AVX2, 16 on SSE/NEON).
 #[inline]
-fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
+pub(crate) fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
     let max_per_char = scoring.match_score as usize
         + scoring.matching_case_bonus as usize
         + scoring
@@ -31,12 +31,32 @@ fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
     max_matrix_score <= u8::MAX as usize
 }
 
+pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
+    fn new(needle: &[u8], scoring: &Scoring) -> Self;
+    fn match_haystack_indices(
+        &mut self,
+        haystack: &[u8],
+        skipped_chars: usize,
+        max_typos: Option<u16>,
+    ) -> Option<(u16, Vec<usize>)>;
+    fn score_haystack(&mut self, haystack: &[u8]) -> u16;
+    #[cfg(feature = "match_end_col")]
+    fn match_end_col(&self, haystack: &[u8]) -> u16;
+    fn iter_alignment_path(
+        &self,
+        skipped_chars: usize,
+        score: u16,
+        max_typos: Option<u16>,
+    ) -> AlignmentPathIter<'_>;
+}
+
 /// SIMD Smith Waterman matcher with affine gaps and sequential layout
 /// parallelism. Chooses the fastest backend via runtime feature detection.
 ///
 /// Each architecture has both a u16-scoring and a u8-scoring variant.
 /// `new()` picks the u8 variant when the maximum possible matrix score fits
 /// in a u8, doubling effective throughput
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub enum SmithWatermanMatcher {
     #[cfg(target_arch = "x86_64")]
@@ -63,6 +83,7 @@ pub enum SmithWatermanMatcher {
 /// `unsafe`: the SIMD variants because of `#[target_feature]`, the scalar
 /// ones for uniformity (no actual safety obligation). The wrapping methods
 /// on [`SmithWatermanMatcher`] are safe due to runtime feature detection.
+#[cfg(test)]
 macro_rules! dispatch {
     ($self:expr, $m:ident => $body:expr) => {
         match $self {
@@ -88,6 +109,7 @@ macro_rules! dispatch {
     };
 }
 
+#[cfg(test)]
 impl SmithWatermanMatcher {
     pub fn new(needle: &[u8], scoring: &Scoring) -> Self {
         let use_u8 = score_fits_in_u8(needle.len(), scoring);
@@ -145,23 +167,9 @@ impl SmithWatermanMatcher {
         dispatch!(self, m => m.match_haystack_indices(haystack, skipped_chars, max_typos))
     }
 
-    pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
-        dispatch!(self, m => m.score_haystack(haystack))
-    }
-
     #[cfg(feature = "match_end_col")]
     pub fn match_end_col(&self, haystack: &[u8]) -> u16 {
         dispatch!(self, m => m.match_end_col(haystack))
-    }
-
-    #[allow(unused_unsafe)] // body is safe; `dispatch!` wraps uniformly.
-    pub fn iter_alignment_path(
-        &self,
-        skipped_chars: usize,
-        score: u16,
-        max_typos: Option<u16>,
-    ) -> AlignmentPathIter<'_> {
-        dispatch!(self, m => m.0.iter_alignment_path(skipped_chars, score, max_typos))
     }
 
     #[cfg(test)]
@@ -196,6 +204,7 @@ macro_rules! define_matcher {
                 "# Safety\n\n",
                 "Caller must ensure that the target feature `", $feature, "` is available"
             )]
+            #[cfg(test)]
             #[target_feature(enable = $feature)]
             pub unsafe fn match_haystack(
                 &mut self,
@@ -238,11 +247,60 @@ macro_rules! define_matcher {
                 self.0.match_end_col(haystack)
             }
 
+            pub fn iter_alignment_path(
+                &self,
+                skipped_chars: usize,
+                score: u16,
+                max_typos: Option<u16>,
+            ) -> AlignmentPathIter<'_> {
+                self.0.iter_alignment_path(skipped_chars, score, max_typos)
+            }
+
             #[cfg(test)]
             #[doc = concat!("# Safety\n\nCaller must ensure that the target feature `", $feature, "` is available")]
             #[target_feature(enable = $feature)]
             pub fn print_score_matrix(&self, haystack: &str) {
                 self.0.print_score_matrix(haystack)
+            }
+        }
+
+        impl Kernel for $name {
+            #[inline]
+            fn new(needle: &[u8], scoring: &Scoring) -> Self {
+                unsafe { <$name>::new(needle, scoring) }
+            }
+
+            #[inline(always)]
+            fn match_haystack_indices(
+                &mut self,
+                haystack: &[u8],
+                skipped_chars: usize,
+                max_typos: Option<u16>,
+            ) -> Option<(u16, Vec<usize>)> {
+                unsafe {
+                    <$name>::match_haystack_indices(self, haystack, skipped_chars, max_typos)
+                }
+            }
+
+            #[inline(always)]
+            fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
+                unsafe { <$name>::score_haystack(self, haystack) }
+            }
+
+            #[cfg(feature = "match_end_col")]
+            #[inline(always)]
+            fn match_end_col(&self, haystack: &[u8]) -> u16 {
+                unsafe { <$name>::match_end_col(self, haystack) }
+            }
+
+            #[inline(always)]
+            fn iter_alignment_path(
+                &self,
+                skipped_chars: usize,
+                score: u16,
+                max_typos: Option<u16>,
+            ) -> AlignmentPathIter<'_> {
+                <$name>::iter_alignment_path(self, skipped_chars, score, max_typos)
             }
         }
     };
@@ -319,12 +377,9 @@ macro_rules! define_scalar_matcher {
                 Self(SmithWatermanMatcherInternal::new(needle, scoring))
             }
 
-            pub fn is_available() -> bool {
-                true
-            }
-
             /// # Safety
             /// Trivially safe — kept `unsafe` for uniformity.
+            #[cfg(test)]
             pub unsafe fn match_haystack(
                 &mut self,
                 haystack: &[u8],
@@ -358,9 +413,56 @@ macro_rules! define_scalar_matcher {
                 self.0.match_end_col(haystack)
             }
 
+            pub fn iter_alignment_path(
+                &self,
+                skipped_chars: usize,
+                score: u16,
+                max_typos: Option<u16>,
+            ) -> AlignmentPathIter<'_> {
+                self.0.iter_alignment_path(skipped_chars, score, max_typos)
+            }
+
             #[cfg(test)]
             pub fn print_score_matrix(&self, haystack: &str) {
                 self.0.print_score_matrix(haystack)
+            }
+        }
+
+        impl Kernel for $name {
+            #[inline]
+            fn new(needle: &[u8], scoring: &Scoring) -> Self {
+                unsafe { <$name>::new(needle, scoring) }
+            }
+
+            #[inline(always)]
+            fn match_haystack_indices(
+                &mut self,
+                haystack: &[u8],
+                skipped_chars: usize,
+                max_typos: Option<u16>,
+            ) -> Option<(u16, Vec<usize>)> {
+                unsafe { <$name>::match_haystack_indices(self, haystack, skipped_chars, max_typos) }
+            }
+
+            #[inline(always)]
+            fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
+                unsafe { <$name>::score_haystack(self, haystack) }
+            }
+
+            #[cfg(feature = "match_end_col")]
+            #[inline(always)]
+            fn match_end_col(&self, haystack: &[u8]) -> u16 {
+                unsafe { <$name>::match_end_col(self, haystack) }
+            }
+
+            #[inline(always)]
+            fn iter_alignment_path(
+                &self,
+                skipped_chars: usize,
+                score: u16,
+                max_typos: Option<u16>,
+            ) -> AlignmentPathIter<'_> {
+                <$name>::iter_alignment_path(self, skipped_chars, score, max_typos)
             }
         }
     };
