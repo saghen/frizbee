@@ -91,6 +91,13 @@ impl Backend for PrefilterAVX512Backend {
     }
 
     #[inline(always)]
+    unsafe fn load_partial(ptr: *const u8, _remaining: usize, mask: Self::Mask) -> Self::Chunk {
+        // AVX-512 has native masked byte loads, so loads at page boundaries
+        // don't need a copy based fallback
+        unsafe { _mm512_maskz_loadu_epi8(mask, ptr as *const i8) }
+    }
+
+    #[inline(always)]
     unsafe fn occ(chunk: Self::Chunk, needle: Self::Needle) -> Self::Mask {
         unsafe { _mm512_cmpeq_epi8_mask(needle.0, chunk) | _mm512_cmpeq_epi8_mask(needle.1, chunk) }
     }
