@@ -115,32 +115,65 @@ impl Prefilter {
     /// Optionally, define the maximum number of typos (missing characters from the needle) before
     /// the haystack is filtered out.
     ///
-    /// Returns the byte offset of the first match in the haystack (first needle char), rounded
-    /// down to the nearest 16-byte chunk boundary. The haystack can then be sliced to skip empty
-    /// chunks: `haystack[skipped_chars..]`
+    /// Returns `(matched, skipped_chars, end_pos)`:
+    /// - `skipped_chars`: byte offset of the first needle char in the haystack
+    /// - `end_pos`: exclusive byte offset just past the last needle char's match.
+    ///   Only the AVX-512 prefilter with `max_typos = 0` computes a meaningful
+    ///   tail trim; all other variants return `haystack.len()`.
+    ///
+    /// The caller can slice `haystack[skipped_chars..end_pos]` to drop both
+    /// the unmatched prefix and (when supported) the unmatched suffix.
     ///
     /// The caller must ensure needle.len() > 0
     #[inline]
-    pub fn match_haystack(&self, haystack: &[u8], max_typos: u16) -> (bool, usize) {
+    pub fn match_haystack(&self, haystack: &[u8], max_typos: u16) -> (bool, usize, usize) {
+        let len = haystack.len();
         match (self, max_typos) {
             #[cfg(target_arch = "x86_64")]
             (Prefilter::AVX512(p), 0) => unsafe { p.match_haystack(haystack) },
             #[cfg(target_arch = "x86_64")]
-            (Prefilter::AVX512(p), _) => unsafe { p.match_haystack_typos(haystack, max_typos) },
+            (Prefilter::AVX512(p), _) => {
+                let (m, s) = unsafe { p.match_haystack_typos(haystack, max_typos) };
+                (m, s, len)
+            }
             #[cfg(target_arch = "x86_64")]
-            (Prefilter::AVX(p), 0) => unsafe { p.match_haystack(haystack) },
+            (Prefilter::AVX(p), 0) => {
+                let (m, s) = unsafe { p.match_haystack(haystack) };
+                (m, s, len)
+            }
             #[cfg(target_arch = "x86_64")]
-            (Prefilter::AVX(p), _) => unsafe { p.match_haystack_typos(haystack, max_typos) },
+            (Prefilter::AVX(p), _) => {
+                let (m, s) = unsafe { p.match_haystack_typos(haystack, max_typos) };
+                (m, s, len)
+            }
             #[cfg(target_arch = "x86_64")]
-            (Prefilter::SSE(p), 0) => unsafe { p.match_haystack(haystack) },
+            (Prefilter::SSE(p), 0) => {
+                let (m, s) = unsafe { p.match_haystack(haystack) };
+                (m, s, len)
+            }
             #[cfg(target_arch = "x86_64")]
-            (Prefilter::SSE(p), _) => unsafe { p.match_haystack_typos(haystack, max_typos) },
+            (Prefilter::SSE(p), _) => {
+                let (m, s) = unsafe { p.match_haystack_typos(haystack, max_typos) };
+                (m, s, len)
+            }
             #[cfg(target_arch = "aarch64")]
-            (Prefilter::NEON(p), 0) => unsafe { p.match_haystack(haystack) },
+            (Prefilter::NEON(p), 0) => {
+                let (m, s) = unsafe { p.match_haystack(haystack) };
+                (m, s, len)
+            }
             #[cfg(target_arch = "aarch64")]
-            (Prefilter::NEON(p), _) => unsafe { p.match_haystack_typos(haystack, max_typos) },
-            (Prefilter::Scalar(p), 0) => p.match_haystack(haystack),
-            (Prefilter::Scalar(p), _) => p.match_haystack_typos(haystack, max_typos),
+            (Prefilter::NEON(p), _) => {
+                let (m, s) = unsafe { p.match_haystack_typos(haystack, max_typos) };
+                (m, s, len)
+            }
+            (Prefilter::Scalar(p), 0) => {
+                let (m, s) = p.match_haystack(haystack);
+                (m, s, len)
+            }
+            (Prefilter::Scalar(p), _) => {
+                let (m, s) = p.match_haystack_typos(haystack, max_typos);
+                (m, s, len)
+            }
         }
     }
 }

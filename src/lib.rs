@@ -80,7 +80,7 @@
 //! let config = Config::default();
 //! let mut matcher = Matcher::new(needle, &config);
 //! let mut matches = matcher.prefilter_iter(&haystacks)
-//!     .filter_map(|(index, haystack, skipped_chars)| {
+//!     .filter_map(|(index, haystack, skipped_chars, is_full_haystack)| {
 //!         let mut score = matcher
 //!             .smith_waterman
 //!             .score_haystack(haystack);
@@ -96,7 +96,7 @@
 //!              }
 //!         }
 //!
-//!         let exact = skipped_chars == 0 && needle.as_bytes() == haystack;
+//!         let exact = is_full_haystack && needle.as_bytes() == haystack;
 //!         if exact {
 //!             score += config.scoring.exact_match_bonus;
 //!         }

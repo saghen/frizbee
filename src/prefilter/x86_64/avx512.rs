@@ -37,26 +37,39 @@ impl PrefilterAVX512 {
     /// per outer iteration; ordering across sub-chunks within the 64-byte window
     /// is preserved by masking the cmpeq bitmask against a moving `min_bit`.
     ///
+    /// Returns `(matched, skipped_chars, end_pos)` where `end_pos` is the
+    /// exclusive byte offset just past the rightmost occurrence of the final
+    /// needle char in `haystack[skipped_chars..]`. For `max_typos = 0` any
+    /// valid Smith Waterman alignment must end on a real needle-char match, so
+    /// the slice `haystack[skipped_chars..end_pos]` retains every alignment.
+    /// On no-match, `end_pos == haystack.len()`.
+    ///
     /// # Safety
     /// The caller must ensure that AVX-512F + AVX-512BW are available.
     #[inline]
     #[target_feature(enable = "avx512f,avx512bw")]
-    pub unsafe fn match_haystack(&self, haystack: &[u8]) -> (bool, usize) {
+    pub unsafe fn match_haystack(&self, haystack: &[u8]) -> (bool, usize, usize) {
         let len = haystack.len();
         match len {
-            0 => return (true, 0),
-            1..=7 => return (scalar::match_haystack(&self.needle_scalar, haystack), 0),
+            0 => return (true, 0, 0),
+            1..=7 => {
+                return (
+                    scalar::match_haystack(&self.needle_scalar, haystack),
+                    0,
+                    len,
+                );
+            }
             _ => {}
         }
 
         let mut can_skip_chunks = true;
-        let mut skipped_chars = 0usize;
+        let mut start_pos = 0usize;
         let mut needle_iter = self.needle_simd.iter();
         let mut needle_char = *needle_iter.next().unwrap();
 
         let mut start = 0usize;
         while start < len {
-            let (window_start, haystack_chunk) = unsafe { load_window(haystack, start, len) };
+            let haystack_chunk = unsafe { load_window(haystack, start, len) };
             let mut min_bit: u32 = 0;
 
             loop {
@@ -71,21 +84,36 @@ impl PrefilterAVX512 {
                 min_bit = mask.trailing_zeros();
 
                 if can_skip_chunks {
-                    skipped_chars = window_start + (min_bit as usize);
+                    start_pos = min_bit as usize;
                     can_skip_chunks = false;
                 }
 
                 if let Some(next_needle_char) = needle_iter.next() {
                     needle_char = *next_needle_char;
-                } else {
-                    return (true, skipped_chars);
+                }
+                // on the last chunk and no more needle chars, reuse mask
+                // for getting last needle char's last position in haystack
+                else if start + 64 >= len {
+                    return (
+                        true,
+                        start_pos,
+                        start + 64 - (mask.leading_zeros() as usize),
+                    );
+                }
+                // not on the last chunk, find the position of the last
+                // needle char from the end of the haystack
+                else {
+                    let last_needle_char = *self.needle_simd.last().unwrap();
+                    let end_pos =
+                        unsafe { start + find_last_char_pos(last_needle_char, &haystack[start..]) };
+                    return (true, start_pos, end_pos);
                 }
             }
 
             start += 64;
         }
 
-        (false, skipped_chars)
+        (false, start_pos, len)
     }
 
     /// # Safety
@@ -118,7 +146,7 @@ impl PrefilterAVX512 {
             // of the haystack each time we burn a typo.
             let mut start = 0usize;
             while start < len {
-                let (_, haystack_chunk) = unsafe { load_window(haystack, start, len) };
+                let haystack_chunk = unsafe { load_window(haystack, start, len) };
                 let mut min_bit: u32 = 0;
 
                 loop {
@@ -156,33 +184,57 @@ impl PrefilterAVX512 {
     }
 }
 
+/// Scans `haystack[min_pos..]` backwards for the rightmost occurrence of
+/// `last_needle_char` (case-insensitive via the broadcast pair) and returns
+/// the exclusive end offset (`pos + 1`) into the original `haystack`.
+///
+/// The forward pass already proved an ordered alignment exists in
+/// `haystack[min_pos..]` ending at some position `p`. Since the last char of
+/// that alignment must equal `last_needle_char` and the rightmost occurrence
+/// `q >= p`, the slice `haystack[min_pos..=q]` still contains that alignment
+/// (and any later candidate). Falls back to `haystack.len()` if nothing is
+/// found, which can't happen when the forward pass succeeded.
+///
+/// # Safety
+/// Caller must ensure AVX-512F + AVX-512BW availability and `min_pos <= haystack.len()`.
+#[inline]
+#[target_feature(enable = "avx512f,avx512bw")]
+unsafe fn find_last_char_pos(last_needle_char: (__m512i, __m512i), haystack: &[u8]) -> usize {
+    let len = haystack.len();
+    let mut start = len.saturating_sub(64);
+    loop {
+        let haystack_chunk = unsafe { load_window(haystack, start, len) };
+        let mask_a = _mm512_cmpeq_epi8_mask(last_needle_char.0, haystack_chunk);
+        let mask_b = _mm512_cmpeq_epi8_mask(last_needle_char.1, haystack_chunk);
+        let mask = mask_a | mask_b;
+        if mask != 0 {
+            return start + 64 - (mask.leading_zeros() as usize);
+        }
+        // looping infinitely is safe, since the caller already ensured that
+        // the needle char matches somewhere in the haystack
+        start = start.saturating_sub(64);
+    }
+}
+
 /// Loads a 64-byte window from the haystack, returning the byte offset of the
 /// loaded data, a validity mask over the lanes (covers the full register when
 /// the load is complete), and the loaded chunk.
 ///
 /// - `start + 64 <= len`: aligned 64-byte load at `start`
-/// - `len >= 64` but tail short: overlap-from-end (last 64 bytes)
 /// - `len < 64`: masked load covering only the valid bytes (page-safe)
 ///
 /// # Safety
-/// Caller must ensure `len >= 8` (matching the prefilter's small-haystack
-/// fallback) and AVX-512F + AVX-512BW availability.
+/// Caller must ensure AVX-512F + AVX-512BW availability.
 #[inline]
 #[target_feature(enable = "avx512f,avx512bw")]
-unsafe fn load_window(haystack: &[u8], start: usize, len: usize) -> (usize, __m512i) {
+unsafe fn load_window(haystack: &[u8], start: usize, len: usize) -> __m512i {
     unsafe {
         if start + 64 <= len {
-            let chunk = _mm512_loadu_si512(haystack.as_ptr().add(start) as *const __m512i);
-            (start, chunk)
-        } else if len >= 64 {
-            let window_start = len - 64;
-            let chunk = _mm512_loadu_si512(haystack.as_ptr().add(window_start) as *const __m512i);
-            (window_start, chunk)
+            _mm512_loadu_si512(haystack.as_ptr().add(start) as *const __m512i)
         } else {
-            // len < 64: masked load, zero-fills inactive lanes
-            let mask: u64 = (1u64 << len).wrapping_sub(1);
-            let chunk = _mm512_maskz_loadu_epi8(mask, haystack.as_ptr() as *const i8);
-            (0, chunk)
+            // len - start < 64: masked load, zero-fills inactive lanes
+            let mask: u64 = (1u64 << (len - start)).wrapping_sub(1);
+            _mm512_maskz_loadu_epi8(mask, haystack.as_ptr().add(start) as *const i8)
         }
     }
 }
