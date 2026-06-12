@@ -1,39 +1,29 @@
-use std::marker::PhantomData;
-
 use crate::{
     Scoring,
     prefilter::case_needle,
-    simd::{Vector128Expansion, Vector256},
+    simd::{Backend, BytesVec, ScoreVec},
     smith_waterman::greedy::match_greedy,
 };
 
 use super::alignment_iter::Alignment;
-use super::gaps::propagate_horizontal_gaps;
 use super::matrix::Matrix;
 
 const MAX_HAYSTACK_LEN: usize = 512;
 
-pub const PREFIX_MASK: [u8; 32] = [
-    0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-];
-
 #[derive(Debug, Clone)]
-pub struct SmithWatermanMatcherInternal<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256> {
+pub struct SmithWatermanMatcherInternal<B: Backend> {
     pub needle: String,
-    pub needle_simd: Vec<(Simd128, Simd128)>,
+    pub needle_simd: Vec<(B::Bytes, B::Bytes)>,
     pub scoring: Scoring,
-    pub score_matrix: Matrix<Simd256>,
-    pub match_masks: Matrix<Simd256>,
-    /// Actual haystack chunks for the most recent score_haystack call.
-    /// The matrix stride is always MAX_HAYSTACK_CHUNKS for zero-free reuse.
+    pub score_matrix: Matrix<B>,
+    pub match_masks: Matrix<B>,
+    /// Number of LANES-wide chunks (incl. the leading zero column) actually
+    /// consumed by the most recent `score_haystack` call. The matrix stride is
+    /// always sized for `MAX_HAYSTACK_LEN` for zero-free reuse.
     pub haystack_chunks: usize,
-    phantom: PhantomData<Simd256>,
 }
 
-impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
-    SmithWatermanMatcherInternal<Simd128, Simd256>
-{
+impl<B: Backend> SmithWatermanMatcherInternal<B> {
     pub fn new(needle: &[u8], scoring: &Scoring) -> Self {
         Self {
             needle: String::from_utf8_lossy(needle).to_string(),
@@ -42,15 +32,14 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
             score_matrix: Matrix::new(needle.len(), MAX_HAYSTACK_LEN),
             match_masks: Matrix::new(needle.len(), MAX_HAYSTACK_LEN),
             haystack_chunks: 0,
-            phantom: PhantomData,
         }
     }
 
-    fn broadcast_needle(needle: &[u8]) -> Vec<(Simd128, Simd128)> {
+    fn broadcast_needle(needle: &[u8]) -> Vec<(B::Bytes, B::Bytes)> {
         let needle_cased = case_needle(needle);
         needle_cased
             .iter()
-            .map(|(c1, c2)| unsafe { (Simd128::splat_u8(*c1), Simd128::splat_u8(*c2)) })
+            .map(|(c1, c2)| unsafe { (B::Bytes::splat(*c1), B::Bytes::splat(*c2)) })
             .collect()
     }
 
@@ -108,147 +97,131 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
         }
 
         let scoring = &self.scoring;
-        let haystack_chunks = haystack.len().div_ceil(16) + 1;
+        let haystack_chunks = haystack.len().div_ceil(B::LANES) + 1;
         self.haystack_chunks = haystack_chunks;
 
-        // Matrix stride is fixed at MAX_HAYSTACK_CHUNKS from construction.
-        // Row 0 and column 0 are always zero (never written by the inner loop),
-        // so no re-zeroing is needed between calls.
+        // Matrix stride is fixed at construction. Row 0 and column 0 are
+        // always zero (never written by the inner loop), so no re-zeroing is
+        // needed between calls.
         let score_matrix = &mut self.score_matrix;
         let match_masks = &mut self.match_masks;
 
         unsafe {
             // Constants
-            let gap_extend_penalty = Simd256::splat_u16(scoring.gap_extend_penalty);
+            let gap_extend_penalty = B::Score::splat(scoring.gap_extend_penalty);
             let gap_open_penalty =
-                Simd256::splat_u16(scoring.gap_open_penalty - scoring.gap_extend_penalty);
-            let match_score = Simd256::splat_u16(scoring.match_score + scoring.mismatch_penalty);
-            let mismatch_penalty = Simd256::splat_u16(scoring.mismatch_penalty);
-            let matching_case_bonus = Simd256::splat_u16(scoring.matching_case_bonus);
-            let capitalization_bonus = Simd256::splat_u16(scoring.capitalization_bonus);
-            let delimiter_bonus = Simd256::splat_u16(scoring.delimiter_bonus);
+                B::Score::splat(scoring.gap_open_penalty - scoring.gap_extend_penalty);
+            let match_score = B::Score::splat(scoring.match_score + scoring.mismatch_penalty);
+            let mismatch_penalty = B::Score::splat(scoring.mismatch_penalty);
+            let matching_case_bonus = B::Score::splat(scoring.matching_case_bonus);
+            let capitalization_bonus = B::Score::splat(scoring.capitalization_bonus);
+            let delimiter_bonus = B::Score::splat(scoring.delimiter_bonus);
 
             // State
             // TODO: have prefix bonus scale based on distance
-            let mut prefix_bonus_masked =
-                Simd256::splat_u16(scoring.prefix_bonus).and(Simd256::load_unaligned(PREFIX_MASK));
-            let mut prev_chunk_char_is_delimiter_mask = Simd128::zero();
-            let mut prev_chunk_is_lower_mask = Simd128::zero();
-            let mut max_scores = Simd256::zero();
+            let mut prefix_bonus_masked = B::Score::first_lane(scoring.prefix_bonus);
+            let mut prev_chunk_char_is_delimiter_mask = B::Bytes::zero();
+            let mut prev_chunk_is_lower_mask = B::Bytes::zero();
+            let mut max_scores = B::Score::zero();
 
             // TODO: try doing N needle chars per haystack chunk for better cache locality
-            for (col_idx, haystack) in (0..(haystack_chunks - 1)).map(|col_idx| {
-                let haystack =
-                    Simd128::load_partial(haystack.as_ptr(), col_idx * 16, haystack.len());
-                (col_idx + 1, haystack)
+            for (col_idx, haystack_chunk) in (0..(haystack_chunks - 1)).map(|col_idx| {
+                let haystack_chunk =
+                    B::Bytes::load_partial(haystack.as_ptr(), col_idx * B::LANES, haystack.len());
+                (col_idx + 1, haystack_chunk)
             }) {
                 // Bonus for matching a capital letter after a lowercase letter
-                let is_upper_mask = Simd128::and(
-                    haystack.lt_u8(Simd128::splat_u8(b'Z' + 1)),
-                    haystack.gt_u8(Simd128::splat_u8(b'A' - 1)),
-                );
-                let is_lower_mask = Simd128::and(
-                    haystack.lt_u8(Simd128::splat_u8(b'z' + 1)),
-                    haystack.gt_u8(Simd128::splat_u8(b'a' - 1)),
-                );
+                let is_upper_mask = haystack_chunk
+                    .lt(B::Bytes::splat(b'Z' + 1))
+                    .and(haystack_chunk.gt(B::Bytes::splat(b'A' - 1)));
+                let is_lower_mask = haystack_chunk
+                    .lt(B::Bytes::splat(b'z' + 1))
+                    .and(haystack_chunk.gt(B::Bytes::splat(b'a' - 1)));
                 let is_letter_mask = is_upper_mask.or(is_lower_mask);
 
-                // Give the bonus if the character is uppercase and the previous character was lowercase
-                let capitalization_mask = Simd128::and(
-                    is_upper_mask,
-                    is_lower_mask.shift_right_padded_u8::<1>(prev_chunk_is_lower_mask),
-                )
-                .cast_i8_to_i16();
+                // Bonus when an uppercase byte follows a lowercase byte
+                let capitalization_mask = B::widen(
+                    is_upper_mask.and(is_lower_mask.shift_right_padded_1(prev_chunk_is_lower_mask)),
+                );
                 let capitalization_bonus_masked = capitalization_mask.and(capitalization_bonus);
-
                 prev_chunk_is_lower_mask = is_lower_mask;
 
-                // Bonus for matching after a delimiter character
-                // We consider anything that isn't a digit or a letter, and within ASCII range, to
-                // be a delimiter
-                let is_digit_mask = Simd128::and(
-                    haystack.gt_u8(Simd128::splat_u8(b'0' - 1)),
-                    haystack.lt_u8(Simd128::splat_u8(b'9' + 1)),
-                );
+                // Bonus for matching after a delimiter character. We consider
+                // anything that isn't a digit or a letter and is within ASCII
+                // range to be a delimiter.
+                let is_digit_mask = haystack_chunk
+                    .gt(B::Bytes::splat(b'0' - 1))
+                    .and(haystack_chunk.lt(B::Bytes::splat(b'9' + 1)));
                 let char_is_delimiter_mask = is_letter_mask
                     .or(is_digit_mask)
-                    .or(haystack.gt_u8(Simd128::splat_u8(127)))
+                    .or(haystack_chunk.gt(B::Bytes::splat(127)))
                     .not();
-                let prev_char_is_delimiter_mask = char_is_delimiter_mask
-                    .shift_right_padded_u8::<1>(prev_chunk_char_is_delimiter_mask);
-                let delimiter_mask = prev_char_is_delimiter_mask
-                    .and(char_is_delimiter_mask.not())
-                    .cast_i8_to_i16();
+                let prev_char_is_delimiter_mask =
+                    char_is_delimiter_mask.shift_right_padded_1(prev_chunk_char_is_delimiter_mask);
+                let delimiter_mask =
+                    B::widen(prev_char_is_delimiter_mask.and(char_is_delimiter_mask.not()));
                 let delimiter_bonus_masked = delimiter_mask.and(delimiter_bonus);
                 prev_chunk_char_is_delimiter_mask = char_is_delimiter_mask;
 
-                // Delimiter, capitalization and prefix bonuses
+                // Match-conditional bonuses (delimiter, capitalization, prefix)
                 let match_and_masked_bonuses = delimiter_bonus_masked
-                    .add_u16(capitalization_bonus_masked)
-                    .add_u16(prefix_bonus_masked)
-                    .add_u16(match_score);
+                    .add(capitalization_bonus_masked)
+                    .add(prefix_bonus_masked)
+                    .add(match_score);
 
-                let mut up_gap_mask = Simd256::zero();
-                let mut prev_row_scores = Simd256::zero();
-                let mut row_scores = Simd256::zero();
+                let mut up_gap_mask = B::Score::zero();
+                let mut prev_row_scores = B::Score::zero();
+                let mut row_scores = B::Score::zero();
 
                 for (row_idx, (needle_char, flipped_case_needle_char)) in
                     self.needle_simd.iter().enumerate().map(|(i, c)| (i + 1, c))
                 {
-                    // Match needle chars against the haystack (case insensitive)
-                    let exact_case_match_mask = (*needle_char).eq_u8(haystack);
-                    let flipped_case_match_mask = (*flipped_case_needle_char).eq_u8(haystack);
-                    let match_mask = exact_case_match_mask
-                        .or(flipped_case_match_mask)
-                        .cast_i8_to_i16();
-                    let exact_case_match_mask = exact_case_match_mask.cast_i8_to_i16();
+                    // Match needle char against the chunk (case insensitive)
+                    let exact_case_match_mask = needle_char.eq(haystack_chunk);
+                    let flipped_case_match_mask = flipped_case_needle_char.eq(haystack_chunk);
+                    let match_mask = B::widen(exact_case_match_mask.or(flipped_case_match_mask));
+                    let exact_case_match_mask = B::widen(exact_case_match_mask);
 
-                    // Diagonal - typical match/mismatch, moving along one haystack and needle char
+                    // Diagonal — typical match/mismatch, advancing one cell.
                     let diag_scores = {
-                        let diag = prev_row_scores.shift_right_padded_u16::<1>(
-                            score_matrix.get(row_idx - 1, col_idx - 1),
-                        );
-
-                        // Add match score (+ mismatch penalty) with bonuses for matches, avoiding blendv
-                        // Bonuses are delimiter, capitalization and prefix
-                        let diag = diag.add_u16(match_mask.and(match_and_masked_bonuses));
-                        // Always add mismatch penalty
-                        let diag = diag.subs_u16(mismatch_penalty);
-                        // Add matching case bonus
-                        diag.add_u16(exact_case_match_mask.and(matching_case_bonus))
+                        let diag = prev_row_scores
+                            .shift_right_padded::<1>(score_matrix.get(row_idx - 1, col_idx - 1));
+                        // Add bonuses for matches
+                        let diag = diag.add(match_mask.and(match_and_masked_bonuses));
+                        // Always pay the mismatch penalty
+                        let diag = diag.subs(mismatch_penalty);
+                        // Reward matching the needle's exact case
+                        diag.add(exact_case_match_mask.and(matching_case_bonus))
                     };
 
-                    // Up - skipping char in needle
+                    // Up — skipping a char in the needle.
                     let up_scores = {
-                        // Always apply gap extend penalty
-                        let score_after_gap_extend = prev_row_scores.subs_u16(gap_extend_penalty);
-                        // Apply gap open penalty - gap extend penalty for opened gaps, avoiding blendv
-                        score_after_gap_extend.subs_u16(up_gap_mask.and(gap_open_penalty))
+                        let after_extend = prev_row_scores.subs(gap_extend_penalty);
+                        after_extend.subs(up_gap_mask.and(gap_open_penalty))
                     };
 
-                    // Max of diagonal, up and left (after gap extension)
-                    row_scores = propagate_horizontal_gaps::<Simd256>(
-                        diag_scores.max_u16(up_scores),         // Current
-                        score_matrix.get(row_idx, col_idx - 1), // Left
-                        match_mask,                             // Current
-                        match_masks.get(row_idx, col_idx - 1),  // Left
+                    // Max of diagonal, up, and left (after gap extension).
+                    row_scores = B::propagate_horizontal_gaps(
+                        diag_scores.max(up_scores),
+                        score_matrix.get(row_idx, col_idx - 1),
+                        match_mask,
+                        match_masks.get(row_idx, col_idx - 1),
                         gap_open_penalty,
                         gap_extend_penalty,
                     );
 
-                    // Store results
                     score_matrix.set(row_idx, col_idx, row_scores);
                     match_masks.set(row_idx, col_idx, match_mask);
                     prev_row_scores = row_scores;
                     up_gap_mask = match_mask;
                 }
 
-                // because we do this after the loop, we're guaranteed to be on the last row
-                max_scores = max_scores.max_u16(row_scores);
-                prefix_bonus_masked = Simd256::zero();
+                // Last row of the matrix at this chunk
+                max_scores = max_scores.max(row_scores);
+                prefix_bonus_masked = B::Score::zero();
             }
 
-            max_scores.smax_u16()
+            max_scores.horizontal_max()
         }
     }
 
@@ -261,13 +234,13 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
 
         let mut match_end_col: u16 = 0;
         let mut max_score = 0;
-        for col_idx in 1..(haystack.len().div_ceil(16) + 1) {
+        for col_idx in 1..(haystack.len().div_ceil(B::LANES) + 1) {
             let chunk_scores = self.score_matrix.get(self.needle.len(), col_idx);
-            let chunk_max_score = unsafe { chunk_scores.smax_u16() };
+            let chunk_max_score = unsafe { chunk_scores.horizontal_max() };
             if chunk_max_score > max_score {
                 max_score = chunk_max_score;
-                let lane = unsafe { chunk_scores.idx_u16(chunk_max_score) };
-                match_end_col = ((col_idx - 1) * 16 + lane) as u16;
+                let lane = unsafe { chunk_scores.find_lane(chunk_max_score) };
+                match_end_col = ((col_idx - 1) * B::LANES + lane) as u16;
             }
         }
         match_end_col
@@ -275,9 +248,11 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
 
     #[cfg(test)]
     pub fn print_score_matrix(&self, haystack: &str) {
-        let haystack_chunks = haystack.len().div_ceil(16) + 1;
+        let haystack_chunks = haystack.len().div_ceil(B::LANES) + 1;
         let stride = self.score_matrix.haystack_chunks;
-        let score_matrix = self.score_matrix.as_slice();
+        let bytes = self.score_matrix.as_byte_slice();
+        let lanes = B::LANES;
+        let lane_bytes = B::LANE_BYTES;
 
         print!("     ");
         for char in haystack.chars() {
@@ -285,15 +260,18 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
         }
         println!();
 
-        for (i, row) in score_matrix
-            .chunks_exact(stride)
-            .enumerate()
-            .skip(1)
-            .take(self.needle.len())
-        {
-            print!("{:<4} ", self.needle.chars().nth(i - 1).unwrap_or(' '));
-            for col in row.iter().take(haystack_chunks).skip(1).flatten() {
-                print!("{:<4} ", col);
+        for row in 1..=self.needle.len() {
+            print!("{:<4} ", self.needle.chars().nth(row - 1).unwrap_or(' '));
+            for chunk in 1..haystack_chunks {
+                for lane in 0..lanes {
+                    let offset = (row * stride * lanes + chunk * lanes + lane) * lane_bytes;
+                    let value: u16 = if lane_bytes == 2 {
+                        u16::from_ne_bytes([bytes[offset], bytes[offset + 1]])
+                    } else {
+                        bytes[offset] as u16
+                    };
+                    print!("{:<4} ", value);
+                }
             }
             println!();
         }

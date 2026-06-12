@@ -1,5 +1,5 @@
 use super::matrix::Matrix;
-use crate::simd::Vector256;
+use crate::simd::{Backend, ScoreVec};
 
 pub enum Alignment {
     Left((usize, usize)),
@@ -33,12 +33,22 @@ impl Alignment {
 
 /// Iterator over alignment path positions with support for max typos.
 ///
-/// Yields `Some((needle_idx, haystack_idx))` for each position in the path,
-/// or `None` to signal that max_typos was exceeded.
+/// Yields `Some(Alignment::*)` for each step taken, or `None` to signal that
+/// max_typos was exceeded.
+///
+/// The iterator is non-generic over `Backend`: the backend's lane count and
+/// element width (1 or 2 bytes) are resolved at construction so the body
+/// monomorphizes once instead of per backend. The element-width branch in
+/// `get_score` / `get_is_match` is a single field load + compare; in practice
+/// LLVM hoists it across consecutive accesses.
 pub struct AlignmentPathIter<'a> {
-    score_matrix: &'a [[u16; 16]],
-    match_masks: &'a [[u16; 16]],
-    haystack_chunks: usize,
+    score_matrix: &'a [u8],
+    match_masks: &'a [u8],
+    /// Number of byte-positions in one row = chunks_per_row * LANES * LANE_BYTES.
+    row_stride: usize,
+    lanes_per_chunk: usize,
+    /// 1 for u8 scoring, 2 for u16 scoring.
+    lane_bytes: usize,
     row_idx: usize,
     col_idx: usize,
     skipped_chunks: usize,
@@ -50,26 +60,23 @@ pub struct AlignmentPathIter<'a> {
 
 impl<'a> AlignmentPathIter<'a> {
     #[inline(always)]
-    pub fn new<Simd256: Vector256>(
-        score_matrix: &'a Matrix<Simd256>,
-        match_masks: &'a Matrix<Simd256>,
+    pub fn new<B: Backend>(
+        score_matrix: &'a Matrix<B>,
+        match_masks: &'a Matrix<B>,
         needle_len: usize,
         haystack_chunks: usize,
         skipped_chunks: usize,
         score: u16,
         max_typos: Option<u16>,
     ) -> Self {
-        let col_idx = Self::get_col_idx(
-            score_matrix,
-            needle_len,
-            haystack_chunks,
-            score,
-        );
+        let col_idx = Self::get_col_idx::<B>(score_matrix, needle_len, haystack_chunks, score);
 
         Self {
-            score_matrix: score_matrix.as_slice(),
-            match_masks: match_masks.as_slice(),
-            haystack_chunks: score_matrix.haystack_chunks,
+            score_matrix: score_matrix.as_byte_slice(),
+            match_masks: match_masks.as_byte_slice(),
+            row_stride: score_matrix.haystack_chunks * B::LANES * B::LANE_BYTES,
+            lanes_per_chunk: B::LANES,
+            lane_bytes: B::LANE_BYTES,
             row_idx: needle_len,
             col_idx,
             skipped_chunks,
@@ -81,17 +88,17 @@ impl<'a> AlignmentPathIter<'a> {
     }
 
     #[inline(always)]
-    fn get_col_idx<Simd256: Vector256>(
-        score_matrix: &Matrix<Simd256>,
+    fn get_col_idx<B: Backend>(
+        score_matrix: &Matrix<B>,
         needle_len: usize,
         haystack_chunks: usize,
         score: u16,
     ) -> usize {
         for chunk_idx in 1..haystack_chunks {
-            let chunk = &score_matrix.get(needle_len, chunk_idx);
-            let idx = unsafe { chunk.idx_u16(score) };
-            if idx != 16 {
-                return chunk_idx * 16 + idx;
+            let chunk = score_matrix.get(needle_len, chunk_idx);
+            let idx = unsafe { chunk.find_lane(score) };
+            if idx != B::LANES {
+                return chunk_idx * B::LANES + idx;
             }
         }
         panic!("could not find max score in score matrix final row");
@@ -99,12 +106,22 @@ impl<'a> AlignmentPathIter<'a> {
 
     #[inline(always)]
     fn get_score(&self, row: usize, col: usize) -> u16 {
-        self.score_matrix[row * self.haystack_chunks + col / 16][col % 16]
+        let offset = row * self.row_stride + col * self.lane_bytes;
+        if self.lane_bytes == 2 {
+            u16::from_ne_bytes([self.score_matrix[offset], self.score_matrix[offset + 1]])
+        } else {
+            self.score_matrix[offset] as u16
+        }
     }
 
     #[inline(always)]
     fn get_is_match(&self, row: usize, col: usize) -> bool {
-        self.match_masks[row * self.haystack_chunks + col / 16][col % 16] != 0
+        let offset = row * self.row_stride + col * self.lane_bytes;
+        if self.lane_bytes == 2 {
+            self.match_masks[offset] != 0 || self.match_masks[offset + 1] != 0
+        } else {
+            self.match_masks[offset] != 0
+        }
     }
 }
 
@@ -125,7 +142,7 @@ impl<'a> Iterator for AlignmentPathIter<'a> {
         }
 
         // Must be moving up only (at left edge), or lost alignment
-        if self.col_idx < 16 || self.score == 0 {
+        if self.col_idx < self.lanes_per_chunk || self.score == 0 {
             if let Some(max_typos) = self.max_typos
                 && (self.typo_count + self.row_idx as u16) > max_typos
             {
@@ -135,10 +152,12 @@ impl<'a> Iterator for AlignmentPathIter<'a> {
             return None;
         }
 
-        // Capture current position to yield (adjusted to 0-indexed)
+        // Capture current position to yield (adjusted to 0-indexed haystack
+        // bytes; `skipped_chunks` is in units of 16 since the prefilter
+        // operates on 16-byte chunks).
         let current_pos = (
             self.row_idx - 1,
-            self.col_idx - 16 + self.skipped_chunks * 16,
+            self.col_idx - self.lanes_per_chunk + self.skipped_chunks * 16,
         );
 
         if self.get_is_match(self.row_idx, self.col_idx) {
