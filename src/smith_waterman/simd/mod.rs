@@ -1,6 +1,6 @@
 use crate::Scoring;
 #[cfg(target_arch = "x86_64")]
-use crate::simd::{AvxBackend, AvxU8Backend, SseBackend, SseU8Backend};
+use crate::simd::{Avx512U8Backend, AvxBackend, AvxU8Backend, SseBackend, SseU8Backend};
 use crate::simd::{Backend, Scalar8Backend, Scalar16U8Backend};
 #[cfg(target_arch = "aarch64")]
 use crate::simd::{NeonBackend, NeonU8Backend};
@@ -31,9 +31,11 @@ fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
 ///
 /// Each architecture has both a u16-scoring and a u8-scoring variant.
 /// `new()` picks the u8 variant when the maximum possible matrix score fits
-/// in a u8, doubling effective throughput.
+/// in a u8, doubling effective throughput
 #[derive(Debug, Clone)]
 pub enum SmithWatermanMatcher {
+    #[cfg(target_arch = "x86_64")]
+    AVX512U8(SmithWatermanMatcherAVX512U8),
     #[cfg(target_arch = "x86_64")]
     AVX2(SmithWatermanMatcherAVX2),
     #[cfg(target_arch = "x86_64")]
@@ -53,12 +55,12 @@ pub enum SmithWatermanMatcher {
 /// Dispatch to the active backend's matcher. All variants' inner methods are
 /// `unsafe`: the SIMD variants because of `#[target_feature]`, the scalar
 /// ones for uniformity (no actual safety obligation). The wrapping methods
-/// on [`SmithWatermanMatcher`] are safe — `new()` proves the right target
-/// feature is available before constructing the variant, so subsequent
-/// dispatches are sound.
+/// on [`SmithWatermanMatcher`] are safe due to runtime feature detection.
 macro_rules! dispatch {
     ($self:expr, $m:ident => $body:expr) => {
         match $self {
+            #[cfg(target_arch = "x86_64")]
+            Self::AVX512U8($m) => unsafe { $body },
             #[cfg(target_arch = "x86_64")]
             Self::AVX2($m) => unsafe { $body },
             #[cfg(target_arch = "x86_64")]
@@ -81,6 +83,10 @@ impl SmithWatermanMatcher {
     pub fn new(needle: &[u8], scoring: &Scoring) -> Self {
         let use_u8 = score_fits_in_u8(needle.len(), scoring);
 
+        #[cfg(target_arch = "x86_64")]
+        if use_u8 && SmithWatermanMatcherAVX512U8::is_available() {
+            return Self::AVX512U8(unsafe { SmithWatermanMatcherAVX512U8::new(needle, scoring) });
+        }
         #[cfg(target_arch = "x86_64")]
         if SmithWatermanMatcherAVX2::is_available() {
             return if use_u8 {
@@ -227,6 +233,13 @@ macro_rules! define_matcher {
         }
     };
 }
+
+#[cfg(target_arch = "x86_64")]
+define_matcher!(
+    SmithWatermanMatcherAVX512U8,
+    backend = Avx512U8Backend,
+    target_feature = "avx512f,avx512bw,avx512vbmi",
+);
 
 #[cfg(target_arch = "x86_64")]
 define_matcher!(
@@ -586,6 +599,20 @@ mod tests {
                 );
             }
 
+            #[cfg(target_arch = "x86_64")]
+            if SmithWatermanMatcherAVX512U8::is_available()
+                && score_fits_in_u8(needle.len(), &Scoring::default())
+            {
+                let mut avx = unsafe {
+                    SmithWatermanMatcherAVX512U8::new(needle.as_bytes(), &Scoring::default())
+                };
+                let got = unsafe { avx.match_haystack(haystack.as_bytes(), None) }.unwrap();
+                assert_eq!(
+                    got, want,
+                    "AVX-512-u8 score mismatch for needle={needle:?} haystack={haystack:?}"
+                );
+            }
+
             let mut scalar =
                 unsafe { SmithWatermanMatcherScalar::new(needle.as_bytes(), &Scoring::default()) };
             let got = unsafe { scalar.match_haystack(haystack.as_bytes(), None) }.unwrap();
@@ -660,6 +687,21 @@ mod tests {
                 );
             }
 
+            #[cfg(target_arch = "x86_64")]
+            if SmithWatermanMatcherAVX512U8::is_available()
+                && score_fits_in_u8(needle.len(), &Scoring::default())
+            {
+                let mut avx = unsafe {
+                    SmithWatermanMatcherAVX512U8::new(needle.as_bytes(), &Scoring::default())
+                };
+                let got = unsafe { avx.match_haystack_indices(haystack.as_bytes(), 0, None) }
+                    .map(|(_, indices)| indices);
+                assert_eq!(
+                    got, want,
+                    "AVX-512-u8 indices mismatch for needle={needle:?} haystack={haystack:?}"
+                );
+            }
+
             let mut scalar =
                 unsafe { SmithWatermanMatcherScalar::new(needle.as_bytes(), &Scoring::default()) };
             let got = unsafe { scalar.match_haystack_indices(haystack.as_bytes(), 0, None) }
@@ -689,7 +731,9 @@ mod tests {
         let m = SmithWatermanMatcher::new(b"abc", &Scoring::default());
         let is_u8 = match m {
             #[cfg(target_arch = "x86_64")]
-            SmithWatermanMatcher::AVX2U8(_) | SmithWatermanMatcher::SSEU8(_) => true,
+            SmithWatermanMatcher::AVX512U8(_)
+            | SmithWatermanMatcher::AVX2U8(_)
+            | SmithWatermanMatcher::SSEU8(_) => true,
             #[cfg(target_arch = "aarch64")]
             SmithWatermanMatcher::NEONU8(_) => true,
             SmithWatermanMatcher::ScalarU8(_) => true,

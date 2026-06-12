@@ -1,20 +1,28 @@
 //! SIMD backend abstraction for the Smith-Waterman kernel.
 //!
-//! Each backend exposes its native vector width via [`Backend::LANES`] and two
-//! associated vector types: [`BytesVec`] for haystack/byte-mask work (LANES bytes
-//! wide) and [`ScoreVec`] for the score matrix (LANES × u16 or LANES x u8).
+//! Each backend exposes its native vector width via [`Backend::LANES`] and
+//! three associated vector types: [`BytesVec`] for haystack bytes (LANES bytes
+//! wide), [`MaskVec`] for boolean comparison results, and [`ScoreVec`] for the
+//! score matrix (LANES × u16 or LANES × u8). Keeping masks as a distinct type
+//! lets AVX-512 carry them as native `__mmask64` bitmasks rather than
+//! 64-byte vectors, while other backends can alias [`MaskVec`] to their
+//! [`BytesVec`] type with no loss.
+//!
 //! The kernel itself is generic over [`Backend`] and the lane count threads
 //! through chunk arithmetic, the matrix stride, the alignment-path iterator,
 //! and the horizontal-gap propagation unroll.
 //!
 //! Availabled backends:
-//!   - AVX2:   LANES = 16/32 (scoring u16 x 16 = 256-bit or u8 x 32 = 256-bit)
-//!   - SSE:    LANES = 8/16  (scoring u16 x 8 = 128-bit or u8 x 16 = 128-bit)
-//!   - NEON:   LANES = 8/16  (scoring u16 x 8 = 128-bit or u8 x 16 = 128-bit)
-//!   - Scalar: LANES = 16/32 (fallback for non-SIMD systems)
+//!   - AVX-512: LANES = 64    (scoring u8 x 64 = 512-bit, u8 only)
+//!   - AVX2:    LANES = 16/32 (scoring u16 x 16 = 256-bit or u8 x 32 = 256-bit)
+//!   - SSE:     LANES = 8/16  (scoring u16 x 8 = 128-bit or u8 x 16 = 128-bit)
+//!   - NEON:    LANES = 8/16  (scoring u16 x 8 = 128-bit or u8 x 16 = 128-bit)
+//!   - Scalar:  LANES = 16/32 (fallback for non-SIMD systems)
 
 #[cfg(target_arch = "x86_64")]
 mod avx;
+#[cfg(target_arch = "x86_64")]
+mod avx512;
 #[cfg(target_arch = "aarch64")]
 mod neon;
 mod scalar;
@@ -23,6 +31,8 @@ mod sse;
 
 #[cfg(target_arch = "x86_64")]
 pub use avx::{AvxBackend, AvxU8Backend};
+#[cfg(target_arch = "x86_64")]
+pub use avx512::Avx512U8Backend;
 #[cfg(target_arch = "aarch64")]
 pub use neon::{NeonBackend, NeonU8Backend};
 pub use scalar::{Scalar8Backend, Scalar16U8Backend};
@@ -30,28 +40,32 @@ pub use scalar::{Scalar8Backend, Scalar16U8Backend};
 pub use sse::{SseBackend, SseU8Backend};
 
 /// A SIMD backend for Smith-Waterman matching that supports variable-width
-/// lanes (8, 16, 32) and score primitives (u8, u16).
+/// lanes (8, 16, 32, 64) and score primitives (u8, u16).
 ///
 /// `LANES` is the number of cells per chunk in the score matrix. The matching
-/// [`BytesVec`] holds `LANES` meaningful bytes (one per lane) and widens
-/// element-wise to the [`ScoreVec`] via [`Backend::widen`].
+/// [`BytesVec`] holds `LANES` meaningful bytes (one per lane); comparisons
+/// produce a [`MaskVec`] which can be widened element-wise to the [`ScoreVec`]
+/// via [`Backend::widen_mask`].
 pub trait Backend: Sized + 'static {
     const LANES: usize;
     /// Size of a single score lane in bytes. 1 for u8-element backends,
     /// 2 for u16-element backends. Used by the alignment-path iterator to
     /// read individual cells from the matrix's raw byte view.
     const LANE_BYTES: usize;
-    type Bytes: BytesVec;
+    type Bytes: BytesVec<Mask = Self::Mask>;
+    type Mask: MaskVec;
     type Score: ScoreVec;
 
     /// Whether this backend's required CPU features are available at runtime
     fn is_available() -> bool;
 
-    /// Extend the low `LANES` bytes of a [`BytesVec`] into a [`ScoreVec`].
+    /// Widen a comparison [`MaskVec`] into a [`ScoreVec`] with each lane set
+    /// to `0xFF` (u8 score) or `0xFFFF` (u16 score) where the mask is true and
+    /// zero elsewhere.
     ///
     /// # Safety
     /// The backend's required target features must be enabled at the call site.
-    unsafe fn widen(b: Self::Bytes) -> Self::Score;
+    unsafe fn widen_mask(m: Self::Mask) -> Self::Score;
 
     /// Propagate horizontal (left-direction) gaps across a score row.
     ///
@@ -73,6 +87,9 @@ pub trait Backend: Sized + 'static {
 
 /// A byte-wide vector with `LANES` meaningful bytes
 pub trait BytesVec: Copy + core::fmt::Debug {
+    /// The backend's mask type, produced by comparison operations.
+    type Mask: MaskVec;
+
     /// Zero in every lane.
     ///
     /// # Safety
@@ -85,41 +102,24 @@ pub trait BytesVec: Copy + core::fmt::Debug {
     /// The backend's target features must be enabled at the call site.
     unsafe fn splat(value: u8) -> Self;
 
-    /// Per-lane equality, producing 0xFF where equal and 0x00 elsewhere.
+    /// Per-lane equality, producing a true bit in each lane where equal.
     ///
     /// # Safety
     /// The backend's target features must be enabled at the call site.
-    unsafe fn eq(self, other: Self) -> Self;
+    unsafe fn eq(self, other: Self) -> Self::Mask;
 
-    /// Per-lane unsigned greater-than, producing 0xFF where `self > other`.
+    /// Per-lane unsigned greater-than, producing a true bit where
+    /// `self > other`.
     ///
     /// # Safety
     /// The backend's target features must be enabled at the call site.
-    unsafe fn gt(self, other: Self) -> Self;
+    unsafe fn gt(self, other: Self) -> Self::Mask;
 
-    /// Per-lane unsigned less-than, producing 0xFF where `self < other`.
+    /// Per-lane unsigned less-than, producing a true bit where `self < other`.
     ///
     /// # Safety
     /// The backend's target features must be enabled at the call site.
-    unsafe fn lt(self, other: Self) -> Self;
-
-    /// Bitwise AND.
-    ///
-    /// # Safety
-    /// The backend's target features must be enabled at the call site.
-    unsafe fn and(self, other: Self) -> Self;
-
-    /// Bitwise OR.
-    ///
-    /// # Safety
-    /// The backend's target features must be enabled at the call site.
-    unsafe fn or(self, other: Self) -> Self;
-
-    /// Bitwise NOT.
-    ///
-    /// # Safety
-    /// The backend's target features must be enabled at the call site.
-    unsafe fn not(self) -> Self;
+    unsafe fn lt(self, other: Self) -> Self::Mask;
 
     /// Load up to `LANES` bytes from `data + start`. `len` is the total length
     /// of the buffer pointed to by `data`.
@@ -129,17 +129,53 @@ pub trait BytesVec: Copy + core::fmt::Debug {
     /// backend's target features are enabled.
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self;
 
+    #[cfg(test)]
+    fn from_lanes(values: &[u8]) -> Self;
+    #[cfg(test)]
+    fn to_lanes(self) -> Vec<u8>;
+}
+
+/// A boolean mask over `LANES` lanes, produced by [`BytesVec`] comparisons.
+///
+/// Each lane holds a logical true/false. Non-AVX-512 backends typically alias
+/// this to their [`BytesVec`] type and represent the mask as 0xFF/0x00 per
+/// byte. AVX-512 uses a native `__mmask64` bitmask.
+pub trait MaskVec: Copy + core::fmt::Debug {
+    /// False in every lane.
+    ///
+    /// # Safety
+    /// The backend's target features must be enabled at the call site.
+    unsafe fn zero() -> Self;
+
+    /// Per-lane logical AND.
+    ///
+    /// # Safety
+    /// The backend's target features must be enabled at the call site.
+    unsafe fn and(self, other: Self) -> Self;
+
+    /// Per-lane logical OR.
+    ///
+    /// # Safety
+    /// The backend's target features must be enabled at the call site.
+    unsafe fn or(self, other: Self) -> Self;
+
+    /// Per-lane logical NOT.
+    ///
+    /// # Safety
+    /// The backend's target features must be enabled at the call site.
+    unsafe fn not(self) -> Self;
+
     /// Shift right by 1 lane, filling lane 0 with the highest meaningful lane
-    /// of `prev`
+    /// of `prev`.
     ///
     /// # Safety
     /// The backend's target features must be enabled at the call site.
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self;
 
     #[cfg(test)]
-    fn from_lanes(values: &[u8]) -> Self;
+    fn from_lanes(values: &[bool]) -> Self;
     #[cfg(test)]
-    fn to_lanes(self) -> Vec<u8>;
+    fn to_lanes(self) -> Vec<bool>;
 }
 
 /// A score-wide vector holding `LANES` u16 elements.
@@ -307,6 +343,27 @@ pub(crate) unsafe fn propagate_32_lane<B: Backend>(
     }
 }
 
+#[inline(always)]
+pub(crate) unsafe fn propagate_64_lane<B: Backend>(
+    row: B::Score,
+    adj: B::Score,
+    mm: B::Score,
+    amm: B::Score,
+    gop: B::Score,
+    gex: B::Score,
+) -> B::Score {
+    unsafe {
+        gap_step!(B, 1, row, adj, mm, amm, gop, gex);
+        gap_step!(B, 2, row, adj, mm, amm, gop, gex);
+        gap_step!(B, 4, row, adj, mm, amm, gop, gex);
+        gap_step!(B, 8, row, adj, mm, amm, gop, gex);
+        gap_step!(B, 16, row, adj, mm, amm, gop, gex);
+        gap_step!(B, 32, row, adj, mm, amm, gop, gex);
+        let _ = gex;
+        row
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,10 +394,9 @@ mod tests {
                 .collect::<Vec<_>>();
             let a = B::Bytes::from_lanes(&a_in);
             let b = B::Bytes::from_lanes(&b_in);
-            let result = BytesVec::to_lanes(a.eq(b));
+            let result = MaskVec::to_lanes(a.eq(b));
             for (i, r) in result.iter().enumerate() {
-                let expected = if i % 2 == 0 { 0xFF } else { 0x00 };
-                assert_eq!(*r, expected, "lane {i}");
+                assert_eq!(*r, i % 2 == 0, "lane {i}");
             }
         }
     }
@@ -355,26 +411,38 @@ mod tests {
             }
             let a = B::Bytes::from_lanes(&a_in);
             let b = B::Bytes::from_lanes(&b_in);
-            let gt = BytesVec::to_lanes(a.gt(b));
-            let lt = BytesVec::to_lanes(a.lt(b));
+            let gt = MaskVec::to_lanes(a.gt(b));
+            let lt = MaskVec::to_lanes(a.lt(b));
             if B::LANES >= 2 {
-                assert_eq!(gt[0], 0xFF);
-                assert_eq!(gt[1], 0x00);
-                assert_eq!(lt[0], 0x00);
-                assert_eq!(lt[1], 0xFF);
+                assert!(gt[0]);
+                assert!(!gt[1]);
+                assert!(!lt[0]);
+                assert!(lt[1]);
             }
         }
     }
 
-    fn check_bytes_and_or_not<B: Backend>() {
+    fn check_mask_and_or_not<B: Backend>() {
         unsafe {
-            let a_in = vec![0b1100_1100u8; B::LANES];
-            let b_in = vec![0b1010_1010u8; B::LANES];
-            let a = B::Bytes::from_lanes(&a_in);
-            let b = B::Bytes::from_lanes(&b_in);
-            assert_eq!(BytesVec::to_lanes(a.and(b)), vec![0b1000_1000u8; B::LANES]);
-            assert_eq!(BytesVec::to_lanes(a.or(b)), vec![0b1110_1110u8; B::LANES]);
-            assert_eq!(BytesVec::to_lanes(a.not()), vec![0b0011_0011u8; B::LANES]);
+            let pattern_a: Vec<bool> = (0..B::LANES).map(|i| i % 2 == 0).collect();
+            let pattern_b: Vec<bool> = (0..B::LANES).map(|i| i % 3 == 0).collect();
+            let a = B::Mask::from_lanes(&pattern_a);
+            let b = B::Mask::from_lanes(&pattern_b);
+            let and = a.and(b).to_lanes();
+            let or = a.or(b).to_lanes();
+            let not_a = a.not().to_lanes();
+            for i in 0..B::LANES {
+                assert_eq!(and[i], pattern_a[i] && pattern_b[i], "and lane {i}");
+                assert_eq!(or[i], pattern_a[i] || pattern_b[i], "or lane {i}");
+                assert_eq!(not_a[i], !pattern_a[i], "not lane {i}");
+            }
+        }
+    }
+
+    fn check_mask_zero<B: Backend>() {
+        unsafe {
+            let z = B::Mask::zero();
+            assert_eq!(MaskVec::to_lanes(z), vec![false; B::LANES]);
         }
     }
 
@@ -395,15 +463,15 @@ mod tests {
         }
     }
 
-    fn check_bytes_shift_right_padded_1<B: Backend>() {
+    fn check_mask_shift_right_padded_1<B: Backend>() {
         unsafe {
-            let a_in = (0u8..B::LANES as u8).collect::<Vec<_>>();
-            let p_in = (100u8..(100 + B::LANES as u8)).collect::<Vec<_>>();
-            let a = B::Bytes::from_lanes(&a_in);
-            let p = B::Bytes::from_lanes(&p_in);
-            let got = BytesVec::to_lanes(a.shift_right_padded_1(p));
+            let a_in: Vec<bool> = (0..B::LANES).map(|i| i % 2 == 0).collect();
+            let p_in: Vec<bool> = (0..B::LANES).map(|i| i % 3 == 0).collect();
+            let a = B::Mask::from_lanes(&a_in);
+            let p = B::Mask::from_lanes(&p_in);
+            let got = MaskVec::to_lanes(a.shift_right_padded_1(p));
 
-            let mut expected = vec![0u8; B::LANES];
+            let mut expected = vec![false; B::LANES];
             expected[0] = p_in[B::LANES - 1];
             expected[1..B::LANES].copy_from_slice(&a_in[0..(B::LANES - 1)]);
             assert_eq!(got, expected);
@@ -526,6 +594,10 @@ mod tests {
         check_score_shift_right_padded_each::<B, 16>();
     }
 
+    fn check_score_shift_right_padded_32<B: Backend>() {
+        check_score_shift_right_padded_each::<B, 32>();
+    }
+
     // ----- Dispatch -------------------------------------------------------
 
     macro_rules! backend_tests {
@@ -550,16 +622,20 @@ mod tests {
                     check_bytes_gt_lt::<$backend>();
                 }
                 #[test]
-                fn bytes_and_or_not() {
-                    check_bytes_and_or_not::<$backend>();
+                fn mask_and_or_not() {
+                    check_mask_and_or_not::<$backend>();
+                }
+                #[test]
+                fn mask_zero() {
+                    check_mask_zero::<$backend>();
                 }
                 #[test]
                 fn bytes_load_partial() {
                     check_bytes_load_partial::<$backend>();
                 }
                 #[test]
-                fn bytes_shift_right_padded_1() {
-                    check_bytes_shift_right_padded_1::<$backend>();
+                fn mask_shift_right_padded_1() {
+                    check_mask_shift_right_padded_1::<$backend>();
                 }
                 #[test]
                 fn score_zero() {
@@ -607,6 +683,142 @@ mod tests {
         };
     }
 
+    /// Backend tests gated on `Backend::is_available()` at runtime. Used for
+    /// backends whose required CPU features may not be present in CI
+    /// (notably AVX-512). Tests no-op on machines without the features
+    macro_rules! backend_tests_runtime_gated {
+        ($mod_name:ident, $backend:ty) => {
+            mod $mod_name {
+                use super::*;
+
+                #[inline]
+                fn skip_if_unavailable() -> bool {
+                    !<$backend>::is_available()
+                }
+
+                #[test]
+                fn bytes_zero() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_bytes_zero::<$backend>();
+                }
+                #[test]
+                fn bytes_splat() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_bytes_splat::<$backend>();
+                }
+                #[test]
+                fn bytes_eq() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_bytes_eq::<$backend>();
+                }
+                #[test]
+                fn bytes_gt_lt() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_bytes_gt_lt::<$backend>();
+                }
+                #[test]
+                fn mask_and_or_not() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_mask_and_or_not::<$backend>();
+                }
+                #[test]
+                fn mask_zero() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_mask_zero::<$backend>();
+                }
+                #[test]
+                fn bytes_load_partial() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_bytes_load_partial::<$backend>();
+                }
+                #[test]
+                fn mask_shift_right_padded_1() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_mask_shift_right_padded_1::<$backend>();
+                }
+                #[test]
+                fn score_zero() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_score_zero::<$backend>();
+                }
+                #[test]
+                fn score_splat() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_score_splat::<$backend>();
+                }
+                #[test]
+                fn score_first_lane() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_score_first_lane::<$backend>();
+                }
+                #[test]
+                fn score_max_add_subs() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_score_max_add_subs::<$backend>();
+                }
+                #[test]
+                fn score_horizontal_max() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_score_horizontal_max::<$backend>();
+                }
+                #[test]
+                fn score_find_lane() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_score_find_lane::<$backend>();
+                }
+                #[test]
+                fn score_shift_right_padded() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_score_shift_right_padded_8::<$backend>();
+                }
+                #[test]
+                fn score_shift_right_padded_16() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_score_shift_right_padded_16::<$backend>();
+                }
+                #[test]
+                fn score_shift_right_padded_32() {
+                    if skip_if_unavailable() {
+                        return;
+                    }
+                    check_score_shift_right_padded_32::<$backend>();
+                }
+            }
+        };
+    }
+
     backend_tests!(scalar8, super::Scalar8Backend);
     backend_tests!(scalar16_u8, super::Scalar16U8Backend);
     #[cfg(target_arch = "x86_64")]
@@ -619,6 +831,8 @@ mod tests {
     backend_tests!(avx_u8, super::AvxU8Backend);
     #[cfg(target_arch = "x86_64")]
     backend_tests_32_lane!(avx_u8_extra, super::AvxU8Backend);
+    #[cfg(target_arch = "x86_64")]
+    backend_tests_runtime_gated!(avx512_u8, super::Avx512U8Backend);
     #[cfg(target_arch = "aarch64")]
     backend_tests!(neon, super::NeonBackend);
     #[cfg(target_arch = "aarch64")]

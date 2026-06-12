@@ -1,6 +1,6 @@
 use std::arch::aarch64::*;
 
-use super::{Backend, BytesVec, ScoreVec};
+use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
 /// 8-lane scoring (uint16x8_t, 128-bit), 8-byte bytes (uint8x8_t, 64-bit).
 #[derive(Debug, Clone, Copy)]
@@ -16,6 +16,7 @@ impl Backend for NeonBackend {
     const LANES: usize = 8;
     const LANE_BYTES: usize = 2;
     type Bytes = NeonBytes;
+    type Mask = NeonBytes;
     type Score = NeonScore;
 
     fn is_available() -> bool {
@@ -23,8 +24,8 @@ impl Backend for NeonBackend {
     }
 
     #[inline(always)]
-    unsafe fn widen(b: Self::Bytes) -> Self::Score {
-        unsafe { NeonScore(vreinterpretq_u16_s16(vmovl_s8(vreinterpret_s8_u8(b.0)))) }
+    unsafe fn widen_mask(m: Self::Mask) -> Self::Score {
+        unsafe { NeonScore(vreinterpretq_u16_s16(vmovl_s8(vreinterpret_s8_u8(m.0)))) }
     }
 
     #[inline(always)]
@@ -50,7 +51,6 @@ impl Backend for NeonBackend {
 }
 
 impl NeonBytes {
-    /// Safe page-bounded read of 0..8 bytes.
     #[inline(always)]
     unsafe fn load_partial_safe(ptr: *const u8, len: usize) -> uint8x8_t {
         unsafe {
@@ -93,6 +93,8 @@ impl NeonBytes {
 }
 
 impl BytesVec for NeonBytes {
+    type Mask = NeonBytes;
+
     #[inline(always)]
     unsafe fn zero() -> Self {
         unsafe { Self(vdup_n_u8(0)) }
@@ -102,28 +104,16 @@ impl BytesVec for NeonBytes {
         unsafe { Self(vdup_n_u8(value)) }
     }
     #[inline(always)]
-    unsafe fn eq(self, other: Self) -> Self {
+    unsafe fn eq(self, other: Self) -> Self::Mask {
         unsafe { Self(vceq_u8(self.0, other.0)) }
     }
     #[inline(always)]
-    unsafe fn gt(self, other: Self) -> Self {
+    unsafe fn gt(self, other: Self) -> Self::Mask {
         unsafe { Self(vcgt_u8(self.0, other.0)) }
     }
     #[inline(always)]
-    unsafe fn lt(self, other: Self) -> Self {
+    unsafe fn lt(self, other: Self) -> Self::Mask {
         unsafe { Self(vclt_u8(self.0, other.0)) }
-    }
-    #[inline(always)]
-    unsafe fn and(self, other: Self) -> Self {
-        unsafe { Self(vand_u8(self.0, other.0)) }
-    }
-    #[inline(always)]
-    unsafe fn or(self, other: Self) -> Self {
-        unsafe { Self(vorr_u8(self.0, other.0)) }
-    }
-    #[inline(always)]
-    unsafe fn not(self) -> Self {
-        unsafe { Self(vmvn_u8(self.0)) }
     }
 
     #[inline(always)]
@@ -154,14 +144,6 @@ impl BytesVec for NeonBytes {
         }
     }
 
-    #[inline(always)]
-    unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
-        // vext_u8(prev, self, 7) takes bytes 7..15 of (prev || self)
-        //   = [prev[7], self[0], self[1], ..., self[6]]
-        // which is what shift-right-by-1-with-fill-from-prev produces.
-        unsafe { Self(vext_u8::<7>(prev.0, self.0)) }
-    }
-
     #[cfg(test)]
     fn from_lanes(values: &[u8]) -> Self {
         assert_eq!(values.len(), 8);
@@ -172,6 +154,48 @@ impl BytesVec for NeonBytes {
         let mut buf = [0u8; 8];
         unsafe { vst1_u8(buf.as_mut_ptr(), self.0) };
         buf.to_vec()
+    }
+}
+
+impl MaskVec for NeonBytes {
+    #[inline(always)]
+    unsafe fn zero() -> Self {
+        unsafe { Self(vdup_n_u8(0)) }
+    }
+    #[inline(always)]
+    unsafe fn and(self, other: Self) -> Self {
+        unsafe { Self(vand_u8(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn or(self, other: Self) -> Self {
+        unsafe { Self(vorr_u8(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn not(self) -> Self {
+        unsafe { Self(vmvn_u8(self.0)) }
+    }
+    #[inline(always)]
+    unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
+        // vext_u8(prev, self, 7) takes bytes 7..15 of (prev || self)
+        //   = [prev[7], self[0], self[1], ..., self[6]]
+        // which is what shift-right-by-1-with-fill-from-prev produces
+        unsafe { Self(vext_u8::<7>(prev.0, self.0)) }
+    }
+
+    #[cfg(test)]
+    fn from_lanes(values: &[bool]) -> Self {
+        assert_eq!(values.len(), 8);
+        let mut buf = [0u8; 8];
+        for i in 0..8 {
+            buf[i] = if values[i] { 0xFF } else { 0 };
+        }
+        Self(unsafe { vld1_u8(buf.as_ptr()) })
+    }
+    #[cfg(test)]
+    fn to_lanes(self) -> Vec<bool> {
+        let mut buf = [0u8; 8];
+        unsafe { vst1_u8(buf.as_mut_ptr(), self.0) };
+        buf.iter().map(|&v| v != 0).collect()
     }
 }
 
@@ -259,7 +283,7 @@ impl ScoreVec for NeonScore {
     }
 }
 
-/// 16-lane scoring (uint8x16_t), 16-byte bytes (uint8x16_t).
+/// 16-lane scoring (uint8x16_t), 16-lane u8 input (uint8x16_t)
 #[derive(Debug, Clone, Copy)]
 pub struct NeonU8Backend;
 
@@ -273,6 +297,7 @@ impl Backend for NeonU8Backend {
     const LANES: usize = 16;
     const LANE_BYTES: usize = 1;
     type Bytes = NeonU8Bytes;
+    type Mask = NeonU8Bytes;
     type Score = NeonU8Score;
 
     fn is_available() -> bool {
@@ -280,8 +305,8 @@ impl Backend for NeonU8Backend {
     }
 
     #[inline(always)]
-    unsafe fn widen(b: Self::Bytes) -> Self::Score {
-        NeonU8Score(b.0)
+    unsafe fn widen_mask(m: Self::Mask) -> Self::Score {
+        NeonU8Score(m.0)
     }
 
     #[inline(always)]
@@ -307,13 +332,12 @@ impl Backend for NeonU8Backend {
 }
 
 impl NeonU8Bytes {
-    /// Safe page-bounded read of 0..16 bytes into a uint8x16_t.
     #[inline(always)]
     unsafe fn load_partial_safe(ptr: *const u8, len: usize) -> uint8x16_t {
         unsafe {
             debug_assert!(len < 16);
             // Build via two 8-byte halves; reuse NeonBytes::load_partial_safe
-            // logic for chunks under 8.
+            // logic for chunks under 8
             if len == 0 {
                 return vdupq_n_u8(0);
             }
@@ -321,7 +345,7 @@ impl NeonU8Bytes {
                 let lo = NeonBytes::load_partial_safe(ptr, len);
                 return vcombine_u8(lo, vdup_n_u8(0));
             }
-            // 9..=15 — load 8 + remainder
+            // 9..=15 - load 8 + remainder
             let lo = vld1_u8(ptr);
             let hi_len = len - 8;
             let hi = NeonBytes::load_partial_safe(ptr.add(8), hi_len);
@@ -336,6 +360,8 @@ impl NeonU8Bytes {
 }
 
 impl BytesVec for NeonU8Bytes {
+    type Mask = NeonU8Bytes;
+
     #[inline(always)]
     unsafe fn zero() -> Self {
         unsafe { Self(vdupq_n_u8(0)) }
@@ -345,28 +371,16 @@ impl BytesVec for NeonU8Bytes {
         unsafe { Self(vdupq_n_u8(value)) }
     }
     #[inline(always)]
-    unsafe fn eq(self, other: Self) -> Self {
+    unsafe fn eq(self, other: Self) -> Self::Mask {
         unsafe { Self(vceqq_u8(self.0, other.0)) }
     }
     #[inline(always)]
-    unsafe fn gt(self, other: Self) -> Self {
+    unsafe fn gt(self, other: Self) -> Self::Mask {
         unsafe { Self(vcgtq_u8(self.0, other.0)) }
     }
     #[inline(always)]
-    unsafe fn lt(self, other: Self) -> Self {
+    unsafe fn lt(self, other: Self) -> Self::Mask {
         unsafe { Self(vcltq_u8(self.0, other.0)) }
-    }
-    #[inline(always)]
-    unsafe fn and(self, other: Self) -> Self {
-        unsafe { Self(vandq_u8(self.0, other.0)) }
-    }
-    #[inline(always)]
-    unsafe fn or(self, other: Self) -> Self {
-        unsafe { Self(vorrq_u8(self.0, other.0)) }
-    }
-    #[inline(always)]
-    unsafe fn not(self) -> Self {
-        unsafe { Self(vmvnq_u8(self.0)) }
     }
 
     #[inline(always)]
@@ -405,13 +419,6 @@ impl BytesVec for NeonU8Bytes {
         }
     }
 
-    #[inline(always)]
-    unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
-        // vextq_u8(prev, self, 15) = (prev || self)[15..31]
-        //   = [prev[15], self[0..15]]
-        unsafe { Self(vextq_u8::<15>(prev.0, self.0)) }
-    }
-
     #[cfg(test)]
     fn from_lanes(values: &[u8]) -> Self {
         assert_eq!(values.len(), 16);
@@ -422,6 +429,47 @@ impl BytesVec for NeonU8Bytes {
         let mut buf = [0u8; 16];
         unsafe { vst1q_u8(buf.as_mut_ptr(), self.0) };
         buf.to_vec()
+    }
+}
+
+impl MaskVec for NeonU8Bytes {
+    #[inline(always)]
+    unsafe fn zero() -> Self {
+        unsafe { Self(vdupq_n_u8(0)) }
+    }
+    #[inline(always)]
+    unsafe fn and(self, other: Self) -> Self {
+        unsafe { Self(vandq_u8(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn or(self, other: Self) -> Self {
+        unsafe { Self(vorrq_u8(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn not(self) -> Self {
+        unsafe { Self(vmvnq_u8(self.0)) }
+    }
+    #[inline(always)]
+    unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
+        // vextq_u8(prev, self, 15) = (prev || self)[15..31]
+        //   = [prev[15], self[0..15]]
+        unsafe { Self(vextq_u8::<15>(prev.0, self.0)) }
+    }
+
+    #[cfg(test)]
+    fn from_lanes(values: &[bool]) -> Self {
+        assert_eq!(values.len(), 16);
+        let mut buf = [0u8; 16];
+        for i in 0..16 {
+            buf[i] = if values[i] { 0xFF } else { 0 };
+        }
+        Self(unsafe { vld1q_u8(buf.as_ptr()) })
+    }
+    #[cfg(test)]
+    fn to_lanes(self) -> Vec<bool> {
+        let mut buf = [0u8; 16];
+        unsafe { vst1q_u8(buf.as_mut_ptr(), self.0) };
+        buf.iter().map(|&v| v != 0).collect()
     }
 }
 

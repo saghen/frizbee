@@ -1,7 +1,7 @@
 use crate::{
     Scoring,
     prefilter::case_needle,
-    simd::{Backend, BytesVec, ScoreVec},
+    simd::{Backend, BytesVec, MaskVec, ScoreVec},
     smith_waterman::greedy::match_greedy,
 };
 
@@ -120,8 +120,8 @@ impl<B: Backend> SmithWatermanMatcherInternal<B> {
             // State
             // TODO: have prefix bonus scale based on distance
             let mut prefix_bonus_masked = B::Score::first_lane(scoring.prefix_bonus);
-            let mut prev_chunk_char_is_delimiter_mask = B::Bytes::zero();
-            let mut prev_chunk_is_lower_mask = B::Bytes::zero();
+            let mut prev_chunk_char_is_delimiter_mask = B::Mask::zero();
+            let mut prev_chunk_is_lower_mask = B::Mask::zero();
             let mut max_scores = B::Score::zero();
 
             // TODO: try doing N needle chars per haystack chunk for better cache locality
@@ -140,7 +140,7 @@ impl<B: Backend> SmithWatermanMatcherInternal<B> {
                 let is_letter_mask = is_upper_mask.or(is_lower_mask);
 
                 // Bonus when an uppercase byte follows a lowercase byte
-                let capitalization_mask = B::widen(
+                let capitalization_mask = B::widen_mask(
                     is_upper_mask.and(is_lower_mask.shift_right_padded_1(prev_chunk_is_lower_mask)),
                 );
                 let capitalization_bonus_masked = capitalization_mask.and(capitalization_bonus);
@@ -159,7 +159,7 @@ impl<B: Backend> SmithWatermanMatcherInternal<B> {
                 let prev_char_is_delimiter_mask =
                     char_is_delimiter_mask.shift_right_padded_1(prev_chunk_char_is_delimiter_mask);
                 let delimiter_mask =
-                    B::widen(prev_char_is_delimiter_mask.and(char_is_delimiter_mask.not()));
+                    B::widen_mask(prev_char_is_delimiter_mask.and(char_is_delimiter_mask.not()));
                 let delimiter_bonus_masked = delimiter_mask.and(delimiter_bonus);
                 prev_chunk_char_is_delimiter_mask = char_is_delimiter_mask;
 
@@ -179,8 +179,9 @@ impl<B: Backend> SmithWatermanMatcherInternal<B> {
                     // Match needle char against the chunk (case insensitive)
                     let exact_case_match_mask = needle_char.eq(haystack_chunk);
                     let flipped_case_match_mask = flipped_case_needle_char.eq(haystack_chunk);
-                    let match_mask = B::widen(exact_case_match_mask.or(flipped_case_match_mask));
-                    let exact_case_match_mask = B::widen(exact_case_match_mask);
+                    let match_mask =
+                        B::widen_mask(exact_case_match_mask.or(flipped_case_match_mask));
+                    let exact_case_match_mask = B::widen_mask(exact_case_match_mask);
 
                     // Diagonal — typical match/mismatch, advancing one cell.
                     let diag_scores = {

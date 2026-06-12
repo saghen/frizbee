@@ -1,14 +1,7 @@
 //! Scalar backend used when no SIMD instruction set is available, and for
 //! cross-backend property tests.
-//!
-//! Four variants are exposed so every lane-count × element-width combination
-//! used by the SIMD backends can be exercised independently of CPU support:
-//!   - [`Scalar8Backend`]    - 8-lane u16 (mirrors SSE/NEON u16)
-//!   - [`Scalar16Backend`]   - 16-lane u16 (mirrors AVX2 u16, production fallback)
-//!   - [`Scalar16U8Backend`] - 16-lane u8 (mirrors SSE/NEON u8)
-//!   - [`Scalar32U8Backend`] - 32-lane u8 (mirrors AVX2 u8, production u8 fallback)
 
-use super::{Backend, BytesVec, ScoreVec};
+use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
 // ---------------------------------------------------------------------------
 // 8-lane scalar backend
@@ -27,6 +20,7 @@ impl Backend for Scalar8Backend {
     const LANES: usize = 8;
     const LANE_BYTES: usize = 2;
     type Bytes = Scalar8Bytes;
+    type Mask = Scalar8Bytes;
     type Score = Scalar8Score;
 
     fn is_available() -> bool {
@@ -34,10 +28,10 @@ impl Backend for Scalar8Backend {
     }
 
     #[inline(always)]
-    unsafe fn widen(b: Self::Bytes) -> Self::Score {
+    unsafe fn widen_mask(m: Self::Mask) -> Self::Score {
         let mut out = [0u16; 8];
         for i in 0..8 {
-            out[i] = (b.0[i] as i8 as i16) as u16;
+            out[i] = (m.0[i] as i8 as i16) as u16;
         }
         Scalar8Score(out)
     }
@@ -65,6 +59,8 @@ impl Backend for Scalar8Backend {
 }
 
 impl BytesVec for Scalar8Bytes {
+    type Mask = Scalar8Bytes;
+
     #[inline(always)]
     unsafe fn zero() -> Self {
         Self([0; 8])
@@ -74,7 +70,7 @@ impl BytesVec for Scalar8Bytes {
         Self([value; 8])
     }
     #[inline(always)]
-    unsafe fn eq(self, other: Self) -> Self {
+    unsafe fn eq(self, other: Self) -> Self::Mask {
         let mut o = [0u8; 8];
         for i in 0..8 {
             o[i] = if self.0[i] == other.0[i] { 0xFF } else { 0 };
@@ -82,7 +78,7 @@ impl BytesVec for Scalar8Bytes {
         Self(o)
     }
     #[inline(always)]
-    unsafe fn gt(self, other: Self) -> Self {
+    unsafe fn gt(self, other: Self) -> Self::Mask {
         let mut o = [0u8; 8];
         for i in 0..8 {
             o[i] = if self.0[i] > other.0[i] { 0xFF } else { 0 };
@@ -90,12 +86,41 @@ impl BytesVec for Scalar8Bytes {
         Self(o)
     }
     #[inline(always)]
-    unsafe fn lt(self, other: Self) -> Self {
+    unsafe fn lt(self, other: Self) -> Self::Mask {
         let mut o = [0u8; 8];
         for i in 0..8 {
             o[i] = if self.0[i] < other.0[i] { 0xFF } else { 0 };
         }
         Self(o)
+    }
+    #[inline(always)]
+    unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
+        let mut o = [0u8; 8];
+        let available = len.saturating_sub(start);
+        let take = available.min(8);
+        for i in 0..take {
+            o[i] = unsafe { *data.add(start + i) };
+        }
+        Self(o)
+    }
+
+    #[cfg(test)]
+    fn from_lanes(values: &[u8]) -> Self {
+        assert_eq!(values.len(), 8);
+        let mut o = [0u8; 8];
+        o.copy_from_slice(values);
+        Self(o)
+    }
+    #[cfg(test)]
+    fn to_lanes(self) -> Vec<u8> {
+        self.0.to_vec()
+    }
+}
+
+impl MaskVec for Scalar8Bytes {
+    #[inline(always)]
+    unsafe fn zero() -> Self {
+        Self([0; 8])
     }
     #[inline(always)]
     unsafe fn and(self, other: Self) -> Self {
@@ -122,16 +147,6 @@ impl BytesVec for Scalar8Bytes {
         Self(o)
     }
     #[inline(always)]
-    unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
-        let mut o = [0u8; 8];
-        let available = len.saturating_sub(start);
-        let take = available.min(8);
-        for i in 0..take {
-            o[i] = unsafe { *data.add(start + i) };
-        }
-        Self(o)
-    }
-    #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         let mut o = [0u8; 8];
         o[0] = prev.0[7];
@@ -140,15 +155,17 @@ impl BytesVec for Scalar8Bytes {
     }
 
     #[cfg(test)]
-    fn from_lanes(values: &[u8]) -> Self {
+    fn from_lanes(values: &[bool]) -> Self {
         assert_eq!(values.len(), 8);
         let mut o = [0u8; 8];
-        o.copy_from_slice(values);
+        for i in 0..8 {
+            o[i] = if values[i] { 0xFF } else { 0 };
+        }
         Self(o)
     }
     #[cfg(test)]
-    fn to_lanes(self) -> Vec<u8> {
-        self.0.to_vec()
+    fn to_lanes(self) -> Vec<bool> {
+        self.0.iter().map(|&v| v != 0).collect()
     }
 }
 
@@ -256,6 +273,7 @@ impl Backend for Scalar16U8Backend {
     const LANES: usize = 16;
     const LANE_BYTES: usize = 1;
     type Bytes = Scalar16U8Bytes;
+    type Mask = Scalar16U8Bytes;
     type Score = Scalar16U8Score;
 
     fn is_available() -> bool {
@@ -263,8 +281,8 @@ impl Backend for Scalar16U8Backend {
     }
 
     #[inline(always)]
-    unsafe fn widen(b: Self::Bytes) -> Self::Score {
-        Scalar16U8Score(b.0)
+    unsafe fn widen_mask(m: Self::Mask) -> Self::Score {
+        Scalar16U8Score(m.0)
     }
 
     #[inline(always)]
@@ -290,6 +308,8 @@ impl Backend for Scalar16U8Backend {
 }
 
 impl BytesVec for Scalar16U8Bytes {
+    type Mask = Scalar16U8Bytes;
+
     #[inline(always)]
     unsafe fn zero() -> Self {
         Self([0; 16])
@@ -299,7 +319,7 @@ impl BytesVec for Scalar16U8Bytes {
         Self([value; 16])
     }
     #[inline(always)]
-    unsafe fn eq(self, other: Self) -> Self {
+    unsafe fn eq(self, other: Self) -> Self::Mask {
         let mut o = [0u8; 16];
         for i in 0..16 {
             o[i] = if self.0[i] == other.0[i] { 0xFF } else { 0 };
@@ -307,7 +327,7 @@ impl BytesVec for Scalar16U8Bytes {
         Self(o)
     }
     #[inline(always)]
-    unsafe fn gt(self, other: Self) -> Self {
+    unsafe fn gt(self, other: Self) -> Self::Mask {
         let mut o = [0u8; 16];
         for i in 0..16 {
             o[i] = if self.0[i] > other.0[i] { 0xFF } else { 0 };
@@ -315,12 +335,41 @@ impl BytesVec for Scalar16U8Bytes {
         Self(o)
     }
     #[inline(always)]
-    unsafe fn lt(self, other: Self) -> Self {
+    unsafe fn lt(self, other: Self) -> Self::Mask {
         let mut o = [0u8; 16];
         for i in 0..16 {
             o[i] = if self.0[i] < other.0[i] { 0xFF } else { 0 };
         }
         Self(o)
+    }
+    #[inline(always)]
+    unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
+        let mut o = [0u8; 16];
+        let available = len.saturating_sub(start);
+        let take = available.min(16);
+        for i in 0..take {
+            o[i] = unsafe { *data.add(start + i) };
+        }
+        Self(o)
+    }
+
+    #[cfg(test)]
+    fn from_lanes(values: &[u8]) -> Self {
+        assert_eq!(values.len(), 16);
+        let mut o = [0u8; 16];
+        o.copy_from_slice(values);
+        Self(o)
+    }
+    #[cfg(test)]
+    fn to_lanes(self) -> Vec<u8> {
+        self.0.to_vec()
+    }
+}
+
+impl MaskVec for Scalar16U8Bytes {
+    #[inline(always)]
+    unsafe fn zero() -> Self {
+        Self([0; 16])
     }
     #[inline(always)]
     unsafe fn and(self, other: Self) -> Self {
@@ -347,16 +396,6 @@ impl BytesVec for Scalar16U8Bytes {
         Self(o)
     }
     #[inline(always)]
-    unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
-        let mut o = [0u8; 16];
-        let available = len.saturating_sub(start);
-        let take = available.min(16);
-        for i in 0..take {
-            o[i] = unsafe { *data.add(start + i) };
-        }
-        Self(o)
-    }
-    #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         let mut o = [0u8; 16];
         o[0] = prev.0[15];
@@ -367,15 +406,17 @@ impl BytesVec for Scalar16U8Bytes {
     }
 
     #[cfg(test)]
-    fn from_lanes(values: &[u8]) -> Self {
+    fn from_lanes(values: &[bool]) -> Self {
         assert_eq!(values.len(), 16);
         let mut o = [0u8; 16];
-        o.copy_from_slice(values);
+        for i in 0..16 {
+            o[i] = if values[i] { 0xFF } else { 0 };
+        }
         Self(o)
     }
     #[cfg(test)]
-    fn to_lanes(self) -> Vec<u8> {
-        self.0.to_vec()
+    fn to_lanes(self) -> Vec<bool> {
+        self.0.iter().map(|&v| v != 0).collect()
     }
 }
 
@@ -438,9 +479,7 @@ impl ScoreVec for Scalar16U8Score {
         for i in 0..n {
             o[i] = prev.0[16 - n + i];
         }
-        for i in n..16 {
-            o[i] = self.0[i - n];
-        }
+        o[n..16].copy_from_slice(&self.0[..(16 - n)]);
         Self(o)
     }
     #[inline(always)]

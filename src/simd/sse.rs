@@ -1,28 +1,25 @@
-//! SSE backend: 8-lane Score (128-bit __m128i), 8-byte Bytes (low half of __m128i).
-//!
-//! The Bytes vector physically occupies a full 128-bit register, but only the
-//! low 8 bytes are meaningful. Upper bytes are don't-care; the kernel never
-//! reads them (it widens via `_mm_cvtepi8_epi16` which only consumes the low 8
-//! bytes), and the cross-chunk carry in `shift_right_padded_1` works entirely
-//! within the meaningful region.
-
 use std::arch::x86_64::*;
 
-use super::{Backend, BytesVec, ScoreVec};
+use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
+/// 8-lane u16 scoring (128-bit __mm128i), 8-lane u8 input (low half of __m128i).
+#[derive(Debug, Clone, Copy)]
+pub struct SseBackend;
+
+/// Physically occupies a full 128-bit register, but only the low 8 bytes are
+/// used since we'll eventually widen the 8-bit per lane to 16-bit per lane
+/// for the Score vector
 #[derive(Debug, Clone, Copy)]
 pub struct SseBytes(__m128i);
 
 #[derive(Debug, Clone, Copy)]
 pub struct SseScore(__m128i);
 
-#[derive(Debug, Clone, Copy)]
-pub struct SseBackend;
-
 impl Backend for SseBackend {
     const LANES: usize = 8;
     const LANE_BYTES: usize = 2;
     type Bytes = SseBytes;
+    type Mask = SseBytes;
     type Score = SseScore;
 
     fn is_available() -> bool {
@@ -34,8 +31,8 @@ impl Backend for SseBackend {
     }
 
     #[inline(always)]
-    unsafe fn widen(b: Self::Bytes) -> Self::Score {
-        unsafe { SseScore(_mm_cvtepi8_epi16(b.0)) }
+    unsafe fn widen_mask(m: Self::Mask) -> Self::Score {
+        unsafe { SseScore(_mm_cvtepi8_epi16(m.0)) }
     }
 
     #[inline(always)]
@@ -60,12 +57,8 @@ impl Backend for SseBackend {
     }
 }
 
-// ---------------------------------------------------------------------------
-// SseBytes (8 bytes meaningful, __m128i)
-// ---------------------------------------------------------------------------
-
 impl SseBytes {
-    /// Safe page-bounded read of 0..8 bytes into the low 64 bits of an __m128i.
+    /// Safe page-bounded read of 0..8 bytes into the low 64 bits of an __m128i
     #[inline(always)]
     unsafe fn load_partial_safe(ptr: *const u8, len: usize) -> __m128i {
         unsafe {
@@ -108,6 +101,8 @@ impl SseBytes {
 }
 
 impl BytesVec for SseBytes {
+    type Mask = SseBytes;
+
     #[inline(always)]
     unsafe fn zero() -> Self {
         unsafe { Self(_mm_setzero_si128()) }
@@ -117,11 +112,11 @@ impl BytesVec for SseBytes {
         unsafe { Self(_mm_set1_epi8(value as i8)) }
     }
     #[inline(always)]
-    unsafe fn eq(self, other: Self) -> Self {
+    unsafe fn eq(self, other: Self) -> Self::Mask {
         unsafe { Self(_mm_cmpeq_epi8(self.0, other.0)) }
     }
     #[inline(always)]
-    unsafe fn gt(self, other: Self) -> Self {
+    unsafe fn gt(self, other: Self) -> Self::Mask {
         unsafe {
             let sign = _mm_set1_epi8(-128i8);
             Self(_mm_cmpgt_epi8(
@@ -131,7 +126,7 @@ impl BytesVec for SseBytes {
         }
     }
     #[inline(always)]
-    unsafe fn lt(self, other: Self) -> Self {
+    unsafe fn lt(self, other: Self) -> Self::Mask {
         unsafe {
             let sign = _mm_set1_epi8(-128i8);
             Self(_mm_cmplt_epi8(
@@ -139,18 +134,6 @@ impl BytesVec for SseBytes {
                 _mm_xor_si128(other.0, sign),
             ))
         }
-    }
-    #[inline(always)]
-    unsafe fn and(self, other: Self) -> Self {
-        unsafe { Self(_mm_and_si128(self.0, other.0)) }
-    }
-    #[inline(always)]
-    unsafe fn or(self, other: Self) -> Self {
-        unsafe { Self(_mm_or_si128(self.0, other.0)) }
-    }
-    #[inline(always)]
-    unsafe fn not(self) -> Self {
-        unsafe { Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1))) }
     }
 
     #[inline(always)]
@@ -171,20 +154,6 @@ impl BytesVec for SseBytes {
         }
     }
 
-    #[inline(always)]
-    unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
-        unsafe {
-            // Want low 8 bytes = [prev[7], self[0..7]].
-            // Move prev's low 8 bytes to bytes 8..16 so prev[7] lands at byte 15.
-            let shifted = _mm_slli_si128::<8>(prev.0);
-            // alignr<15>(self, shifted) = (self || shifted)[15..31]
-            //   = [shifted[15], self[0..15]]
-            //   = [prev[7], self[0..15]]
-            // Low 8 bytes: [prev[7], self[0..7]]. Upper 8 are don't-care.
-            Self(_mm_alignr_epi8::<15>(self.0, shifted))
-        }
-    }
-
     #[cfg(test)]
     fn from_lanes(values: &[u8]) -> Self {
         assert_eq!(values.len(), 8);
@@ -201,9 +170,53 @@ impl BytesVec for SseBytes {
     }
 }
 
-// ---------------------------------------------------------------------------
-// SseScore (8 × u16, __m128i)
-// ---------------------------------------------------------------------------
+impl MaskVec for SseBytes {
+    #[inline(always)]
+    unsafe fn zero() -> Self {
+        unsafe { Self(_mm_setzero_si128()) }
+    }
+    #[inline(always)]
+    unsafe fn and(self, other: Self) -> Self {
+        unsafe { Self(_mm_and_si128(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn or(self, other: Self) -> Self {
+        unsafe { Self(_mm_or_si128(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn not(self) -> Self {
+        unsafe { Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1))) }
+    }
+    #[inline(always)]
+    unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
+        unsafe {
+            // Want low 8 bytes = [prev[7], self[0..7]].
+            // Move prev's low 8 bytes to bytes 8..16 so prev[7] lands at byte 15.
+            let shifted = _mm_slli_si128::<8>(prev.0);
+            // alignr<15>(self, shifted) = (self || shifted)[15..31]
+            //   = [shifted[15], self[0..15]]
+            //   = [prev[7], self[0..15]]
+            // Low 8 bytes: [prev[7], self[0..7]]. Upper 8 are don't-care.
+            Self(_mm_alignr_epi8::<15>(self.0, shifted))
+        }
+    }
+
+    #[cfg(test)]
+    fn from_lanes(values: &[bool]) -> Self {
+        assert_eq!(values.len(), 8);
+        let mut buf = [0u8; 16];
+        for i in 0..8 {
+            buf[i] = if values[i] { 0xFF } else { 0 };
+        }
+        Self(unsafe { _mm_loadu_si128(buf.as_ptr() as *const __m128i) })
+    }
+    #[cfg(test)]
+    fn to_lanes(self) -> Vec<bool> {
+        let mut buf = [0u8; 16];
+        unsafe { _mm_storeu_si128(buf.as_mut_ptr() as *mut __m128i, self.0) };
+        buf[..8].iter().map(|&v| v != 0).collect()
+    }
+}
 
 impl ScoreVec for SseScore {
     #[inline(always)]
@@ -285,10 +298,9 @@ impl ScoreVec for SseScore {
     }
 }
 
-// ---------------------------------------------------------------------------
-// SSE u8-scoring backend: 16-lane Score (128-bit __m128i, 16 × u8), 16-byte
-// Bytes (128-bit __m128i). Selected when the max possible score fits in u8.
-// ---------------------------------------------------------------------------
+/// 16-lane u8 scoring (128-bit __m128i), 16-lane u8 input (128-bit __m128i)
+#[derive(Debug, Clone, Copy)]
+pub struct SseU8Backend;
 
 #[derive(Debug, Clone, Copy)]
 pub struct SseU8Bytes(__m128i);
@@ -296,13 +308,11 @@ pub struct SseU8Bytes(__m128i);
 #[derive(Debug, Clone, Copy)]
 pub struct SseU8Score(__m128i);
 
-#[derive(Debug, Clone, Copy)]
-pub struct SseU8Backend;
-
 impl Backend for SseU8Backend {
     const LANES: usize = 16;
     const LANE_BYTES: usize = 1;
     type Bytes = SseU8Bytes;
+    type Mask = SseU8Bytes;
     type Score = SseU8Score;
 
     fn is_available() -> bool {
@@ -310,8 +320,8 @@ impl Backend for SseU8Backend {
     }
 
     #[inline(always)]
-    unsafe fn widen(b: Self::Bytes) -> Self::Score {
-        SseU8Score(b.0)
+    unsafe fn widen_mask(m: Self::Mask) -> Self::Score {
+        SseU8Score(m.0)
     }
 
     #[inline(always)]
@@ -337,6 +347,8 @@ impl Backend for SseU8Backend {
 }
 
 impl BytesVec for SseU8Bytes {
+    type Mask = SseU8Bytes;
+
     #[inline(always)]
     unsafe fn zero() -> Self {
         unsafe { Self(_mm_setzero_si128()) }
@@ -346,11 +358,11 @@ impl BytesVec for SseU8Bytes {
         unsafe { Self(_mm_set1_epi8(value as i8)) }
     }
     #[inline(always)]
-    unsafe fn eq(self, other: Self) -> Self {
+    unsafe fn eq(self, other: Self) -> Self::Mask {
         unsafe { Self(_mm_cmpeq_epi8(self.0, other.0)) }
     }
     #[inline(always)]
-    unsafe fn gt(self, other: Self) -> Self {
+    unsafe fn gt(self, other: Self) -> Self::Mask {
         unsafe {
             let sign = _mm_set1_epi8(-128i8);
             Self(_mm_cmpgt_epi8(
@@ -360,7 +372,7 @@ impl BytesVec for SseU8Bytes {
         }
     }
     #[inline(always)]
-    unsafe fn lt(self, other: Self) -> Self {
+    unsafe fn lt(self, other: Self) -> Self::Mask {
         unsafe {
             let sign = _mm_set1_epi8(-128i8);
             Self(_mm_cmplt_epi8(
@@ -368,6 +380,29 @@ impl BytesVec for SseU8Bytes {
                 _mm_xor_si128(other.0, sign),
             ))
         }
+    }
+    #[inline(always)]
+    unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
+        unsafe { Self(super::avx::load_partial_m128i(data, start, len)) }
+    }
+
+    #[cfg(test)]
+    fn from_lanes(values: &[u8]) -> Self {
+        assert_eq!(values.len(), 16);
+        Self(unsafe { _mm_loadu_si128(values.as_ptr() as *const __m128i) })
+    }
+    #[cfg(test)]
+    fn to_lanes(self) -> Vec<u8> {
+        let mut buf = [0u8; 16];
+        unsafe { _mm_storeu_si128(buf.as_mut_ptr() as *mut __m128i, self.0) };
+        buf.to_vec()
+    }
+}
+
+impl MaskVec for SseU8Bytes {
+    #[inline(always)]
+    unsafe fn zero() -> Self {
+        unsafe { Self(_mm_setzero_si128()) }
     }
     #[inline(always)]
     unsafe fn and(self, other: Self) -> Self {
@@ -382,10 +417,6 @@ impl BytesVec for SseU8Bytes {
         unsafe { Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1))) }
     }
     #[inline(always)]
-    unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
-        unsafe { Self(super::avx::load_partial_m128i(data, start, len)) }
-    }
-    #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         // Full 16-byte register, full 16 meaningful bytes. alignr_epi8::<15>
         // gives [prev[15], self[0..15]] which is the desired result.
@@ -393,15 +424,19 @@ impl BytesVec for SseU8Bytes {
     }
 
     #[cfg(test)]
-    fn from_lanes(values: &[u8]) -> Self {
+    fn from_lanes(values: &[bool]) -> Self {
         assert_eq!(values.len(), 16);
-        Self(unsafe { _mm_loadu_si128(values.as_ptr() as *const __m128i) })
+        let mut buf = [0u8; 16];
+        for i in 0..16 {
+            buf[i] = if values[i] { 0xFF } else { 0 };
+        }
+        Self(unsafe { _mm_loadu_si128(buf.as_ptr() as *const __m128i) })
     }
     #[cfg(test)]
-    fn to_lanes(self) -> Vec<u8> {
+    fn to_lanes(self) -> Vec<bool> {
         let mut buf = [0u8; 16];
         unsafe { _mm_storeu_si128(buf.as_mut_ptr() as *mut __m128i, self.0) };
-        buf.to_vec()
+        buf.iter().map(|&v| v != 0).collect()
     }
 }
 

@@ -1,8 +1,8 @@
 use std::arch::x86_64::*;
 
-use super::{Backend, BytesVec, ScoreVec};
+use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
-/// 16-lane u16 scoring (256-bit __m256i), 16-byte bytes (128-bit __m128i).
+/// 16-lane u16 scoring (256-bit __m256i), 16-lane u8 input (128-bit __m128i).
 #[derive(Debug, Clone, Copy)]
 pub struct AvxBackend;
 
@@ -16,19 +16,18 @@ impl Backend for AvxBackend {
     const LANES: usize = 16;
     const LANE_BYTES: usize = 2;
     type Bytes = AvxBytes;
+    type Mask = AvxBytes;
     type Score = AvxScore;
 
     fn is_available() -> bool {
-        // AVX2 covers everything we need: _mm256_cvtepi8_epi16, _mm256_max_epu16,
-        // _mm256_alignr_epi8, _mm256_movemask_epi8, etc.
         raw_cpuid::CpuId::new()
             .get_extended_feature_info()
             .is_some_and(|info| info.has_avx2())
     }
 
     #[inline(always)]
-    unsafe fn widen(b: Self::Bytes) -> Self::Score {
-        unsafe { AvxScore(_mm256_cvtepi8_epi16(b.0)) }
+    unsafe fn widen_mask(m: Self::Mask) -> Self::Score {
+        unsafe { AvxScore(_mm256_cvtepi8_epi16(m.0)) }
     }
 
     #[inline(always)]
@@ -132,6 +131,8 @@ pub(crate) unsafe fn load_partial_m128i(data: *const u8, start: usize, len: usiz
 }
 
 impl BytesVec for AvxBytes {
+    type Mask = AvxBytes;
+
     #[inline(always)]
     unsafe fn zero() -> Self {
         unsafe { Self(_mm_setzero_si128()) }
@@ -141,11 +142,11 @@ impl BytesVec for AvxBytes {
         unsafe { Self(_mm_set1_epi8(value as i8)) }
     }
     #[inline(always)]
-    unsafe fn eq(self, other: Self) -> Self {
+    unsafe fn eq(self, other: Self) -> Self::Mask {
         unsafe { Self(_mm_cmpeq_epi8(self.0, other.0)) }
     }
     #[inline(always)]
-    unsafe fn gt(self, other: Self) -> Self {
+    unsafe fn gt(self, other: Self) -> Self::Mask {
         unsafe {
             let sign = _mm_set1_epi8(-128i8);
             let a = _mm_xor_si128(self.0, sign);
@@ -154,13 +155,37 @@ impl BytesVec for AvxBytes {
         }
     }
     #[inline(always)]
-    unsafe fn lt(self, other: Self) -> Self {
+    unsafe fn lt(self, other: Self) -> Self::Mask {
         unsafe {
             let sign = _mm_set1_epi8(-128i8);
             let a = _mm_xor_si128(self.0, sign);
             let b = _mm_xor_si128(other.0, sign);
             Self(_mm_cmplt_epi8(a, b))
         }
+    }
+
+    #[inline(always)]
+    unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
+        unsafe { Self(load_partial_m128i(data, start, len)) }
+    }
+
+    #[cfg(test)]
+    fn from_lanes(values: &[u8]) -> Self {
+        assert_eq!(values.len(), 16);
+        Self(unsafe { _mm_loadu_si128(values.as_ptr() as *const __m128i) })
+    }
+    #[cfg(test)]
+    fn to_lanes(self) -> Vec<u8> {
+        let mut buf = [0u8; 16];
+        unsafe { _mm_storeu_si128(buf.as_mut_ptr() as *mut __m128i, self.0) };
+        buf.to_vec()
+    }
+}
+
+impl MaskVec for AvxBytes {
+    #[inline(always)]
+    unsafe fn zero() -> Self {
+        unsafe { Self(_mm_setzero_si128()) }
     }
     #[inline(always)]
     unsafe fn and(self, other: Self) -> Self {
@@ -174,27 +199,25 @@ impl BytesVec for AvxBytes {
     unsafe fn not(self) -> Self {
         unsafe { Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1))) }
     }
-
-    #[inline(always)]
-    unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
-        unsafe { Self(load_partial_m128i(data, start, len)) }
-    }
-
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         unsafe { Self(_mm_alignr_epi8::<15>(self.0, prev.0)) }
     }
 
     #[cfg(test)]
-    fn from_lanes(values: &[u8]) -> Self {
+    fn from_lanes(values: &[bool]) -> Self {
         assert_eq!(values.len(), 16);
-        Self(unsafe { _mm_loadu_si128(values.as_ptr() as *const __m128i) })
+        let mut buf = [0u8; 16];
+        for i in 0..16 {
+            buf[i] = if values[i] { 0xFF } else { 0 };
+        }
+        Self(unsafe { _mm_loadu_si128(buf.as_ptr() as *const __m128i) })
     }
     #[cfg(test)]
-    fn to_lanes(self) -> Vec<u8> {
+    fn to_lanes(self) -> Vec<bool> {
         let mut buf = [0u8; 16];
         unsafe { _mm_storeu_si128(buf.as_mut_ptr() as *mut __m128i, self.0) };
-        buf.to_vec()
+        buf.iter().map(|&v| v != 0).collect()
     }
 }
 
@@ -287,7 +310,7 @@ impl ScoreVec for AvxScore {
     }
 }
 
-/// 32-lane u8 scoring (256-bit __m256i, 32 × u8), 32-byte bytes (256-bit __m256i).
+/// 32-lane u8 scoring (256-bit __m256i), 32-lane u8 input (256-bit __m256i).
 #[derive(Debug, Clone, Copy)]
 pub struct AvxU8Backend;
 
@@ -301,6 +324,7 @@ impl Backend for AvxU8Backend {
     const LANES: usize = 32;
     const LANE_BYTES: usize = 1;
     type Bytes = AvxU8Bytes;
+    type Mask = AvxU8Bytes;
     type Score = AvxU8Score;
 
     fn is_available() -> bool {
@@ -308,10 +332,8 @@ impl Backend for AvxU8Backend {
     }
 
     #[inline(always)]
-    unsafe fn widen(b: Self::Bytes) -> Self::Score {
-        // Bytes and Score are both __m256i; widen is just a type rewrap since
-        // the byte-mask and score elements are the same width.
-        AvxU8Score(b.0)
+    unsafe fn widen_mask(m: Self::Mask) -> Self::Score {
+        AvxU8Score(m.0)
     }
 
     #[inline(always)]
@@ -337,6 +359,8 @@ impl Backend for AvxU8Backend {
 }
 
 impl BytesVec for AvxU8Bytes {
+    type Mask = AvxU8Bytes;
+
     #[inline(always)]
     unsafe fn zero() -> Self {
         unsafe { Self(_mm256_setzero_si256()) }
@@ -346,11 +370,11 @@ impl BytesVec for AvxU8Bytes {
         unsafe { Self(_mm256_set1_epi8(value as i8)) }
     }
     #[inline(always)]
-    unsafe fn eq(self, other: Self) -> Self {
+    unsafe fn eq(self, other: Self) -> Self::Mask {
         unsafe { Self(_mm256_cmpeq_epi8(self.0, other.0)) }
     }
     #[inline(always)]
-    unsafe fn gt(self, other: Self) -> Self {
+    unsafe fn gt(self, other: Self) -> Self::Mask {
         unsafe {
             let sign = _mm256_set1_epi8(-128i8);
             Self(_mm256_cmpgt_epi8(
@@ -360,7 +384,7 @@ impl BytesVec for AvxU8Bytes {
         }
     }
     #[inline(always)]
-    unsafe fn lt(self, other: Self) -> Self {
+    unsafe fn lt(self, other: Self) -> Self::Mask {
         unsafe {
             let sign = _mm256_set1_epi8(-128i8);
             Self(_mm256_cmpgt_epi8(
@@ -368,18 +392,6 @@ impl BytesVec for AvxU8Bytes {
                 _mm256_xor_si256(self.0, sign),
             ))
         }
-    }
-    #[inline(always)]
-    unsafe fn and(self, other: Self) -> Self {
-        unsafe { Self(_mm256_and_si256(self.0, other.0)) }
-    }
-    #[inline(always)]
-    unsafe fn or(self, other: Self) -> Self {
-        unsafe { Self(_mm256_or_si256(self.0, other.0)) }
-    }
-    #[inline(always)]
-    unsafe fn not(self) -> Self {
-        unsafe { Self(_mm256_xor_si256(self.0, _mm256_set1_epi32(-1))) }
     }
 
     #[inline(always)]
@@ -396,6 +408,36 @@ impl BytesVec for AvxU8Bytes {
         }
     }
 
+    #[cfg(test)]
+    fn from_lanes(values: &[u8]) -> Self {
+        assert_eq!(values.len(), 32);
+        Self(unsafe { _mm256_loadu_si256(values.as_ptr() as *const __m256i) })
+    }
+    #[cfg(test)]
+    fn to_lanes(self) -> Vec<u8> {
+        let mut buf = [0u8; 32];
+        unsafe { _mm256_storeu_si256(buf.as_mut_ptr() as *mut __m256i, self.0) };
+        buf.to_vec()
+    }
+}
+
+impl MaskVec for AvxU8Bytes {
+    #[inline(always)]
+    unsafe fn zero() -> Self {
+        unsafe { Self(_mm256_setzero_si256()) }
+    }
+    #[inline(always)]
+    unsafe fn and(self, other: Self) -> Self {
+        unsafe { Self(_mm256_and_si256(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn or(self, other: Self) -> Self {
+        unsafe { Self(_mm256_or_si256(self.0, other.0)) }
+    }
+    #[inline(always)]
+    unsafe fn not(self) -> Self {
+        unsafe { Self(_mm256_xor_si256(self.0, _mm256_set1_epi32(-1))) }
+    }
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         unsafe {
@@ -410,15 +452,19 @@ impl BytesVec for AvxU8Bytes {
     }
 
     #[cfg(test)]
-    fn from_lanes(values: &[u8]) -> Self {
+    fn from_lanes(values: &[bool]) -> Self {
         assert_eq!(values.len(), 32);
-        Self(unsafe { _mm256_loadu_si256(values.as_ptr() as *const __m256i) })
+        let mut buf = [0u8; 32];
+        for i in 0..32 {
+            buf[i] = if values[i] { 0xFF } else { 0 };
+        }
+        Self(unsafe { _mm256_loadu_si256(buf.as_ptr() as *const __m256i) })
     }
     #[cfg(test)]
-    fn to_lanes(self) -> Vec<u8> {
+    fn to_lanes(self) -> Vec<bool> {
         let mut buf = [0u8; 32];
         unsafe { _mm256_storeu_si256(buf.as_mut_ptr() as *mut __m256i, self.0) };
-        buf.to_vec()
+        buf.iter().map(|&v| v != 0).collect()
     }
 }
 
