@@ -109,16 +109,18 @@ impl Matcher {
                 continue;
             }
 
-            let (matched, skipped_chars, end_pos) =
-                self.config.max_typos.map_or((true, 0, original_len), |max_typos| {
+            let (matched, start_pos, end_pos) = self
+                .config
+                .max_typos
+                .map_or((true, 0, original_len), |max_typos| {
                     self.prefilter.match_haystack(haystack, max_typos)
                 });
             if !matched {
                 continue;
             }
 
-            let trimmed = &haystack[skipped_chars..end_pos];
-            let include_exact = skipped_chars == 0 && end_pos == original_len;
+            let trimmed = &haystack[start_pos..end_pos];
+            let include_exact = start_pos == 0 && end_pos == original_len;
             if let Some(match_) = self.smith_waterman_one(
                 trimmed,
                 (index as u32) + haystack_index_offset,
@@ -158,19 +160,21 @@ impl Matcher {
                 continue;
             }
 
-            let (matched, skipped_chars, end_pos) =
-                self.config.max_typos.map_or((true, 0, original_len), |max_typos| {
+            let (matched, start_pos, end_pos) = self
+                .config
+                .max_typos
+                .map_or((true, 0, original_len), |max_typos| {
                     self.prefilter.match_haystack(haystack, max_typos)
                 });
             if !matched {
                 continue;
             }
 
-            let trimmed = &haystack[skipped_chars..end_pos];
-            let include_exact = skipped_chars == 0 && end_pos == original_len;
+            let trimmed = &haystack[start_pos..end_pos];
+            let include_exact = start_pos == 0 && end_pos == original_len;
             if let Some(match_) = self.smith_waterman_indices_one(
                 trimmed,
-                skipped_chars,
+                start_pos,
                 (index as u32) + haystack_index_offset,
                 include_exact,
             ) {
@@ -206,10 +210,11 @@ impl Matcher {
     pub fn match_iter<S: AsRef<str>>(&mut self, haystacks: &[S]) -> impl Iterator<Item = Match> {
         Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
 
-        self.prefilter_iter(haystacks)
-            .filter_map(|(index, haystack, _skipped_chars, is_full_haystack)| {
+        self.prefilter_iter(haystacks).filter_map(
+            |(index, haystack, _skipped_chars, is_full_haystack)| {
                 self.smith_waterman_one(haystack, index as u32, is_full_haystack)
-            })
+            },
+        )
     }
 
     /// Returns an unsorted iterator over the matches in the haystacks with indices.
@@ -242,15 +247,16 @@ impl Matcher {
     ) -> impl Iterator<Item = MatchIndices> {
         Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
 
-        self.prefilter_iter(haystacks)
-            .filter_map(|(index, haystack, skipped_chars, is_full_haystack)| {
+        self.prefilter_iter(haystacks).filter_map(
+            |(index, haystack, skipped_chars, is_full_haystack)| {
                 self.smith_waterman_indices_one(
                     haystack,
                     skipped_chars,
                     index as u32,
                     is_full_haystack,
                 )
-            })
+            },
+        )
     }
 
     #[inline(always)]
@@ -348,13 +354,21 @@ impl Matcher {
             // Prefiltering
             .filter_map(move |(i, haystack)| {
                 let original_len = haystack.len();
-                let (matched, skipped_chars, end_pos) =
-                    config.max_typos.map_or((true, 0, original_len), |max_typos| {
+                let (matched, skipped_chars, end_pos) = config
+                    .max_typos
+                    .map_or((true, 0, original_len), |max_typos| {
                         prefilter.match_haystack(haystack, max_typos)
                     });
                 let is_full_haystack = skipped_chars == 0 && end_pos == original_len;
                 // Skip any chunks where we know the needle doesn't match
-                matched.then(|| (i, &haystack[skipped_chars..end_pos], skipped_chars, is_full_haystack))
+                matched.then(|| {
+                    (
+                        i,
+                        &haystack[skipped_chars..end_pos],
+                        skipped_chars,
+                        is_full_haystack,
+                    )
+                })
             })
     }
 

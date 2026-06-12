@@ -103,6 +103,8 @@ impl Prefilter {
         match (self, max_typos) {
             #[cfg(target_arch = "x86_64")]
             (Prefilter::AVX512(_), 0) => true,
+            #[cfg(target_arch = "x86_64")]
+            (Prefilter::AVX(_), 0) => true,
             _ => false,
         }
     }
@@ -137,10 +139,7 @@ impl Prefilter {
                 (m, s, len)
             }
             #[cfg(target_arch = "x86_64")]
-            (Prefilter::AVX(p), 0) => {
-                let (m, s) = unsafe { p.match_haystack(haystack) };
-                (m, s, len)
-            }
+            (Prefilter::AVX(p), 0) => unsafe { p.match_haystack(haystack) },
             #[cfg(target_arch = "x86_64")]
             (Prefilter::AVX(p), _) => {
                 let (m, s) = unsafe { p.match_haystack_typos(haystack, max_typos) };

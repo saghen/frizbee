@@ -32,17 +32,11 @@ impl PrefilterAVX512 {
             .is_some_and(|info| info.has_avx512f() && info.has_avx512bw())
     }
 
-    /// Checks if the needle is wholly contained in the haystack, unordered within
-    /// an aligned 16-byte sub-chunk but ordered across sub-chunks. Scans 64 bytes
-    /// per outer iteration; ordering across sub-chunks within the 64-byte window
-    /// is preserved by masking the cmpeq bitmask against a moving `min_bit`.
+    /// Checks if the needle is wholly contained in the haystack.
     ///
-    /// Returns `(matched, skipped_chars, end_pos)` where `end_pos` is the
+    /// Returns `(matched, start_pos, end_pos)` where `end_pos` is the
     /// exclusive byte offset just past the rightmost occurrence of the final
-    /// needle char in `haystack[skipped_chars..]`. For `max_typos = 0` any
-    /// valid Smith Waterman alignment must end on a real needle-char match, so
-    /// the slice `haystack[skipped_chars..end_pos]` retains every alignment.
-    /// On no-match, `end_pos == haystack.len()`.
+    /// needle char in `haystack[start_pos..end_pos]`.
     ///
     /// # Safety
     /// The caller must ensure that AVX-512F + AVX-512BW are available.
@@ -63,28 +57,28 @@ impl PrefilterAVX512 {
         }
 
         let mut can_skip_chunks = true;
-        let mut start_pos = 0usize;
+        let mut match_start_pos = 0usize;
         let mut needle_iter = self.needle_simd.iter();
         let mut needle_char = *needle_iter.next().unwrap();
 
         let mut start = 0usize;
         while start < len {
-            let haystack_chunk = unsafe { load_window(haystack, start, len) };
-            let mut min_bit: u32 = 0;
+            let (haystack_chunk, mut haystack_chunk_mask) =
+                unsafe { load_window(haystack, start, len) };
 
             loop {
                 let mask_a = _mm512_cmpeq_epi8_mask(needle_char.0, haystack_chunk);
                 let mask_b = _mm512_cmpeq_epi8_mask(needle_char.1, haystack_chunk);
-                let mut mask = mask_a | mask_b;
-                mask &= !((1u64 << min_bit).wrapping_sub(1));
+                let mask = (mask_a | mask_b) & haystack_chunk_mask;
 
                 if mask == 0 {
                     break;
                 }
-                min_bit = mask.trailing_zeros();
+                // mask ^ (mask - 1) = all bits from 0..=lowest_set_bit
+                haystack_chunk_mask &= !(mask ^ mask.wrapping_sub(1));
 
                 if can_skip_chunks {
-                    start_pos = min_bit as usize;
+                    match_start_pos = mask.trailing_zeros() as usize;
                     can_skip_chunks = false;
                 }
 
@@ -96,7 +90,7 @@ impl PrefilterAVX512 {
                 else if start + 64 >= len {
                     return (
                         true,
-                        start_pos,
+                        match_start_pos,
                         start + 64 - (mask.leading_zeros() as usize),
                     );
                 }
@@ -106,14 +100,14 @@ impl PrefilterAVX512 {
                     let last_needle_char = *self.needle_simd.last().unwrap();
                     let end_pos =
                         unsafe { start + find_last_char_pos(last_needle_char, &haystack[start..]) };
-                    return (true, start_pos, end_pos);
+                    return (true, match_start_pos, end_pos);
                 }
             }
 
             start += 64;
         }
 
-        (false, start_pos, len)
+        (false, match_start_pos, len)
     }
 
     /// # Safety
@@ -121,66 +115,67 @@ impl PrefilterAVX512 {
     #[inline]
     #[target_feature(enable = "avx512f,avx512bw")]
     pub unsafe fn match_haystack_typos(&self, haystack: &[u8], max_typos: u16) -> (bool, usize) {
-        let len = haystack.len();
-        match len {
-            0 => return (true, 0),
-            1..=7 => {
-                return (
-                    scalar::match_haystack_typos(&self.needle_scalar, haystack, max_typos),
-                    0,
-                );
-            }
-            _ => {}
-        }
-
-        if max_typos >= 3 {
-            return (true, 0);
-        }
-
-        let mut needle_iter = self.needle_simd.iter();
-        let mut needle_char = *needle_iter.next().unwrap();
-        let mut typos = 0usize;
-
-        loop {
-            // Mirror the AVX2 / SSE typos loop: restart scan from the beginning
-            // of the haystack each time we burn a typo.
-            let mut start = 0usize;
-            while start < len {
-                let haystack_chunk = unsafe { load_window(haystack, start, len) };
-                let mut min_bit: u32 = 0;
-
-                loop {
-                    let mask_a = _mm512_cmpeq_epi8_mask(needle_char.0, haystack_chunk);
-                    let mask_b = _mm512_cmpeq_epi8_mask(needle_char.1, haystack_chunk);
-                    let mut mask = mask_a | mask_b;
-                    mask &= !((1u64 << min_bit).wrapping_sub(1));
-
-                    if mask == 0 {
-                        break;
-                    }
-                    min_bit = mask.trailing_zeros();
-
-                    if let Some(next_needle_char) = needle_iter.next() {
-                        needle_char = *next_needle_char;
-                    } else {
-                        return (true, 0);
-                    }
-                }
-
-                start += 64;
-            }
-
-            typos += 1;
-            if typos > max_typos as usize {
-                return (false, 0);
-            }
-
-            if let Some(next_needle_char) = needle_iter.next() {
-                needle_char = *next_needle_char;
-            } else {
-                return (true, 0);
-            }
-        }
+        todo!();
+        // let len = haystack.len();
+        // match len {
+        //     0 => return (true, 0),
+        //     1..=7 => {
+        //         return (
+        //             scalar::match_haystack_typos(&self.needle_scalar, haystack, max_typos),
+        //             0,
+        //         );
+        //     }
+        //     _ => {}
+        // }
+        //
+        // if max_typos >= 3 {
+        //     return (true, 0);
+        // }
+        //
+        // let mut needle_iter = self.needle_simd.iter();
+        // let mut needle_char = *needle_iter.next().unwrap();
+        // let mut typos = 0usize;
+        //
+        // loop {
+        //     // Mirror the AVX2 / SSE typos loop: restart scan from the beginning
+        //     // of the haystack each time we burn a typo.
+        //     let mut start = 0usize;
+        //     while start < len {
+        //         let (haystack_chunk, mut haystack_chunk_mask) =
+        //             unsafe { load_window(haystack, start, len) };
+        //
+        //         loop {
+        //             let mask_a = _mm512_cmpeq_epi8_mask(needle_char.0, haystack_chunk);
+        //             let mask_b = _mm512_cmpeq_epi8_mask(needle_char.1, haystack_chunk);
+        //             let mask = (mask_a | mask_b) & haystack_chunk_mask;
+        //
+        //             if mask == 0 {
+        //                 break;
+        //             }
+        //             let min_bit = mask.trailing_zeros();
+        //             haystack_chunk_mask &= !((1u64 << min_bit).wrapping_sub(1));
+        //
+        //             if let Some(next_needle_char) = needle_iter.next() {
+        //                 needle_char = *next_needle_char;
+        //             } else {
+        //                 return (true, 0);
+        //             }
+        //         }
+        //
+        //         start += 64;
+        //     }
+        //
+        //     typos += 1;
+        //     if typos > max_typos as usize {
+        //         return (false, 0);
+        //     }
+        //
+        //     if let Some(next_needle_char) = needle_iter.next() {
+        //         needle_char = *next_needle_char;
+        //     } else {
+        //         return (true, 0);
+        //     }
+        // }
     }
 }
 
@@ -188,25 +183,21 @@ impl PrefilterAVX512 {
 /// `last_needle_char` (case-insensitive via the broadcast pair) and returns
 /// the exclusive end offset (`pos + 1`) into the original `haystack`.
 ///
-/// The forward pass already proved an ordered alignment exists in
-/// `haystack[min_pos..]` ending at some position `p`. Since the last char of
-/// that alignment must equal `last_needle_char` and the rightmost occurrence
-/// `q >= p`, the slice `haystack[min_pos..=q]` still contains that alignment
-/// (and any later candidate). Falls back to `haystack.len()` if nothing is
-/// found, which can't happen when the forward pass succeeded.
+/// The forward pass already proved the `needle_char` can be found somewhere within the provided
+/// `haystack` slice.
 ///
 /// # Safety
 /// Caller must ensure AVX-512F + AVX-512BW availability and `min_pos <= haystack.len()`.
 #[inline]
 #[target_feature(enable = "avx512f,avx512bw")]
-unsafe fn find_last_char_pos(last_needle_char: (__m512i, __m512i), haystack: &[u8]) -> usize {
+unsafe fn find_last_char_pos(needle_char: (__m512i, __m512i), haystack: &[u8]) -> usize {
     let len = haystack.len();
     let mut start = len.saturating_sub(64);
     loop {
-        let haystack_chunk = unsafe { load_window(haystack, start, len) };
-        let mask_a = _mm512_cmpeq_epi8_mask(last_needle_char.0, haystack_chunk);
-        let mask_b = _mm512_cmpeq_epi8_mask(last_needle_char.1, haystack_chunk);
-        let mask = mask_a | mask_b;
+        let (haystack_chunk, haystack_chunk_mask) = unsafe { load_window(haystack, start, len) };
+        let mask_a = _mm512_cmpeq_epi8_mask(needle_char.0, haystack_chunk);
+        let mask_b = _mm512_cmpeq_epi8_mask(needle_char.1, haystack_chunk);
+        let mask = (mask_a | mask_b) & haystack_chunk_mask;
         if mask != 0 {
             return start + 64 - (mask.leading_zeros() as usize);
         }
@@ -227,14 +218,30 @@ unsafe fn find_last_char_pos(last_needle_char: (__m512i, __m512i), haystack: &[u
 /// Caller must ensure AVX-512F + AVX-512BW availability.
 #[inline]
 #[target_feature(enable = "avx512f,avx512bw")]
-unsafe fn load_window(haystack: &[u8], start: usize, len: usize) -> __m512i {
+unsafe fn load_window(haystack: &[u8], start: usize, len: usize) -> (__m512i, u64) {
     unsafe {
         if start + 64 <= len {
-            _mm512_loadu_si512(haystack.as_ptr().add(start) as *const __m512i)
+            (
+                _mm512_loadu_si512(haystack.as_ptr().add(start) as *const __m512i),
+                u64::MAX,
+            )
+        } else if can_overread_64(haystack.as_ptr().add(start)) {
+            (
+                _mm512_loadu_si512(haystack.as_ptr().add(start) as *const __m512i),
+                (1u64 << (len - start)) - 1,
+            )
         } else {
             // len - start < 64: masked load, zero-fills inactive lanes
             let mask: u64 = (1u64 << (len - start)).wrapping_sub(1);
-            _mm512_maskz_loadu_epi8(mask, haystack.as_ptr().add(start) as *const i8)
+            (
+                _mm512_maskz_loadu_epi8(mask, haystack.as_ptr().add(start) as *const i8),
+                u64::MAX,
+            )
         }
     }
+}
+
+#[inline(always)]
+fn can_overread_64(ptr: *const u8) -> bool {
+    (ptr as usize & 0xFFF) <= (4096 - 64)
 }
