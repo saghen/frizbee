@@ -10,6 +10,7 @@ const BIT_WEIGHTS: [u8; 16] = [1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 
 pub struct PrefilterNEON(PrefilterImpl<PrefilterNEONBackend>);
 
 impl PrefilterNEON {
+    #[inline(always)]
     pub fn new(needle: &[u8]) -> Self {
         Self(unsafe { PrefilterImpl::new(needle) })
     }
@@ -18,43 +19,31 @@ impl PrefilterNEON {
         PrefilterImpl::<PrefilterNEONBackend>::is_available()
     }
 
-    /// # Safety
-    /// Caller must ensure that NEON is available.
-    #[inline]
-    #[target_feature(enable = "neon")]
-    pub unsafe fn match_haystack(&self, haystack: &[u8]) -> (bool, usize, usize) {
+    #[inline(always)]
+    pub fn match_haystack(&self, haystack: &[u8]) -> (bool, usize, usize) {
         unsafe { self.0.match_haystack(haystack) }
     }
 
-    /// # Safety
-    /// Caller must ensure that NEON is available.
-    #[inline]
-    #[target_feature(enable = "neon")]
-    pub unsafe fn match_haystack_1_typo(&self, haystack: &[u8]) -> (bool, usize, usize) {
+    #[inline(always)]
+    pub fn match_haystack_1_typo(&self, haystack: &[u8]) -> (bool, usize, usize) {
         unsafe { self.0.match_haystack_1_typo(haystack) }
     }
 
-    /// # Safety
-    /// Caller must ensure that NEON is available.
-    #[inline]
-    #[target_feature(enable = "neon")]
-    pub unsafe fn match_haystack_2_typos(&self, haystack: &[u8]) -> (bool, usize, usize) {
+    #[inline(always)]
+    pub fn match_haystack_2_typos(&self, haystack: &[u8]) -> (bool, usize, usize) {
         unsafe { self.0.match_haystack_2_typos(haystack) }
     }
 
-    /// # Safety
-    /// Caller must ensure that NEON is available.
-    #[inline]
-    #[target_feature(enable = "neon")]
-    pub unsafe fn match_haystack_typos(
+    #[inline(always)]
+    pub fn match_haystack_typos(
         &mut self,
         haystack: &[u8],
         max_typos: u16,
     ) -> (bool, usize, usize) {
         match max_typos {
-            0 => unsafe { self.match_haystack(haystack) },
-            1 => unsafe { self.match_haystack_1_typo(haystack) },
-            2 => unsafe { self.match_haystack_2_typos(haystack) },
+            0 => self.match_haystack(haystack),
+            1 => self.match_haystack_1_typo(haystack),
+            2 => self.match_haystack_2_typos(haystack),
             _ => unsafe { self.0.match_haystack_typos(haystack, max_typos) },
         }
     }

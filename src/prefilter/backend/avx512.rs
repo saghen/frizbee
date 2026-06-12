@@ -8,11 +8,8 @@ use super::Backend;
 pub struct PrefilterAVX512(PrefilterImpl<PrefilterAVX512Backend>);
 
 impl PrefilterAVX512 {
-    /// # Safety
-    /// Caller must ensure that AVX-512F + AVX-512BW are available at runtime.
-    #[inline]
-    #[target_feature(enable = "avx512f,avx512bw")]
-    pub unsafe fn new(needle: &[u8]) -> Self {
+    #[inline(always)]
+    pub fn new(needle: &[u8]) -> Self {
         Self(unsafe { PrefilterImpl::new(needle) })
     }
 
@@ -20,43 +17,31 @@ impl PrefilterAVX512 {
         PrefilterImpl::<PrefilterAVX512Backend>::is_available()
     }
 
-    /// # Safety
-    /// Caller must ensure that AVX-512F + AVX-512BW are available.
-    #[inline]
-    #[target_feature(enable = "avx512f,avx512bw")]
-    pub unsafe fn match_haystack(&self, haystack: &[u8]) -> (bool, usize, usize) {
+    #[inline(always)]
+    pub fn match_haystack(&self, haystack: &[u8]) -> (bool, usize, usize) {
         unsafe { self.0.match_haystack(haystack) }
     }
 
-    /// # Safety
-    /// Caller must ensure that AVX-512F + AVX-512BW + BMI1 + BMI2 are available.
-    #[inline]
-    #[target_feature(enable = "avx512f,avx512bw,bmi1,bmi2")]
-    pub unsafe fn match_haystack_1_typo(&self, haystack: &[u8]) -> (bool, usize, usize) {
+    #[inline(always)]
+    pub fn match_haystack_1_typo(&self, haystack: &[u8]) -> (bool, usize, usize) {
         unsafe { self.0.match_haystack_1_typo(haystack) }
     }
 
-    /// # Safety
-    /// Caller must ensure that AVX-512F + AVX-512BW + BMI1 + BMI2 are available.
-    #[inline]
-    #[target_feature(enable = "avx512f,avx512bw,bmi1,bmi2")]
-    pub unsafe fn match_haystack_2_typos(&self, haystack: &[u8]) -> (bool, usize, usize) {
+    #[inline(always)]
+    pub fn match_haystack_2_typos(&self, haystack: &[u8]) -> (bool, usize, usize) {
         unsafe { self.0.match_haystack_2_typos(haystack) }
     }
 
-    /// # Safety
-    /// Caller must ensure that AVX-512F + AVX-512BW + BMI1 + BMI2 are available.
-    #[inline]
-    #[target_feature(enable = "avx512f,avx512bw,bmi1,bmi2")]
-    pub unsafe fn match_haystack_typos(
+    #[inline(always)]
+    pub fn match_haystack_typos(
         &mut self,
         haystack: &[u8],
         max_typos: u16,
     ) -> (bool, usize, usize) {
         match max_typos {
-            0 => unsafe { self.match_haystack(haystack) },
-            1 => unsafe { self.match_haystack_1_typo(haystack) },
-            2 => unsafe { self.match_haystack_2_typos(haystack) },
+            0 => self.match_haystack(haystack),
+            1 => self.match_haystack_1_typo(haystack),
+            2 => self.match_haystack_2_typos(haystack),
             _ => unsafe { self.0.match_haystack_typos(haystack, max_typos) },
         }
     }

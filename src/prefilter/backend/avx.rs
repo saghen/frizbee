@@ -17,24 +17,21 @@ pub struct PrefilterAVX {
 }
 
 impl PrefilterAVX {
-    /// # Safety
-    /// Caller must ensure that AVX2 is available at runtime.
-    #[inline]
-    #[target_feature(enable = "avx2")]
-    pub unsafe fn new(needle: &[u8]) -> Self {
+    #[inline(always)]
+    pub fn new(needle: &[u8]) -> Self {
         assert!(!needle.is_empty(), "needle must not be empty");
 
         let needle_cases = case_needle(needle);
         let needle_len = needle_cases.len();
         let mut needle_simd = needle_cases
             .iter()
-            .map(|&(c1, c2)| (_mm256_set1_epi8(c1 as i8), _mm256_set1_epi8(c2 as i8)))
+            .map(|&(c1, c2)| unsafe { (_mm256_set1_epi8(c1 as i8), _mm256_set1_epi8(c2 as i8)) })
             .collect::<Vec<_>>();
 
         // Keep an even number of elements so the exact-match override can
         // issue two needle probes per loop without a tail branch.
         if needle_simd.len() & 1 != 0 {
-            needle_simd.push((_mm256_setzero_si256(), _mm256_setzero_si256()));
+            needle_simd.push(unsafe { (_mm256_setzero_si256(), _mm256_setzero_si256()) });
         }
 
         Self {
@@ -48,13 +45,8 @@ impl PrefilterAVX {
         PrefilterImpl::<PrefilterAVXBackend>::is_available()
     }
 
-    /// Checks if the needle is wholly contained in the haystack.
-    ///
-    /// # Safety
-    /// Caller must ensure that AVX2 is available.
-    #[inline]
-    #[target_feature(enable = "avx2")]
-    pub unsafe fn match_haystack(&self, haystack: &[u8]) -> (bool, usize, usize) {
+    #[inline(always)]
+    pub fn match_haystack(&self, haystack: &[u8]) -> (bool, usize, usize) {
         let len = haystack.len();
         if len == 0 {
             return (false, 0, len);
@@ -79,16 +71,21 @@ impl PrefilterAVX {
                 // Probe two needle bytes together: each case-insensitive probe
                 // is two byte compares, so the pair fills AVX2 compare issue
                 // bandwidth on CPUs with four such ports.
-                let first_mask = _mm256_or_si256(
-                    _mm256_cmpeq_epi8(needle_char.0, haystack_chunk),
-                    _mm256_cmpeq_epi8(needle_char.1, haystack_chunk),
-                );
-                let second_mask = _mm256_or_si256(
-                    _mm256_cmpeq_epi8(second_needle_char.0, haystack_chunk),
-                    _mm256_cmpeq_epi8(second_needle_char.1, haystack_chunk),
-                );
+                let first_mask = unsafe {
+                    _mm256_or_si256(
+                        _mm256_cmpeq_epi8(needle_char.0, haystack_chunk),
+                        _mm256_cmpeq_epi8(needle_char.1, haystack_chunk),
+                    )
+                };
+                let second_mask = unsafe {
+                    _mm256_or_si256(
+                        _mm256_cmpeq_epi8(second_needle_char.0, haystack_chunk),
+                        _mm256_cmpeq_epi8(second_needle_char.1, haystack_chunk),
+                    )
+                };
 
-                let first_mask = _mm256_movemask_epi8(first_mask) as u32 & haystack_chunk_mask;
+                let first_mask =
+                    unsafe { _mm256_movemask_epi8(first_mask) } as u32 & haystack_chunk_mask;
                 if first_mask == 0 {
                     break;
                 }
@@ -122,7 +119,8 @@ impl PrefilterAVX {
                     return (true, match_start_pos, end_pos);
                 }
 
-                let second_mask = _mm256_movemask_epi8(second_mask) as u32 & haystack_chunk_mask;
+                let second_mask =
+                    unsafe { _mm256_movemask_epi8(second_mask) } as u32 & haystack_chunk_mask;
                 if second_mask == 0 {
                     break;
                 }
@@ -155,35 +153,26 @@ impl PrefilterAVX {
         (false, match_start_pos, len)
     }
 
-    /// # Safety
-    /// Caller must ensure that AVX2 is available.
-    #[inline]
-    #[target_feature(enable = "avx2")]
-    pub unsafe fn match_haystack_1_typo(&self, haystack: &[u8]) -> (bool, usize, usize) {
+    #[inline(always)]
+    pub fn match_haystack_1_typo(&self, haystack: &[u8]) -> (bool, usize, usize) {
         unsafe { self.inner.match_haystack_1_typo(haystack) }
     }
 
-    /// # Safety
-    /// Caller must ensure that AVX2 is available.
-    #[inline]
-    #[target_feature(enable = "avx2")]
-    pub unsafe fn match_haystack_2_typos(&self, haystack: &[u8]) -> (bool, usize, usize) {
+    #[inline(always)]
+    pub fn match_haystack_2_typos(&self, haystack: &[u8]) -> (bool, usize, usize) {
         unsafe { self.inner.match_haystack_2_typos(haystack) }
     }
 
-    /// # Safety
-    /// Caller must ensure that AVX2 is available.
-    #[inline]
-    #[target_feature(enable = "avx2")]
-    pub unsafe fn match_haystack_typos(
+    #[inline(always)]
+    pub fn match_haystack_typos(
         &mut self,
         haystack: &[u8],
         max_typos: u16,
     ) -> (bool, usize, usize) {
         match max_typos {
-            0 => unsafe { self.match_haystack(haystack) },
-            1 => unsafe { self.match_haystack_1_typo(haystack) },
-            2 => unsafe { self.match_haystack_2_typos(haystack) },
+            0 => self.match_haystack(haystack),
+            1 => self.match_haystack_1_typo(haystack),
+            2 => self.match_haystack_2_typos(haystack),
             _ => unsafe { self.inner.match_haystack_typos(haystack, max_typos) },
         }
     }
