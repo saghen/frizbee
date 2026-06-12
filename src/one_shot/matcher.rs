@@ -496,7 +496,7 @@ impl<B: MatcherBackend> MatcherCore<B> {
             let haystack = haystack_str.as_ref().as_bytes();
             let original_len = haystack.len();
             if original_len >= min_haystack_len {
-                let (matched, start_pos, end_pos) = self.prefilter.match_0(haystack);
+                let (matched, start_pos, end_pos) = self.prefilter.match_haystack(haystack);
                 if matched {
                     let trimmed = &haystack[start_pos..end_pos];
                     let include_exact = start_pos == 0 && end_pos == original_len;
@@ -520,7 +520,7 @@ impl<B: MatcherBackend> MatcherCore<B> {
             let haystack = haystack_str.as_ref().as_bytes();
             let original_len = haystack.len();
             if original_len >= min_haystack_len {
-                let (matched, start_pos, end_pos) = self.prefilter.match_1(haystack);
+                let (matched, start_pos, end_pos) = self.prefilter.match_haystack_1_typo(haystack);
                 if matched {
                     let trimmed = &haystack[start_pos..end_pos];
                     let include_exact = start_pos == 0 && end_pos == original_len;
@@ -544,7 +544,7 @@ impl<B: MatcherBackend> MatcherCore<B> {
             let haystack = haystack_str.as_ref().as_bytes();
             let original_len = haystack.len();
             if original_len >= min_haystack_len {
-                let (matched, start_pos, end_pos) = self.prefilter.match_2(haystack);
+                let (matched, start_pos, end_pos) = self.prefilter.match_haystack_2_typos(haystack);
                 if matched {
                     let trimmed = &haystack[start_pos..end_pos];
                     let include_exact = start_pos == 0 && end_pos == original_len;
@@ -569,7 +569,8 @@ impl<B: MatcherBackend> MatcherCore<B> {
             let haystack = haystack_str.as_ref().as_bytes();
             let original_len = haystack.len();
             if original_len >= min_haystack_len {
-                let (matched, start_pos, end_pos) = self.prefilter.match_many(haystack, max_typos);
+                let (matched, start_pos, end_pos) =
+                    self.prefilter.match_haystack_typos(haystack, max_typos);
                 if matched {
                     let trimmed = &haystack[start_pos..end_pos];
                     let include_exact = start_pos == 0 && end_pos == original_len;
@@ -714,7 +715,7 @@ impl<B: MatcherBackend> MatcherCore<B> {
                 let original_len = haystack.len();
                 let (matched, skipped_chars, end_pos) = max_typos
                     .map_or((true, 0, original_len), |max_typos| {
-                        prefilter.match_haystack(haystack, max_typos)
+                        prefilter.match_haystack_typos(haystack, max_typos)
                     });
                 let is_full_haystack = skipped_chars == 0 && end_pos == original_len;
                 matched.then(|| {
@@ -753,7 +754,7 @@ impl<B: MatcherBackend> MatcherCore<B> {
         self.config
             .max_typos
             .map_or((true, 0, original_len), |max_typos| {
-                self.prefilter.match_haystack(haystack, max_typos)
+                self.prefilter.match_haystack_typos(haystack, max_typos)
             })
     }
 

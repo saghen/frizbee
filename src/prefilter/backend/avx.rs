@@ -1,7 +1,8 @@
 use std::arch::x86_64::*;
 
 use crate::prefilter::{
-    algo::{PrefilterImpl, find_last_char_pos, load_window},
+    Kernel, Window,
+    algo::{Prefilter, find_last_char_pos, load_window},
     case_needle,
 };
 
@@ -9,7 +10,7 @@ use super::Backend;
 
 #[derive(Debug, Clone)]
 pub struct PrefilterAVX {
-    inner: PrefilterImpl<PrefilterAVXBackend>,
+    inner: Prefilter<PrefilterAVXBackend>,
     needle_len: usize,
     /// Padded to an even length so the exact-match override can compare two
     /// needle bytes per loop without a tail branch.
@@ -17,8 +18,14 @@ pub struct PrefilterAVX {
 }
 
 impl PrefilterAVX {
+    pub fn is_available() -> bool {
+        Prefilter::<PrefilterAVXBackend>::is_available()
+    }
+}
+
+impl Kernel for PrefilterAVX {
     #[inline(always)]
-    pub fn new(needle: &[u8]) -> Self {
+    fn new(needle: &[u8]) -> Self {
         assert!(!needle.is_empty(), "needle must not be empty");
 
         let needle_cases = case_needle(needle);
@@ -35,18 +42,14 @@ impl PrefilterAVX {
         }
 
         Self {
-            inner: unsafe { PrefilterImpl::new(needle) },
+            inner: unsafe { Prefilter::new(needle) },
             needle_len,
             needle_simd,
         }
     }
 
-    pub fn is_available() -> bool {
-        PrefilterImpl::<PrefilterAVXBackend>::is_available()
-    }
-
     #[inline(always)]
-    pub fn match_haystack(&self, haystack: &[u8]) -> (bool, usize, usize) {
+    fn match_haystack(&self, haystack: &[u8]) -> Window {
         let len = haystack.len();
         if len == 0 {
             return (false, 0, len);
@@ -154,26 +157,22 @@ impl PrefilterAVX {
     }
 
     #[inline(always)]
-    pub fn match_haystack_1_typo(&self, haystack: &[u8]) -> (bool, usize, usize) {
+    fn match_haystack_1_typo(&self, haystack: &[u8]) -> Window {
         unsafe { self.inner.match_haystack_1_typo(haystack) }
     }
 
     #[inline(always)]
-    pub fn match_haystack_2_typos(&self, haystack: &[u8]) -> (bool, usize, usize) {
+    fn match_haystack_2_typos(&self, haystack: &[u8]) -> Window {
         unsafe { self.inner.match_haystack_2_typos(haystack) }
     }
 
     #[inline(always)]
-    pub fn match_haystack_typos(
-        &mut self,
-        haystack: &[u8],
-        max_typos: u16,
-    ) -> (bool, usize, usize) {
+    fn match_haystack_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
         match max_typos {
             0 => self.match_haystack(haystack),
             1 => self.match_haystack_1_typo(haystack),
             2 => self.match_haystack_2_typos(haystack),
-            _ => unsafe { self.inner.match_haystack_typos(haystack, max_typos) },
+            _ => unsafe { self.inner.match_haystack_many_typos(haystack, max_typos) },
         }
     }
 }

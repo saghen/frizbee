@@ -1,5 +1,7 @@
 use std::fmt::Debug;
 
+use super::algo::Prefilter;
+
 #[cfg(target_arch = "x86_64")]
 mod avx;
 #[cfg(target_arch = "x86_64")]
@@ -12,13 +14,14 @@ mod sse;
 
 #[cfg(target_arch = "x86_64")]
 pub use avx::PrefilterAVX;
+
 #[cfg(target_arch = "x86_64")]
-pub use avx512::PrefilterAVX512;
+pub type PrefilterAVX512 = Prefilter<avx512::PrefilterAVX512Backend>;
 #[cfg(target_arch = "aarch64")]
-pub use neon::PrefilterNEON;
-pub use scalar::PrefilterScalar;
+pub type PrefilterNEON = Prefilter<neon::PrefilterNEONBackend>;
+pub type PrefilterScalar = Prefilter<scalar::PrefilterScalarBackend>;
 #[cfg(target_arch = "x86_64")]
-pub use sse::PrefilterSSE;
+pub type PrefilterSSE = Prefilter<sse::PrefilterSSEBackend>;
 
 pub(crate) trait Mask:
     Copy + Debug + PartialOrd + BitMaskOps + Send + Sync + 'static
@@ -98,7 +101,7 @@ impl_mask!(u16);
 impl_mask!(u32);
 impl_mask!(u64);
 
-pub(crate) trait Backend: Sized + 'static {
+pub(crate) trait Backend: Sized + Debug + Clone + 'static {
     const LANES: usize;
 
     type Chunk: Copy;

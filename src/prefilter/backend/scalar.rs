@@ -1,44 +1,4 @@
-use crate::prefilter::algo::PrefilterImpl;
-
 use super::Backend;
-
-#[derive(Debug, Clone)]
-pub struct PrefilterScalar(PrefilterImpl<PrefilterScalarBackend>);
-
-impl PrefilterScalar {
-    pub fn new(needle: &[u8]) -> Self {
-        Self(unsafe { PrefilterImpl::new(needle) })
-    }
-
-    #[inline(never)]
-    pub fn match_haystack(&self, haystack: &[u8]) -> (bool, usize, usize) {
-        unsafe { self.0.match_haystack(haystack) }
-    }
-
-    #[inline(never)]
-    pub fn match_haystack_1_typo(&self, haystack: &[u8]) -> (bool, usize, usize) {
-        unsafe { self.0.match_haystack_1_typo(haystack) }
-    }
-
-    #[inline(never)]
-    pub fn match_haystack_2_typos(&self, haystack: &[u8]) -> (bool, usize, usize) {
-        unsafe { self.0.match_haystack_2_typos(haystack) }
-    }
-
-    #[inline(never)]
-    pub fn match_haystack_typos(
-        &mut self,
-        haystack: &[u8],
-        max_typos: u16,
-    ) -> (bool, usize, usize) {
-        match max_typos {
-            0 => self.match_haystack(haystack),
-            1 => self.match_haystack_1_typo(haystack),
-            2 => self.match_haystack_2_typos(haystack),
-            _ => unsafe { self.0.match_haystack_typos(haystack, max_typos) },
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PrefilterScalarBackend;
