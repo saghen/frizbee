@@ -1,6 +1,6 @@
 # Frizbee
 
-Frizbee is a SIMD typo-resistant fuzzy string matcher written in Rust. The core of the algorithm uses Smith-Waterman with affine gaps, similar to FZF. In the included benchmark, with typo resistance disabled, it outperforms [nucleo](https://github.com/helix-editor/nucleo) by ~1.8x and [fzf](https://github.com/junegunn/fzf) by ~2.3x and scales better with multithreading, see [benchmarks](./BENCHMARKS.md). It matches against bytes directly, ignoring unicode.
+Frizbee is a SIMD typo-resistant fuzzy string matcher written in Rust. The core of the algorithm uses Smith-Waterman with affine gaps, similar to FZF. In the included benchmark, with typo resistance disabled, it outperforms [nucleo](https://github.com/helix-editor/nucleo) by ~4x and [fzf](https://github.com/junegunn/fzf) by ~5x and supports multithreading, see [benchmarks](./BENCHMARKS.md). It matches against bytes directly, ignoring unicode.
 
 Used by [blink.cmp](https://github.com/saghen/blink.cmp), [skim](https://github.com/skim-rs/skim), and [fff](https://github.com/dmtrKovalenko/fff). Special thank you to [stefanboca](https://github.com/stefanboca) and [ii14](https://github.com/ii14)!
 
@@ -36,38 +36,62 @@ The core of the algorithm is Smith-Waterman with affine gaps and row-wise parall
 
 ### Prefiltering
 
-Nucleo and FZF use a prefiltering step that removes any haystacks that do not include all of the characters in the needle. Frizbee does this by default but supports disabling it to allow for typos. You may control the maximum number of typos with the `max_typos` property.
+Nucleo and FZF use a prefiltering step that removes any haystacks that do not include all of the characters in the needle. Frizbee does this by default but supports alternative algorithms to allow for typos. You may control the maximum number of typos with the `max_typos` property.
 
-Nucleo uses [`memchr`](https://docs.rs/memchr/2.7.6/memchr/) to ensure that the needle is wholly contained in the haystack, in the correct order. For case insensitive matching, it checks the lowercase and uppercase needle chars separately.
+Nucleo uses [`memchr`](https://docs.rs/memchr/2.7.6/memchr/) to ensure that the needle is wholly contained in the haystack, in the correct order. For case insensitive matching, it checks the lowercase and uppercase needle chars separately. For each character, it loads the haystack from the previously matched position and performs a sequential. This results in many unnecessary loads (for a needle of 6 chars with a haystack of length 32 with 16 byte wide SIMD, this would lead to 6 + 2 - 1 = 7 loads).
 
-Frizbee improves upon this by checking both lowercase and uppercase needle chars in the same comparison (when AVX2 is available) and by ignoring the ordering of the needle characters in the haystack. Ignoring the ordering allows for false-positives, which must be filtered out during the alignment phase of the Smith Waterman. However, the speed-up from re-using the haystack loads drastically outweigh the slow down from the alignment phase.
+Frizbee improves upon this by loading the haystack chunk by chunk and masking out the already-matched prefix for each needle char. This results in ahaystack of length 32 with 16 byte wide SIMD only performing 2 loads. Frizbee also uses prefiltering to find the trim the prefix/suffix of the haystack of characters that are impossible to match (not in the needle).
 
 ```
 needle: "foo"
-haystack: "Fo_o"
+haystack: "oFoo"
 
-// assuming 4 and 8 byte SIMD widths for simplicity
-// in reality, the widths are 16 and 32 bytes
+// assuming 4 byte SIMD width for simplicity
+// in reality, the widths are 16 (SSE/NEON), 32 (AVX2), or 64 (AVX512) bytes
 
-needle: [f, f, f, f, F, F, F, F]
+haystack: [_, F, o, o]
 
-haystack: [F, o, _, o]
-// expand to 8 bytes by broadcasting lo to hi
-haystack: [F, o, _, o, F, o, _, o]
-
-needle == haystack
-mask: [00, 00, 00, 00, FF, 00, 00, 00]
-bitmask: 0b00001000 // movemask(mask)
+// first iter
+needle: ([f, f, f, f], [F, F, F, F])
+mask: [00, FF, 00, 00] // needle.0 == haystack | needle.1 == haystack
+bitmask: 0b0010 & haystack_mask // movemask(mask)
 bitmask > 0 // needle found in haystack, check next needle char
+min_bit: 1 // bitmask.trailing_zeros()
+haystack_mask: 0b1100 // !1u32 << min_bit
+
+haystack_start_pos: min_bit
+
+// second iter
+needle: ([o, o, o, o], [O, O, O, O])
+mask: [FF, 00, FF, FF] // needle.0 == haystack | needle.1 == haystack
+bitmask: 0b1101 & haystack_mask // movemask(mask)
+bitmask: 0b1100
+min_bit: 2 // bitmask.trailing_zeros()
+haystack_mask: 0b0111 // !1u32 << min_bit
+
+// third iter
+needle: ([o, o, o, o], [O, O, O, O])
+mask: [FF, 00, FF, FF] // needle.0 == haystack | needle.1 == haystack
+bitmask: 0b1101 & haystack_mask // movemask(mask)
+bitmask: 0b1000
+min_bit: 3 // bitmask.trailing_zeros()
+haystack_mask: 0b1111 // !1u32 << min_bit
+
+// NOTE: in reality, if we're not on the last chunk,
+// we search for the last occurrence of the last needle char
+haystack_end_pos: min_bit
+
+// ran out of needle chars, matched!
+return (true, haystack_start_pos, haystack_end_pos)
 ```
 
-See the full implementation in [`src/prefilter/x86_64/avx2.rs`](src/prefilter/x86_64/avx2.rs). When 256-bit SIMD is not available (no AVX2 or ARM), we simply check the uppercase and lowercase separately.
+See the full implementation as well as 1-typo, 2-typo and N-typo implementations in [`src/prefilter/x86_64/algo.rs`](src/prefilter/algo.rs).
 
 ### Smith Waterman
 
 The [Smith Waterman algorithm](https://en.wikipedia.org/wiki/Smith%E2%80%93Waterman_algorithm) performs local sequence alignment ([explanation](https://kaell.se/bibook/pairwise/waterman.html)), originally designed to find similar sequences between two DNA strings. The algorithm's time and space complexity of O(nm) led to plenty of research on parallelization. Each cell in the matrix has a data dependency on the cell to the left, up, and left-up diagonal. For biology, DNA sequences are typically quite large (m > 1000), so most of the parallelization approaches focused on large matrices ([see this paper for common parallelization techniques](https://pmc.ncbi.nlm.nih.gov/articles/PMC8419822)).
 
-As a fuzzy matcher, the matrices in Frizbee are typically much smaller than those in DNA alignment (m < 128). Frizbee uses an approach similar to [sequential layout](https://pmc.ncbi.nlm.nih.gov/articles/PMC8419822/#Sec11), except the horizontal (vertical in the paper, but flipped in frizbee) data dependency [is applied immediately](src/smith_waterman/simd/gaps.rs). This approach supports [affine gaps](https://en.wikipedia.org/wiki/Smith%E2%80%93Waterman_algorithm#Affine).
+As a fuzzy matcher, the matrices in Frizbee are typically much smaller than those in DNA alignment (m < 128). Frizbee uses an approach similar to [sequential layout](https://pmc.ncbi.nlm.nih.gov/articles/PMC8419822/#Sec11), except the horizontal (vertical in the paper, but flipped in frizbee) data dependency [is applied immediately](src/smith_waterman/simd/gaps.rs). This approach supports [affine gaps](https://en.wikipedia.org/wiki/Smith%E2%80%93Waterman_algorithm#Affine). When the maximum score is < 255 (based on needle length), Frizbee uses u8 scoring, effectively double SIMD width over the default u16 scoring.
 
 ```
 needle: "foo"
