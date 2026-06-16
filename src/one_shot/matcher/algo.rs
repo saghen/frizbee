@@ -96,6 +96,70 @@ where
     }
 
     #[inline(always)]
+    pub fn match_indexed_list_impl<H: AsRef<str>>(
+        &mut self,
+        haystacks: &[H],
+        indices: impl Iterator<Item = u32>,
+    ) -> Vec<Match> {
+        let mut matches = vec![];
+        self.match_indexed_list_into_impl(haystacks, indices, &mut matches);
+        matches
+    }
+
+    #[inline(always)]
+    pub fn match_indexed_list_into_impl<H: AsRef<str>>(
+        &mut self,
+        haystacks: &[H],
+        indices: impl Iterator<Item = u32>,
+        matches: &mut Vec<Match>,
+    ) {
+        Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
+        if self.needle.is_empty() {
+            return matches.extend(indices.map(|index| Match::from_index(index as usize)));
+        }
+
+        let max_typos = self.config.max_typos;
+        let min_haystack_len = self.min_haystack_len();
+        match max_typos {
+            None => self.match_indexed_list_prefiltered_into::<0, H>(
+                haystacks,
+                indices,
+                min_haystack_len,
+                0,
+                matches,
+            ),
+            Some(0) => self.match_indexed_list_prefiltered_into::<0, H>(
+                haystacks,
+                indices,
+                min_haystack_len,
+                0,
+                matches,
+            ),
+            Some(1) => self.match_indexed_list_prefiltered_into::<1, H>(
+                haystacks,
+                indices,
+                min_haystack_len,
+                1,
+                matches,
+            ),
+            Some(2) => self.match_indexed_list_prefiltered_into::<2, H>(
+                haystacks,
+                indices,
+                min_haystack_len,
+                2,
+                matches,
+            ),
+            Some(max_typos) => self.match_indexed_list_prefiltered_into::<MANY_TYPOS, H>(
+                haystacks,
+                indices,
+                min_haystack_len,
+                max_typos,
+                matches,
+            ),
+        }
+    }
+
+    #[inline(always)]
     pub fn match_list_indices_impl<H: AsRef<str>>(&mut self, haystacks: &[H]) -> Vec<MatchIndices> {
         Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
         if self.needle.is_empty() {
@@ -120,48 +184,6 @@ where
         }
 
         matches
-    }
-
-    #[inline(always)]
-    pub fn match_one_impl(&mut self, haystack: &[u8], index: u32) -> Option<Match> {
-        if self.needle.is_empty() {
-            return Some(Match::from_index(index as usize));
-        }
-
-        let original_len = haystack.len();
-        if original_len < self.min_haystack_len() {
-            return None;
-        }
-
-        match self.config.max_typos {
-            None => Some(self.smith_waterman_one(haystack, index, 0, true)),
-            Some(0) => self.match_one_prefiltered::<0>(haystack, index, 0),
-            Some(1) => self.match_one_prefiltered::<1>(haystack, index, 1),
-            Some(2) => self.match_one_prefiltered::<2>(haystack, index, 2),
-            Some(max_typos) => self.match_one_prefiltered::<MANY_TYPOS>(haystack, index, max_typos),
-        }
-    }
-
-    #[inline(always)]
-    pub fn match_indices_one_impl(&mut self, haystack: &[u8], index: u32) -> Option<MatchIndices> {
-        if self.needle.is_empty() {
-            return Some(MatchIndices::from_index(index as usize));
-        }
-
-        let original_len = haystack.len();
-        if original_len < self.min_haystack_len() {
-            return None;
-        }
-
-        match self.config.max_typos {
-            None => self.smith_waterman_indices_one(haystack, 0, index, true, None),
-            Some(0) => self.match_indices_one_prefiltered::<0>(haystack, index, 0),
-            Some(1) => self.match_indices_one_prefiltered::<1>(haystack, index, 1),
-            Some(2) => self.match_indices_one_prefiltered::<2>(haystack, index, 2),
-            Some(max_typos) => {
-                self.match_indices_one_prefiltered::<MANY_TYPOS>(haystack, index, max_typos)
-            }
-        }
     }
 
     #[inline(always)]
@@ -210,21 +232,27 @@ where
     }
 
     #[inline(always)]
-    fn match_one_prefiltered<const TYPOS: u16>(
+    fn match_indexed_list_prefiltered_into<const TYPOS: u16, H: AsRef<str>>(
         &mut self,
-        haystack: &[u8],
-        index: u32,
+        haystacks: &[H],
+        indices: impl Iterator<Item = u32>,
+        min_haystack_len: usize,
         max_typos: u16,
-    ) -> Option<Match> {
-        let original_len = haystack.len();
-        let (matched, start_pos, end_pos) = self.prefilter_haystack::<TYPOS>(haystack, max_typos);
-        if !matched {
-            return None;
+        matches: &mut Vec<Match>,
+    ) {
+        for index in indices {
+            let haystack = haystacks[index as usize].as_ref().as_bytes();
+            let original_len = haystack.len();
+            if original_len >= min_haystack_len {
+                let (matched, start_pos, end_pos) =
+                    self.prefilter_haystack::<TYPOS>(haystack, max_typos);
+                if matched {
+                    let trimmed = &haystack[start_pos..end_pos];
+                    let include_exact = start_pos == 0 && end_pos == original_len;
+                    matches.push(self.smith_waterman_one(trimmed, index, start_pos, include_exact));
+                }
+            }
         }
-
-        let trimmed = &haystack[start_pos..end_pos];
-        let include_exact = start_pos == 0 && end_pos == original_len;
-        Some(self.smith_waterman_one(trimmed, index, start_pos, include_exact))
     }
 
     #[inline(always)]
@@ -287,24 +315,6 @@ where
             }
         }
         matches
-    }
-
-    #[inline(always)]
-    fn match_indices_one_prefiltered<const TYPOS: u16>(
-        &mut self,
-        haystack: &[u8],
-        index: u32,
-        max_typos: u16,
-    ) -> Option<MatchIndices> {
-        let original_len = haystack.len();
-        let (matched, start_pos, end_pos) = self.prefilter_haystack::<TYPOS>(haystack, max_typos);
-        if !matched {
-            return None;
-        }
-
-        let trimmed = &haystack[start_pos..end_pos];
-        let include_exact = start_pos == 0 && end_pos == original_len;
-        self.smith_waterman_indices_one(trimmed, start_pos, index, include_exact, Some(max_typos))
     }
 
     #[inline(always)]

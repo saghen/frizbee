@@ -60,11 +60,21 @@ impl Matcher {
         unsafe { dispatch!(&mut self.backend, matcher => matcher.match_list(haystacks)) }
     }
 
+    pub fn match_indexed_list<S: AsRef<str>>(
+        &mut self,
+        haystacks: &[S],
+        indices: impl Iterator<Item = u32>,
+    ) -> Vec<Match> {
+        unsafe {
+            dispatch!(&mut self.backend, matcher => matcher.match_indexed_list(haystacks, indices))
+        }
+    }
+
     pub fn match_list_indices<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<MatchIndices> {
         unsafe { dispatch!(&mut self.backend, matcher => matcher.match_list_indices(haystacks)) }
     }
 
-    pub(crate) fn match_list_into<S: AsRef<str>>(
+    pub fn match_list_into<S: AsRef<str>>(
         &mut self,
         haystacks: &[S],
         haystack_index_offset: u32,
@@ -77,7 +87,20 @@ impl Matcher {
         }
     }
 
-    pub(crate) fn match_list_indices_into<S: AsRef<str>>(
+    pub fn match_indexed_list_into<S: AsRef<str>>(
+        &mut self,
+        haystacks: &[S],
+        indices: impl Iterator<Item = u32>,
+        matches: &mut Vec<Match>,
+    ) {
+        unsafe {
+            dispatch!(&mut self.backend, matcher => {
+                matcher.match_indexed_list_into(haystacks, indices, matches)
+            })
+        }
+    }
+
+    pub fn match_list_indices_into<S: AsRef<str>>(
         &mut self,
         haystacks: &[S],
         haystack_index_offset: u32,
@@ -98,22 +121,6 @@ impl Matcher {
             match_.index += haystack_index_offset;
         }
         matches.extend(new_matches);
-    }
-
-    pub(crate) fn match_one(&mut self, haystack: &[u8], index: u32) -> Option<Match> {
-        unsafe { dispatch!(&mut self.backend, matcher => matcher.match_one(haystack, index)) }
-    }
-
-    pub(crate) fn match_indices_one(
-        &mut self,
-        haystack: &[u8],
-        index: u32,
-    ) -> Option<MatchIndices> {
-        unsafe {
-            dispatch!(&mut self.backend, matcher => {
-                matcher.match_indices_one(haystack, index)
-            })
-        }
     }
 
     #[inline(always)]

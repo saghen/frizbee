@@ -86,27 +86,32 @@ macro_rules! impl_matcher_entrypoints {
 
             #[inline]
             $(#[target_feature(enable = $feature)])?
+            pub unsafe fn match_indexed_list<S: AsRef<str>>(
+                &mut self,
+                haystacks: &[S],
+                indices: impl Iterator<Item = u32>,
+            ) -> Vec<Match> {
+                self.match_indexed_list_impl(haystacks, indices)
+            }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
+            pub unsafe fn match_indexed_list_into<S: AsRef<str>>(
+                &mut self,
+                haystacks: &[S],
+                indices: impl Iterator<Item = u32>,
+                matches: &mut Vec<Match>,
+            ) {
+                self.match_indexed_list_into_impl(haystacks, indices, matches)
+            }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
             pub unsafe fn match_list_indices<S: AsRef<str>>(
                 &mut self,
                 haystacks: &[S],
             ) -> Vec<MatchIndices> {
                 self.match_list_indices_impl(haystacks)
-            }
-
-            #[inline]
-            $(#[target_feature(enable = $feature)])?
-            pub unsafe fn match_one(&mut self, haystack: &[u8], index: u32) -> Option<Match> {
-                self.match_one_impl(haystack, index)
-            }
-
-            #[inline]
-            $(#[target_feature(enable = $feature)])?
-            pub unsafe fn match_indices_one(
-                &mut self,
-                haystack: &[u8],
-                index: u32,
-            ) -> Option<MatchIndices> {
-                self.match_indices_one_impl(haystack, index)
             }
         }
     };

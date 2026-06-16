@@ -11,7 +11,7 @@ const ITERS: u32 = 20;
 fn main() {
     let config = Config::default();
 
-    for &count in &[50_000usize, 200_000, 500_000] {
+    for &count in &[500_000, 1_000_000] {
         let haystacks = gen_paths(count, 42);
         let refs: Vec<&str> = haystacks.iter().map(|s| s.as_str()).collect();
 
@@ -31,7 +31,9 @@ fn main() {
         println!("  -- backspace --\n");
         bench_backspace(
             &refs,
-            &["s", "sr", "src", "src/", "src/c", "src/co", "src/com", "src/comp"],
+            &[
+                "s", "sr", "src", "src/", "src/c", "src/co", "src/com", "src/comp",
+            ],
             &config,
         );
     }
@@ -44,9 +46,9 @@ fn bench_query(haystacks: &[&str], steps: &[&str], config: &Config) {
         }
     });
     let incr_total = time_avg(ITERS, || {
-        let mut m = IncrementalMatcher::new(config);
+        let mut m = IncrementalMatcher::new(config, black_box(haystacks));
         for &n in steps {
-            black_box(m.match_list(n, black_box(haystacks)));
+            black_box(m.match_list(n));
         }
     });
 
@@ -73,17 +75,17 @@ fn bench_query(haystacks: &[&str], steps: &[&str], config: &Config) {
 
         // replay prior steps then measure just this one
         let inc = time_avg(ITERS, || {
-            let mut m = IncrementalMatcher::new(config);
+            let mut m = IncrementalMatcher::new(config, black_box(haystacks));
             for &prev in &steps[..i] {
-                m.match_list(prev, haystacks);
+                m.match_list(prev);
             }
-            black_box(m.match_list(black_box(needle), black_box(haystacks)));
+            black_box(m.match_list(black_box(needle)));
         });
         let setup = if i > 0 {
             time_avg(ITERS, || {
-                let mut m = IncrementalMatcher::new(config);
+                let mut m = IncrementalMatcher::new(config, black_box(haystacks));
                 for &prev in &steps[..i] {
-                    m.match_list(prev, haystacks);
+                    m.match_list(prev);
                 }
             })
         } else {
@@ -129,26 +131,23 @@ fn bench_backspace(haystacks: &[&str], steps: &[&str], config: &Config) {
 
         // type forward to the end, then backspace to `back_to`
         let inc = time_avg(ITERS, || {
-            let mut m = IncrementalMatcher::new(config);
+            let mut m = IncrementalMatcher::new(config, black_box(haystacks));
             for &s in steps {
-                m.match_list(s, haystacks);
+                m.match_list(s);
             }
-            black_box(m.match_list(black_box(needle), black_box(haystacks)));
+            black_box(m.match_list(black_box(needle)));
         });
         let setup = time_avg(ITERS, || {
-            let mut m = IncrementalMatcher::new(config);
+            let mut m = IncrementalMatcher::new(config, black_box(haystacks));
             for &s in steps {
-                m.match_list(s, haystacks);
+                m.match_list(s);
             }
         });
         let inc_step = inc.saturating_sub(setup);
 
         let label = format!("{:?}->{:?}", steps.last().unwrap(), needle);
         if inc_step.as_nanos() == 0 {
-            println!(
-                "    {:>10} {:>10.2?} {:>10} {:>6}x",
-                label, os, "~0", ">99"
-            );
+            println!("    {:>10} {:>10.2?} {:>10} {:>6}x", label, os, "~0", ">99");
         } else {
             let speedup = os.as_nanos() as f64 / inc_step.as_nanos() as f64;
             println!(
