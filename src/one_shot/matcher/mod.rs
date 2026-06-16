@@ -6,7 +6,11 @@ mod backend;
 use backend::*;
 
 #[derive(Debug, Clone)]
-pub struct Matcher(MatcherBackend);
+pub struct Matcher {
+    pub needle: String,
+    pub config: Config,
+    backend: MatcherBackend,
+}
 
 macro_rules! dispatch {
     ($self:expr, $m:ident => $body:expr) => {
@@ -35,78 +39,29 @@ macro_rules! dispatch {
 
 impl Matcher {
     pub fn new(needle: &str, config: &Config) -> Self {
-        let needle_bytes = needle.as_bytes();
-        let use_u8 = score_fits_in_u8(needle_bytes.len(), &config.scoring);
-
-        #[cfg(target_arch = "x86_64")]
-        {
-            if use_u8 {
-                if MatcherAVX512U8::is_available() {
-                    return Self(MatcherBackend::AVX512U8(unsafe {
-                        MatcherAVX512U8::new(needle, config)
-                    }));
-                }
-                if MatcherAVXU8::is_available() {
-                    return Self(MatcherBackend::AVXU8(unsafe {
-                        MatcherAVXU8::new(needle, config)
-                    }));
-                }
-                if MatcherSSEU8::is_available() {
-                    return Self(MatcherBackend::SSEU8(unsafe {
-                        MatcherSSEU8::new(needle, config)
-                    }));
-                }
-            } else {
-                if MatcherAVX512::is_available() {
-                    return Self(MatcherBackend::AVX512(unsafe {
-                        MatcherAVX512::new(needle, config)
-                    }));
-                }
-                if MatcherAVX::is_available() {
-                    return Self(MatcherBackend::AVX(unsafe {
-                        MatcherAVX::new(needle, config)
-                    }));
-                }
-                if MatcherSSE::is_available() {
-                    return Self(MatcherBackend::SSE(unsafe {
-                        MatcherSSE::new(needle, config)
-                    }));
-                }
-            }
+        Self {
+            backend: Self::get_backend(needle, config),
+            needle: needle.to_string(),
+            config: config.clone(),
         }
+    }
 
-        #[cfg(target_arch = "aarch64")]
-        {
-            if use_u8 {
-                if MatcherNEONU8::is_available() {
-                    return Self(MatcherBackend::NEONU8(unsafe {
-                        MatcherNEONU8::new(needle, config)
-                    }));
-                }
-            } else if MatcherNEON::is_available() {
-                return Self(MatcherBackend::NEON(unsafe {
-                    MatcherNEON::new(needle, config)
-                }));
-            }
-        }
+    pub fn set_config(&mut self, config: Config) {
+        self.config = config;
+        self.backend = Self::get_backend(&self.needle, &self.config);
+    }
 
-        if use_u8 {
-            Self(MatcherBackend::ScalarU8(unsafe {
-                MatcherScalarU8::new(needle, config)
-            }))
-        } else {
-            Self(MatcherBackend::Scalar(unsafe {
-                MatcherScalar::new(needle, config)
-            }))
-        }
+    pub fn set_needle(&mut self, needle: &str) {
+        self.needle = needle.to_string();
+        self.backend = Self::get_backend(&self.needle, &self.config);
     }
 
     pub fn match_list<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<Match> {
-        unsafe { dispatch!(&mut self.0, matcher => matcher.match_list(haystacks)) }
+        unsafe { dispatch!(&mut self.backend, matcher => matcher.match_list(haystacks)) }
     }
 
     pub fn match_list_indices<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<MatchIndices> {
-        unsafe { dispatch!(&mut self.0, matcher => matcher.match_list_indices(haystacks)) }
+        unsafe { dispatch!(&mut self.backend, matcher => matcher.match_list_indices(haystacks)) }
     }
 
     pub(super) fn match_list_into<S: AsRef<str>>(
@@ -116,7 +71,7 @@ impl Matcher {
         matches: &mut Vec<Match>,
     ) {
         unsafe {
-            dispatch!(&mut self.0, matcher => {
+            dispatch!(&mut self.backend, matcher => {
                 matcher.match_list_into(haystacks, haystack_index_offset, matches)
             })
         }
@@ -151,6 +106,54 @@ impl Matcher {
             u32::MAX,
             haystack_index_offset
         );
+    }
+
+    fn get_backend(needle: &str, config: &Config) -> MatcherBackend {
+        let use_u8 = score_fits_in_u8(needle.len(), &config.scoring);
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            if use_u8 {
+                if MatcherAVX512U8::is_available() {
+                    return MatcherBackend::AVX512U8(unsafe {
+                        MatcherAVX512U8::new(needle, config)
+                    });
+                }
+                if MatcherAVXU8::is_available() {
+                    return MatcherBackend::AVXU8(unsafe { MatcherAVXU8::new(needle, config) });
+                }
+                if MatcherSSEU8::is_available() {
+                    return MatcherBackend::SSEU8(unsafe { MatcherSSEU8::new(needle, config) });
+                }
+            } else {
+                if MatcherAVX512::is_available() {
+                    return MatcherBackend::AVX512(unsafe { MatcherAVX512::new(needle, config) });
+                }
+                if MatcherAVX::is_available() {
+                    return MatcherBackend::AVX(unsafe { MatcherAVX::new(needle, config) });
+                }
+                if MatcherSSE::is_available() {
+                    return MatcherBackend::SSE(unsafe { MatcherSSE::new(needle, config) });
+                }
+            }
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            if use_u8 {
+                if MatcherNEONU8::is_available() {
+                    return MatcherBackend::NEONU8(unsafe { MatcherNEONU8::new(needle, config) });
+                }
+            } else if MatcherNEON::is_available() {
+                return MatcherBackend::NEON(unsafe { MatcherNEON::new(needle, config) });
+            }
+        }
+
+        if use_u8 {
+            MatcherBackend::ScalarU8(unsafe { MatcherScalarU8::new(needle, config) })
+        } else {
+            MatcherBackend::Scalar(unsafe { MatcherScalar::new(needle, config) })
+        }
     }
 }
 
@@ -293,7 +296,7 @@ mod tests {
     fn test_empty_needle() {
         let haystack = ["foo", "bar"];
         let mut matcher = Matcher::new("", &Config::default());
-        let is_u8 = match &matcher.0 {
+        let is_u8 = match &matcher.backend {
             #[cfg(target_arch = "x86_64")]
             MatcherBackend::AVX512U8(_) | MatcherBackend::AVXU8(_) | MatcherBackend::SSEU8(_) => {
                 true
@@ -319,7 +322,7 @@ mod tests {
     #[test]
     fn u8_path_selected_for_short_needle() {
         let matcher = Matcher::new("abc", &Config::default());
-        let is_u8 = match &matcher.0 {
+        let is_u8 = match &matcher.backend {
             #[cfg(target_arch = "x86_64")]
             MatcherBackend::AVX512U8(_) | MatcherBackend::AVXU8(_) | MatcherBackend::SSEU8(_) => {
                 true
@@ -335,7 +338,7 @@ mod tests {
     #[test]
     fn u16_path_selected_for_long_needle() {
         let matcher = Matcher::new("abcdefghijklmnopqrst", &Config::default());
-        let is_u16 = match &matcher.0 {
+        let is_u16 = match &matcher.backend {
             #[cfg(target_arch = "x86_64")]
             MatcherBackend::AVX512(_) | MatcherBackend::AVX(_) | MatcherBackend::SSE(_) => true,
             #[cfg(target_arch = "aarch64")]
