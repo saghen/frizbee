@@ -53,29 +53,6 @@ pub use one_shot::{Matcher, match_list, match_list_indices, match_list_parallel}
 
 use r#const::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
-pub enum CaseMatching {
-    /// Ignore ASCII case while matching.
-    #[default]
-    Ignore,
-    /// Ignore ASCII case unless the needle contains uppercase ASCII.
-    Smart,
-    /// Require matching bytes to have the same ASCII case.
-    Respect,
-}
-
-impl CaseMatching {
-    #[inline(always)]
-    pub(crate) fn respects_case_for(self, needle: &[u8]) -> bool {
-        match self {
-            CaseMatching::Ignore => false,
-            CaseMatching::Smart => needle.iter().any(u8::is_ascii_uppercase),
-            CaseMatching::Respect => true,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Match {
@@ -189,6 +166,29 @@ impl Default for Config {
             casing: CaseMatching::Ignore,
             sort: true,
             scoring: Scoring::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum CaseMatching {
+    /// Ignore ASCII case while matching.
+    #[default]
+    Ignore,
+    /// Ignore ASCII case unless the needle contains uppercase ASCII
+    Smart,
+    /// Require matching bytes to have the same ASCII case
+    Respect,
+}
+
+impl CaseMatching {
+    #[inline(always)]
+    pub(crate) fn respects_case_for(self, needle: &[u8]) -> bool {
+        match self {
+            CaseMatching::Ignore => false,
+            CaseMatching::Smart => needle.iter().any(u8::is_ascii_uppercase),
+            CaseMatching::Respect => true,
         }
     }
 }
