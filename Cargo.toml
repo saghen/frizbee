@@ -36,3 +36,4 @@ raw-cpuid = "11.6" # runtime feature detection
 [features]
 serde = ["dep:serde"]
 match_end_col = []
+safe_read = []

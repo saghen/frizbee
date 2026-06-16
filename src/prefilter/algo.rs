@@ -486,14 +486,22 @@ pub(crate) unsafe fn load_window<B: Backend>(
 
         let mask = B::Mask::first_n(remaining);
         let ptr = haystack.as_ptr().add(start);
-        if can_overread(ptr, B::LANES) {
-            (B::load(ptr), mask)
-        } else {
+        #[cfg(feature = "safe_read")]
+        {
             (B::load_partial(ptr, remaining, mask), mask)
+        }
+        #[cfg(not(feature = "safe_read"))]
+        {
+            if can_overread(ptr, B::LANES) {
+                (B::load(ptr), mask)
+            } else {
+                (B::load_partial(ptr, remaining, mask), mask)
+            }
         }
     }
 }
 
+#[cfg(not(feature = "safe_read"))]
 #[inline(always)]
 pub(crate) fn can_overread(ptr: *const u8, bytes: usize) -> bool {
     (ptr as usize & 0xFFF) <= (4096 - bytes)
