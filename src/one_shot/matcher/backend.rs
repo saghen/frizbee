@@ -92,6 +92,22 @@ macro_rules! impl_matcher_entrypoints {
             ) -> Vec<MatchIndices> {
                 self.match_list_indices_impl(haystacks)
             }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
+            pub unsafe fn match_one(&mut self, haystack: &[u8], index: u32) -> Option<Match> {
+                self.match_one_impl(haystack, index)
+            }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
+            pub unsafe fn match_indices_one(
+                &mut self,
+                haystack: &[u8],
+                index: u32,
+            ) -> Option<MatchIndices> {
+                self.match_indices_one_impl(haystack, index)
+            }
         }
     };
 }

@@ -64,7 +64,7 @@ impl Matcher {
         unsafe { dispatch!(&mut self.backend, matcher => matcher.match_list_indices(haystacks)) }
     }
 
-    pub(super) fn match_list_into<S: AsRef<str>>(
+    pub(crate) fn match_list_into<S: AsRef<str>>(
         &mut self,
         haystacks: &[S],
         haystack_index_offset: u32,
@@ -73,6 +73,45 @@ impl Matcher {
         unsafe {
             dispatch!(&mut self.backend, matcher => {
                 matcher.match_list_into(haystacks, haystack_index_offset, matches)
+            })
+        }
+    }
+
+    pub(crate) fn match_list_indices_into<S: AsRef<str>>(
+        &mut self,
+        haystacks: &[S],
+        haystack_index_offset: u32,
+        matches: &mut Vec<MatchIndices>,
+    ) {
+        Self::guard_against_haystack_overflow(haystacks.len(), haystack_index_offset);
+
+        if self.needle.is_empty() {
+            matches.extend(
+                (0..haystacks.len())
+                    .map(|index| MatchIndices::from_index(index + haystack_index_offset as usize)),
+            );
+            return;
+        }
+
+        let mut new_matches = self.match_list_indices(haystacks);
+        for match_ in &mut new_matches {
+            match_.index += haystack_index_offset;
+        }
+        matches.extend(new_matches);
+    }
+
+    pub(crate) fn match_one(&mut self, haystack: &[u8], index: u32) -> Option<Match> {
+        unsafe { dispatch!(&mut self.backend, matcher => matcher.match_one(haystack, index)) }
+    }
+
+    pub(crate) fn match_indices_one(
+        &mut self,
+        haystack: &[u8],
+        index: u32,
+    ) -> Option<MatchIndices> {
+        unsafe {
+            dispatch!(&mut self.backend, matcher => {
+                matcher.match_indices_one(haystack, index)
             })
         }
     }

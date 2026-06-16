@@ -1,7 +1,7 @@
-use itertools::Itertools;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
+use crate::k_merge::k_merge;
 use crate::one_shot::Matcher;
 use crate::{Config, Match, MatchIndices};
 
@@ -280,34 +280,13 @@ impl IncrementalMatcher {
     #[inline]
     fn match_narrowed_unsorted<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<Match> {
         let mut matches = Vec::with_capacity(self.matched_indices.len());
-        let max_typos = self.matcher.config.max_typos;
-        let needle_len = self.matcher.needle.len();
-        let min_haystack_len = max_typos
-            .map(|max| needle_len.saturating_sub(max as usize))
-            .unwrap_or(0);
 
         let mut write = 0usize;
         for read in 0..self.matched_indices.len() {
             let idx = self.matched_indices[read];
             let haystack = haystacks[idx as usize].as_ref().as_bytes();
 
-            if haystack.len() < min_haystack_len {
-                continue;
-            }
-
-            let (matched, skipped_chunks) = match max_typos {
-                Some(max) => self.matcher.prefilter.match_haystack(haystack, max),
-                None => (true, 0),
-            };
-            if !matched {
-                continue;
-            }
-
-            let trimmed = &haystack[skipped_chunks * 16..];
-            if let Some(m) =
-                self.matcher
-                    .smith_waterman_one(trimmed, idx, skipped_chunks == 0)
-            {
+            if let Some(m) = self.matcher.match_one(haystack, idx) {
                 self.matched_indices[write] = idx;
                 write += 1;
                 matches.push(m);
@@ -341,36 +320,13 @@ impl IncrementalMatcher {
         haystacks: &[S],
     ) -> Vec<MatchIndices> {
         let mut matches = Vec::with_capacity(self.matched_indices.len());
-        let max_typos = self.matcher.config.max_typos;
-        let needle_len = self.matcher.needle.len();
-        let min_haystack_len = max_typos
-            .map(|max| needle_len.saturating_sub(max as usize))
-            .unwrap_or(0);
 
         let mut write = 0usize;
         for read in 0..self.matched_indices.len() {
             let idx = self.matched_indices[read];
             let haystack = haystacks[idx as usize].as_ref().as_bytes();
 
-            if haystack.len() < min_haystack_len {
-                continue;
-            }
-
-            let (matched, skipped_chunks) = match max_typos {
-                Some(max) => self.matcher.prefilter.match_haystack(haystack, max),
-                None => (true, 0),
-            };
-            if !matched {
-                continue;
-            }
-
-            let trimmed = &haystack[skipped_chunks * 16..];
-            if let Some(m) = self.matcher.smith_waterman_indices_one(
-                trimmed,
-                skipped_chunks,
-                idx,
-                skipped_chunks == 0,
-            ) {
+            if let Some(m) = self.matcher.match_indices_one(haystack, idx) {
                 self.matched_indices[write] = idx;
                 write += 1;
                 matches.push(m);
@@ -389,8 +345,11 @@ impl IncrementalMatcher {
 
         let prev_count = self.prev_haystack_count;
         let matches_before_tail = matches.len();
-        self.matcher
-            .match_list_indices_into(&haystacks[prev_count..], prev_count as u32, &mut matches);
+        self.matcher.match_list_indices_into(
+            &haystacks[prev_count..],
+            prev_count as u32,
+            &mut matches,
+        );
         self.matched_indices
             .extend(matches[matches_before_tail..].iter().map(|m| m.index));
 
@@ -449,11 +408,12 @@ impl IncrementalMatcher {
                 .collect();
 
             if config.sort {
-                handles
-                    .into_iter()
-                    .map(|h| h.join().unwrap())
-                    .kmerge()
-                    .collect()
+                k_merge(
+                    handles
+                        .into_iter()
+                        .map(|h| h.join().unwrap())
+                        .collect::<Vec<_>>(),
+                )
             } else {
                 handles
                     .into_iter()
@@ -495,11 +455,6 @@ impl IncrementalMatcher {
         let matched_indices = &self.matched_indices;
         let matcher = &self.matcher;
         let config = &matcher.config;
-        let max_typos = config.max_typos;
-        let needle_len = matcher.needle.len();
-        let min_haystack_len = max_typos
-            .map(|max| needle_len.saturating_sub(max as usize))
-            .unwrap_or(0);
 
         let (thread_matches, new_indices) = thread::scope(|s| {
             let handles: Vec<_> = (0..threads)
@@ -521,26 +476,7 @@ impl IncrementalMatcher {
                             for &idx in &matched_indices[start..end] {
                                 let haystack = haystacks[idx as usize].as_ref().as_bytes();
 
-                                if haystack.len() < min_haystack_len {
-                                    continue;
-                                }
-
-                                let (matched, skipped_chunks) = match max_typos {
-                                    Some(max) => {
-                                        thread_matcher.prefilter.match_haystack(haystack, max)
-                                    }
-                                    None => (true, 0),
-                                };
-                                if !matched {
-                                    continue;
-                                }
-
-                                let trimmed = &haystack[skipped_chunks * 16..];
-                                if let Some(m) = thread_matcher.smith_waterman_one(
-                                    trimmed,
-                                    idx,
-                                    skipped_chunks == 0,
-                                ) {
+                                if let Some(m) = thread_matcher.match_one(haystack, idx) {
                                     local_matches.push(m);
                                     local_indices.push(idx);
                                 }
@@ -564,7 +500,7 @@ impl IncrementalMatcher {
                     all_indices.extend(indices);
                     match_vecs.push(matches);
                 }
-                match_vecs.into_iter().kmerge().collect::<Vec<Match>>()
+                k_merge(match_vecs)
             } else {
                 let mut all_matches = Vec::new();
                 for h in handles {
@@ -584,10 +520,7 @@ impl IncrementalMatcher {
         if new_tail_matches.is_empty() {
             thread_matches
         } else if config.sort {
-            thread_matches
-                .into_iter()
-                .merge(new_tail_matches)
-                .collect()
+            k_merge(vec![thread_matches, new_tail_matches])
         } else {
             let mut result = thread_matches;
             result.extend(new_tail_matches);
@@ -615,12 +548,7 @@ mod tests {
     #[test]
     fn incremental_matches_one_shot() {
         let haystacks = [
-            "fooBar",
-            "foo_bar",
-            "prelude",
-            "println!",
-            "fizzBuzz",
-            "format!",
+            "fooBar", "foo_bar", "prelude", "println!", "fizzBuzz", "format!",
         ];
         let config = Config::default();
         let mut incr = IncrementalMatcher::new(&config);
@@ -867,7 +795,11 @@ mod tests {
         for needle in ["f", "fo", "foo", "fooB"] {
             let expected = match_list(needle, &haystacks, &config);
             let actual = incr.match_list_parallel(needle, &haystacks, 2);
-            assert_eq!(actual, expected, "parallel mismatch for needle {:?}", needle);
+            assert_eq!(
+                actual, expected,
+                "parallel mismatch for needle {:?}",
+                needle
+            );
         }
     }
 
