@@ -1,4 +1,4 @@
-use crate::smith_waterman::simd::Kernel;
+use crate::smith_waterman::Kernel;
 use crate::{Scoring, prefilter::case_needle, smith_waterman::greedy::match_greedy};
 
 use super::SmithWaterman;

@@ -9,13 +9,13 @@ use crate::prefilter::backend::PrefilterScalar;
 #[cfg(target_arch = "x86_64")]
 use crate::prefilter::backend::{PrefilterAVX, PrefilterAVX512, PrefilterSSE};
 #[cfg(target_arch = "x86_64")]
-use crate::smith_waterman::simd::{
+use crate::smith_waterman::{
     SmithWatermanAVX, SmithWatermanAVX512, SmithWatermanAVX512U8, SmithWatermanAVXU8,
     SmithWatermanSSE, SmithWatermanSSEU8,
 };
 #[cfg(target_arch = "aarch64")]
-use crate::smith_waterman::simd::{SmithWatermanNEON, SmithWatermanNEONU8};
-use crate::smith_waterman::simd::{SmithWatermanScalar, SmithWatermanScalarU8};
+use crate::smith_waterman::{SmithWatermanNEON, SmithWatermanNEONU8};
+use crate::smith_waterman::{SmithWatermanScalar, SmithWatermanScalarU8};
 
 #[cfg(target_arch = "x86_64")]
 pub type MatcherAVX512U8 = MatcherImpl<PrefilterAVX512, SmithWatermanAVX512U8>;

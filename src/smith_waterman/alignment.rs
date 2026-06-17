@@ -1,4 +1,4 @@
-use crate::smith_waterman::simd::{AlignmentPathIter, SmithWaterman};
+use crate::smith_waterman::{AlignmentPathIter, SmithWaterman};
 
 use super::backend::Backend;
 

@@ -350,7 +350,7 @@ pub(crate) unsafe fn propagate_64_lane<B: Backend>(
 mod tests {
     use super::*;
     use crate::Scoring;
-    use crate::smith_waterman::simd::{Kernel, SmithWaterman, score_fits_in_u8};
+    use crate::smith_waterman::{Kernel, SmithWaterman, score_fits_in_u8};
     use bolero::check;
 
     #[derive(Debug, Clone, Copy)]

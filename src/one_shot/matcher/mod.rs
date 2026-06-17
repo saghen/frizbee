@@ -1,4 +1,4 @@
-use crate::smith_waterman::simd::score_fits_in_u8;
+use crate::smith_waterman::score_fits_in_u8;
 use crate::{Config, Match, MatchIndices};
 
 mod algo;

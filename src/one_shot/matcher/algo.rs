@@ -1,6 +1,6 @@
 use super::Matcher;
 use crate::prefilter::{Kernel as PrefilterKernel, Window};
-use crate::smith_waterman::simd::Kernel as SmithWatermanKernel;
+use crate::smith_waterman::Kernel as SmithWatermanKernel;
 use crate::sort::radix_sort;
 use crate::{Config, Match, MatchIndices};
 
