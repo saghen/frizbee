@@ -14,7 +14,7 @@ fn bench_with_scale(c: &mut Criterion, scale: usize, batch_size: BatchSize) {
         })
         .collect::<Vec<_>>();
 
-    let mut group = c.benchmark_group("sort");
+    let mut group = c.benchmark_group("Sort");
 
     let input = Vec::from(&matches[..scale]);
 

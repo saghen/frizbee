@@ -13,7 +13,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         String::from_utf8(haystack_bytes).expect("Failed to parse chromium benchmark data");
     let haystack = haystack_str.split('\n').collect::<Vec<_>>();
 
-    match_list_bench(c, "Chromium", "linux", &haystack);
+    match_list_bench(c, "Chromium", "linux", &haystack, true);
 
     // Bench on synthetic data
     for (name, (match_percentage, partial_match_percentage)) in [

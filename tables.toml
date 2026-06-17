@@ -5,15 +5,15 @@ You may test these cases yourself via the included benchmarks. Benchmarks were r
 
 ```bash
 $ cargo version -v
-cargo 1.95.0-nightly (fe2f314ae 2026-01-30)
-release: 1.95.0-nightly
-commit-hash: fe2f314aef06e688a9517da1ac0577bb1854d01f
-commit-date: 2026-01-30
+cargo 1.98.0-nightly (0b1123a48 2026-06-01)
+release: 1.98.0-nightly
+commit-hash: 0b1123a48825309b697312b44fdb64b3df00c958
+commit-date: 2026-06-01
 host: x86_64-unknown-linux-gnu
-libgit2: 1.9.2 (sys:0.20.3 vendored)
-libcurl: 8.15.0-DEV (sys:0.4.83+curl-8.15.0 vendored ssl:OpenSSL/3.5.4)
-ssl: OpenSSL 3.5.4 30 Sep 2025
-os: NixOS 26.5.0 [64-bit]
+libgit2: 1.9.4 (sys:0.21.0 vendored)
+libcurl: 8.20.0-DEV (sys:0.4.88+curl-8.20.0 vendored ssl:OpenSSL/3.6.2)
+ssl: OpenSSL 3.6.2 7 Apr 2026
+os: NixOS 26.11.0 (zokor) [64-bit]
 ```
 """
 
@@ -25,9 +25,9 @@ In each of the benchmarks, the median length of the haystacks is varied from 8 t
 - **All Scores**: Set via `max_typos: None`, gets the scores for all of the items without any filtering
 - **1/2 Typos**: Set via `max_typos: Some(1 || 2)`, performs a slower, but still effective prefilter since a small number of typos are allowed
 - **3 Typos**: Set via `max_typos: Some(3)`, skips prefiltering since in non-syntheic data (Chromium), the prefilter has to pass over the data up to 4 times and most items will not be filtered out
-- **Nucleo**: Runs with normalization disabled, case insentivity enabled and fuzzy matching enabled
-
-NOTE: The nucleo parallel benchmark is not included since I haven't discovered a way to ensure the matcher has finished running.
+- **Nucleo**: Runs with normalization disabled, case insensitivity enabled and fuzzy matching enabled
+- **FZF**: Times only the matching part via `fzf --filter linux --tiebreak index --bench 10s --threads 1 < benches/match_list/data.txt`
+- **$BENCH/Parallel (x8)**: Same as $BENCH, but uses 8 threads to perform the matching in parallel
 """
 
 [table_comments]
