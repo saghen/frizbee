@@ -11,6 +11,8 @@ fn bench_with_scale(c: &mut Criterion, scale: usize, batch_size: BatchSize) {
             score: rng.random(),
             index: index as u32,
             exact: rng.random_bool(0.5),
+            #[cfg(feature = "match_end_col")]
+            end_col: 0,
         })
         .collect::<Vec<_>>();
 
