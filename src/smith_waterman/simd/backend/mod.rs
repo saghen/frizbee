@@ -351,7 +351,7 @@ mod tests {
     use super::*;
     use crate::Scoring;
     use crate::smith_waterman::simd::{Kernel, SmithWaterman, score_fits_in_u8};
-    use proptest::prelude::*;
+    use bolero::check;
 
     #[derive(Debug, Clone, Copy)]
     struct TestScalarBytes<const LANES: usize>([u8; LANES]);
@@ -1000,234 +1000,73 @@ mod tests {
 
     // ----- Dispatch -------------------------------------------------------
 
-    macro_rules! backend_tests {
-        ($mod_name:ident, $backend:ty) => {
+    fn check_backend_contract<B: Backend>() {
+        check_bytes_splat::<B>();
+        check_bytes_eq::<B>();
+        check_bytes_gt_lt::<B>();
+        check_mask_and_or_not::<B>();
+        check_mask_zero::<B>();
+        check_bytes_load_partial::<B>();
+        check_mask_shift_right_padded_1::<B>();
+        check_score_zero::<B>();
+        check_score_splat::<B>();
+        check_score_first_lane::<B>();
+        check_score_max_add_subs::<B>();
+        check_score_horizontal_max::<B>();
+        check_score_find_lane::<B>();
+        check_score_shift_right_padded_8::<B>();
+    }
+
+    macro_rules! backend_contract_tests {
+        ($mod_name:ident, $backend:ty $(, $extra:ident)*) => {
             mod $mod_name {
                 use super::*;
 
                 #[test]
-                fn bytes_splat() {
-                    check_bytes_splat::<$backend>();
-                }
-                #[test]
-                fn bytes_eq() {
-                    check_bytes_eq::<$backend>();
-                }
-                #[test]
-                fn bytes_gt_lt() {
-                    check_bytes_gt_lt::<$backend>();
-                }
-                #[test]
-                fn mask_and_or_not() {
-                    check_mask_and_or_not::<$backend>();
-                }
-                #[test]
-                fn mask_zero() {
-                    check_mask_zero::<$backend>();
-                }
-                #[test]
-                fn bytes_load_partial() {
-                    check_bytes_load_partial::<$backend>();
-                }
-                #[test]
-                fn mask_shift_right_padded_1() {
-                    check_mask_shift_right_padded_1::<$backend>();
-                }
-                #[test]
-                fn score_zero() {
-                    check_score_zero::<$backend>();
-                }
-                #[test]
-                fn score_splat() {
-                    check_score_splat::<$backend>();
-                }
-                #[test]
-                fn score_first_lane() {
-                    check_score_first_lane::<$backend>();
-                }
-                #[test]
-                fn score_max_add_subs() {
-                    check_score_max_add_subs::<$backend>();
-                }
-                #[test]
-                fn score_horizontal_max() {
-                    check_score_horizontal_max::<$backend>();
-                }
-                #[test]
-                fn score_find_lane() {
-                    check_score_find_lane::<$backend>();
-                }
-                #[test]
-                fn score_shift_right_padded() {
-                    check_score_shift_right_padded_8::<$backend>();
+                fn backend_contract() {
+                    if !<$backend>::is_available() {
+                        return;
+                    }
+                    check_backend_contract::<$backend>();
+                    $(
+                        $extra::<$backend>();
+                    )*
                 }
             }
         };
     }
 
-    /// Extra coverage for 32-lane backends only (uses L = 16 const).
-    macro_rules! backend_tests_32_lane {
-        ($mod_name:ident, $backend:ty) => {
-            mod $mod_name {
-                use super::*;
-
-                #[test]
-                fn score_shift_right_padded_16() {
-                    check_score_shift_right_padded_16::<$backend>();
-                }
-            }
-        };
-    }
-
-    /// Backend tests gated on `Backend::is_available()` at runtime. Used for
-    /// backends whose required CPU features may not be present in CI
-    /// (notably AVX-512). Tests no-op on machines without the features
-    macro_rules! backend_tests_runtime_gated {
-        ($mod_name:ident, $backend:ty) => {
-            mod $mod_name {
-                use super::*;
-
-                #[inline]
-                fn skip_if_unavailable() -> bool {
-                    !<$backend>::is_available()
-                }
-
-                #[test]
-                fn bytes_splat() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_bytes_splat::<$backend>();
-                }
-                #[test]
-                fn bytes_eq() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_bytes_eq::<$backend>();
-                }
-                #[test]
-                fn bytes_gt_lt() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_bytes_gt_lt::<$backend>();
-                }
-                #[test]
-                fn mask_and_or_not() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_mask_and_or_not::<$backend>();
-                }
-                #[test]
-                fn mask_zero() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_mask_zero::<$backend>();
-                }
-                #[test]
-                fn bytes_load_partial() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_bytes_load_partial::<$backend>();
-                }
-                #[test]
-                fn mask_shift_right_padded_1() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_mask_shift_right_padded_1::<$backend>();
-                }
-                #[test]
-                fn score_zero() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_score_zero::<$backend>();
-                }
-                #[test]
-                fn score_splat() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_score_splat::<$backend>();
-                }
-                #[test]
-                fn score_first_lane() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_score_first_lane::<$backend>();
-                }
-                #[test]
-                fn score_max_add_subs() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_score_max_add_subs::<$backend>();
-                }
-                #[test]
-                fn score_horizontal_max() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_score_horizontal_max::<$backend>();
-                }
-                #[test]
-                fn score_find_lane() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_score_find_lane::<$backend>();
-                }
-                #[test]
-                fn score_shift_right_padded() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_score_shift_right_padded_8::<$backend>();
-                }
-                #[test]
-                fn score_shift_right_padded_16() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_score_shift_right_padded_16::<$backend>();
-                }
-                #[test]
-                fn score_shift_right_padded_32() {
-                    if skip_if_unavailable() {
-                        return;
-                    }
-                    check_score_shift_right_padded_32::<$backend>();
-                }
-            }
-        };
-    }
-
-    backend_tests!(scalar8, super::BackendScalar8);
-    backend_tests!(scalar16_u8, super::BackendScalar16U8);
+    backend_contract_tests!(scalar8, super::BackendScalar8);
+    backend_contract_tests!(scalar16_u8, super::BackendScalar16U8);
     #[cfg(target_arch = "x86_64")]
-    backend_tests!(sse, super::BackendSSE);
+    backend_contract_tests!(sse, super::BackendSSE);
     #[cfg(target_arch = "x86_64")]
-    backend_tests!(sse_u8, super::BackendSSEU8);
+    backend_contract_tests!(sse_u8, super::BackendSSEU8);
     #[cfg(target_arch = "x86_64")]
-    backend_tests!(avx, super::BackendAVX);
+    backend_contract_tests!(avx, super::BackendAVX);
     #[cfg(target_arch = "x86_64")]
-    backend_tests!(avx_u8, super::BackendAVXU8);
+    backend_contract_tests!(
+        avx_u8,
+        super::BackendAVXU8,
+        check_score_shift_right_padded_16
+    );
     #[cfg(target_arch = "x86_64")]
-    backend_tests_32_lane!(avx_u8_extra, super::BackendAVXU8);
+    backend_contract_tests!(
+        avx512,
+        super::BackendAVX512,
+        check_score_shift_right_padded_16
+    );
     #[cfg(target_arch = "x86_64")]
-    backend_tests_runtime_gated!(avx512, super::BackendAVX512);
-    #[cfg(target_arch = "x86_64")]
-    backend_tests_runtime_gated!(avx512_u8, super::BackendAVX512U8);
+    backend_contract_tests!(
+        avx512_u8,
+        super::BackendAVX512U8,
+        check_score_shift_right_padded_16,
+        check_score_shift_right_padded_32
+    );
     #[cfg(target_arch = "aarch64")]
-    backend_tests!(neon, super::BackendNEON);
+    backend_contract_tests!(neon, super::BackendNEON);
     #[cfg(target_arch = "aarch64")]
-    backend_tests!(neon_u8, super::BackendNEONU8);
+    backend_contract_tests!(neon_u8, super::BackendNEONU8);
 
     // ---------------------------------------------------------------
     // Cross-backend parity: every available backend should produce the same
@@ -1375,29 +1214,6 @@ mod tests {
         }
     }
 
-    fn ascii_byte() -> BoxedStrategy<u8> {
-        prop_oneof![
-            b'a'..=b'z',
-            b'A'..=b'Z',
-            b'0'..=b'9',
-            prop::sample::select(b" /.,_-:".to_vec()),
-        ]
-        .boxed()
-    }
-
-    fn byte_vec(max_len: usize) -> BoxedStrategy<Vec<u8>> {
-        let boundary_lengths = [0usize, 1, 7, 8, 15, 16, 31, 32, 63, 64, 511, 512, 513]
-            .into_iter()
-            .filter(move |len| *len <= max_len)
-            .collect::<Vec<_>>();
-        let regular = prop::collection::vec(ascii_byte(), 0..=max_len).boxed();
-        let boundary = prop::sample::select(boundary_lengths)
-            .prop_flat_map(|len| prop::collection::vec(ascii_byte(), len))
-            .boxed();
-
-        prop_oneof![4 => regular, 1 => boundary].boxed()
-    }
-
     fn score_bytes_with<B: Backend>(needle: &[u8], haystack: &[u8], case_sensitive: bool) -> u16 {
         let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), case_sensitive);
         matcher.score_haystack(haystack)
@@ -1413,7 +1229,7 @@ mod tests {
         matcher.match_haystack_indices(haystack, 0, max_typos)
     }
 
-    fn prop_assert_backend<B: Backend>(
+    fn assert_backend<B: Backend>(
         label: &str,
         needle: &[u8],
         haystack: &[u8],
@@ -1421,42 +1237,41 @@ mod tests {
         case_sensitive: bool,
         want_score: u16,
         want_indices_score: Option<u16>,
-    ) -> Result<(), TestCaseError> {
+    ) {
         if B::is_available() {
-            prop_assert_eq!(
+            assert_eq!(
                 score_bytes_with::<B>(needle, haystack, case_sensitive),
                 want_score,
-                "{} score mismatch",
-                label
+                "{label} score mismatch for needle={needle:?} haystack_len={}",
+                haystack.len()
             );
             let indices = indices_bytes_with::<B>(needle, haystack, max_typos, case_sensitive);
-            prop_assert_eq!(
+            assert_eq!(
                 indices.as_ref().map(|(score, _)| *score),
                 want_indices_score,
-                "{} indexed score mismatch",
-                label
+                "{label} indexed score mismatch for needle={needle:?} haystack_len={}",
+                haystack.len()
             );
             if let Some((_, indices)) = indices {
-                prop_assert_indices_valid(label, needle, haystack, &indices)?;
+                assert_indices_valid(label, needle, haystack, &indices);
             }
         }
-        Ok(())
     }
 
-    fn prop_assert_backend_matches_reference<B: Backend, R: Backend>(
+    fn assert_backend_matches_reference<B: Backend, R: Backend>(
         label: &str,
         needle: &[u8],
         haystack: &[u8],
         max_typos: Option<u16>,
         case_sensitive: bool,
-    ) -> Result<(), TestCaseError> {
+    ) {
         if B::is_available() {
             let want_score = score_bytes_with::<R>(needle, haystack, case_sensitive);
             let want_indices_score =
                 indices_bytes_with::<R>(needle, haystack, max_typos, case_sensitive)
                     .as_ref()
                     .map(|(score, _)| *score);
-            prop_assert_backend::<B>(
+            assert_backend::<B>(
                 label,
                 needle,
                 haystack,
@@ -1464,24 +1279,18 @@ mod tests {
                 case_sensitive,
                 want_score,
                 want_indices_score,
-            )?;
+            );
         }
-        Ok(())
     }
 
-    fn prop_assert_indices_valid(
-        label: &str,
-        needle: &[u8],
-        haystack: &[u8],
-        indices: &[usize],
-    ) -> Result<(), TestCaseError> {
-        prop_assert!(
+    fn assert_indices_valid(label: &str, needle: &[u8], haystack: &[u8], indices: &[usize]) {
+        assert!(
             indices.windows(2).all(|window| window[0] > window[1]),
             "{} indices are not in reverse order: {:?}",
             label,
             indices
         );
-        prop_assert!(
+        assert!(
             indices.len() <= needle.len(),
             "{} indices contain more positions than needle bytes: indices={:?} needle_len={}",
             label,
@@ -1489,7 +1298,7 @@ mod tests {
             needle.len()
         );
         for &index in indices {
-            prop_assert!(
+            assert!(
                 index < haystack.len(),
                 "{} index {} is out of bounds for haystack_len={}",
                 label,
@@ -1497,126 +1306,229 @@ mod tests {
                 haystack.len()
             );
         }
-        Ok(())
     }
 
-    fn proptest_config(cases: u32, max_shrink_iters: u32) -> ProptestConfig {
-        let mut config = ProptestConfig {
-            cases,
-            max_shrink_iters,
-            ..ProptestConfig::default()
-        };
-        if cfg!(miri) {
-            config.cases = cases.min(4);
-            config.max_shrink_iters = max_shrink_iters.min(64);
-            config.failure_persistence = None;
+    #[derive(Debug, Clone)]
+    struct BackendCase {
+        needle: Vec<u8>,
+        haystack: Vec<u8>,
+        max_typos: Option<u16>,
+        case_sensitive: bool,
+    }
+
+    impl BackendCase {
+        fn from_bytes(input: &[u8]) -> Self {
+            let mut cursor = ByteCursor::new(input);
+            let needle_len = cursor
+                .len(test_bound(96, 32), &[1, 7, 8, 15, 16, 31, 32, 63, 64])
+                .max(1);
+            let haystack_len = cursor.len(
+                test_bound(768, 128),
+                &[0, 1, 7, 8, 15, 16, 31, 32, 63, 64, 511, 512, 513],
+            );
+            let max_typos = match cursor.next() % 5 {
+                0 => None,
+                byte => Some((byte as u16 - 1) % 17),
+            };
+            let case_sensitive = cursor.bool();
+
+            Self {
+                needle: cursor.bytes(needle_len),
+                haystack: cursor.bytes(haystack_len),
+                max_typos,
+                case_sensitive,
+            }
         }
-        config
     }
 
-    fn proptest_bound(max: usize, miri_max: usize) -> usize {
+    struct ByteCursor<'a> {
+        input: &'a [u8],
+        pos: usize,
+    }
+
+    impl<'a> ByteCursor<'a> {
+        fn new(input: &'a [u8]) -> Self {
+            Self { input, pos: 0 }
+        }
+
+        fn next(&mut self) -> u8 {
+            let byte = if self.input.is_empty() {
+                (self.pos as u8).wrapping_mul(29).wrapping_add(7)
+            } else {
+                self.input[self.pos % self.input.len()]
+                    .wrapping_add(((self.pos / self.input.len()) as u8).wrapping_mul(19))
+            };
+            self.pos += 1;
+            byte
+        }
+
+        fn bool(&mut self) -> bool {
+            self.next() & 1 == 1
+        }
+
+        fn usize(&mut self) -> usize {
+            let mut value = 0usize;
+            for shift in (0..usize::BITS as usize).step_by(8) {
+                value |= (self.next() as usize) << shift;
+            }
+            value
+        }
+
+        fn len(&mut self, max: usize, boundaries: &[usize]) -> usize {
+            if self.next() % 4 == 0 {
+                boundaries[(self.next() as usize) % boundaries.len()].min(max)
+            } else {
+                self.usize() % (max + 1)
+            }
+        }
+
+        fn bytes(&mut self, len: usize) -> Vec<u8> {
+            (0..len).map(|_| self.byte()).collect()
+        }
+
+        fn byte(&mut self) -> u8 {
+            let byte = self.next();
+            match byte % 16 {
+                0 => b'a',
+                1 => b' ',
+                2 => b'/',
+                3 => b'.',
+                4 => b',',
+                5 => b'_',
+                6 => b'-',
+                7 => b':',
+                8..=10 => b'a' + (byte % 26),
+                11..=13 => b'A' + (byte % 26),
+                _ => b'0' + (byte % 10),
+            }
+        }
+    }
+
+    fn test_bound(max: usize, miri_max: usize) -> usize {
         if cfg!(miri) { max.min(miri_max) } else { max }
     }
 
-    proptest! {
-        #![proptest_config(proptest_config(192, 2048))]
+    fn test_iterations(default: usize) -> usize {
+        if cfg!(miri) { default.min(4) } else { default }
+    }
 
-        #[test]
-        fn randomized_cross_backend_parity(
-            needle in byte_vec(proptest_bound(96, 32)),
-            haystack in byte_vec(proptest_bound(768, 128)),
-            max_typos in prop_oneof![Just(None), (0u16..=16).prop_map(Some)],
-            case_sensitive in any::<bool>(),
-        ) {
-            prop_assume!(!needle.is_empty());
-            prop_assume!(!needle.contains(&0) && !haystack.contains(&0));
+    #[test]
+    fn randomized_cross_backend_parity() {
+        if cfg!(miri) {
+            for input in miri_inputs() {
+                let case = BackendCase::from_bytes(input);
+                assert_backend_case(&case);
+            }
+            return;
+        }
 
-            prop_assert_backend_matches_reference::<BackendScalar8, BackendScalar8>(
-                "scalar-u16",
-                &needle,
-                &haystack,
-                max_typos,
-                case_sensitive,
-            )?;
+        check!()
+            .with_iterations(test_iterations(192))
+            .with_max_len(test_bound(2048, 384))
+            .for_each(|input: &[u8]| {
+                let case = BackendCase::from_bytes(input);
+                assert_backend_case(&case);
+            });
+    }
+
+    fn miri_inputs() -> &'static [&'static [u8]] {
+        &[
+            b"",
+            b"abcABC012 /.,_-:",
+            b"lane-boundary-8-16-32-64",
+            b"greedy-511-512-513",
+        ]
+    }
+
+    fn assert_backend_case(case: &BackendCase) {
+        let needle = &case.needle;
+        let haystack = &case.haystack;
+
+        assert_backend_matches_reference::<BackendScalar8, BackendScalar8>(
+            "scalar-u16",
+            needle,
+            haystack,
+            case.max_typos,
+            case.case_sensitive,
+        );
+
+        if score_fits_in_u8(needle.len(), &Scoring::default()) {
+            assert_backend_matches_reference::<BackendScalar16U8, BackendScalar16U8>(
+                "scalar-u8",
+                needle,
+                haystack,
+                case.max_typos,
+                case.case_sensitive,
+            );
+        }
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            assert_backend_matches_reference::<BackendSSE, BackendScalar8>(
+                "SSE-u16",
+                needle,
+                haystack,
+                case.max_typos,
+                case.case_sensitive,
+            );
+            assert_backend_matches_reference::<BackendAVX, TestScalar16>(
+                "AVX-u16",
+                needle,
+                haystack,
+                case.max_typos,
+                case.case_sensitive,
+            );
+            assert_backend_matches_reference::<BackendAVX512, TestScalar32>(
+                "AVX-512-u16",
+                needle,
+                haystack,
+                case.max_typos,
+                case.case_sensitive,
+            );
 
             if score_fits_in_u8(needle.len(), &Scoring::default()) {
-                prop_assert_backend_matches_reference::<BackendScalar16U8, BackendScalar16U8>(
-                    "scalar-u8",
-                    &needle,
-                    &haystack,
-                    max_typos,
-                    case_sensitive,
-                )?;
+                assert_backend_matches_reference::<BackendSSEU8, BackendScalar16U8>(
+                    "SSE-u8",
+                    needle,
+                    haystack,
+                    case.max_typos,
+                    case.case_sensitive,
+                );
+                assert_backend_matches_reference::<BackendAVXU8, TestScalar32U8>(
+                    "AVX-u8",
+                    needle,
+                    haystack,
+                    case.max_typos,
+                    case.case_sensitive,
+                );
+                assert_backend_matches_reference::<BackendAVX512U8, TestScalar64U8>(
+                    "AVX-512-u8",
+                    needle,
+                    haystack,
+                    case.max_typos,
+                    case.case_sensitive,
+                );
             }
+        }
 
-            #[cfg(target_arch = "x86_64")]
-            {
-                prop_assert_backend_matches_reference::<BackendSSE, BackendScalar8>(
-                    "SSE-u16",
-                    &needle,
-                    &haystack,
-                    max_typos,
-                    case_sensitive,
-                )?;
-                prop_assert_backend_matches_reference::<BackendAVX, TestScalar16>(
-                    "AVX-u16",
-                    &needle,
-                    &haystack,
-                    max_typos,
-                    case_sensitive,
-                )?;
-                prop_assert_backend_matches_reference::<BackendAVX512, TestScalar32>(
-                    "AVX-512-u16",
-                    &needle,
-                    &haystack,
-                    max_typos,
-                    case_sensitive,
-                )?;
+        #[cfg(target_arch = "aarch64")]
+        {
+            assert_backend_matches_reference::<BackendNEON, BackendScalar8>(
+                "NEON-u16",
+                needle,
+                haystack,
+                case.max_typos,
+                case.case_sensitive,
+            );
 
-                if score_fits_in_u8(needle.len(), &Scoring::default()) {
-                    prop_assert_backend_matches_reference::<BackendSSEU8, BackendScalar16U8>(
-                        "SSE-u8",
-                        &needle,
-                        &haystack,
-                        max_typos,
-                        case_sensitive,
-                    )?;
-                    prop_assert_backend_matches_reference::<BackendAVXU8, TestScalar32U8>(
-                        "AVX-u8",
-                        &needle,
-                        &haystack,
-                        max_typos,
-                        case_sensitive,
-                    )?;
-                    prop_assert_backend_matches_reference::<BackendAVX512U8, TestScalar64U8>(
-                        "AVX-512-u8",
-                        &needle,
-                        &haystack,
-                        max_typos,
-                        case_sensitive,
-                    )?;
-                }
-            }
-
-            #[cfg(target_arch = "aarch64")]
-            {
-                prop_assert_backend_matches_reference::<BackendNEON, BackendScalar8>(
-                    "NEON-u16",
-                    &needle,
-                    &haystack,
-                    max_typos,
-                    case_sensitive,
-                )?;
-
-                if score_fits_in_u8(needle.len(), &Scoring::default()) {
-                    prop_assert_backend_matches_reference::<BackendNEONU8, BackendScalar16U8>(
-                        "NEON-u8",
-                        &needle,
-                        &haystack,
-                        max_typos,
-                        case_sensitive,
-                    )?;
-                }
+            if score_fits_in_u8(needle.len(), &Scoring::default()) {
+                assert_backend_matches_reference::<BackendNEONU8, BackendScalar16U8>(
+                    "NEON-u8",
+                    needle,
+                    haystack,
+                    case.max_typos,
+                    case.case_sensitive,
+                );
             }
         }
     }

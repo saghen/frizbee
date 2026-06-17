@@ -84,7 +84,7 @@ impl<B: Backend> Kernel for Prefilter<B> {
 #[cfg(test)]
 mod tests {
     use super::{Kernel, Window, backend::PrefilterScalar};
-    use proptest::prelude::*;
+    use bolero::check;
 
     fn result(needle: &str, haystack: &str, max_typos: u16) -> (bool, usize, usize) {
         result_generic(needle, haystack, max_typos)
@@ -126,6 +126,11 @@ mod tests {
     #[test]
     fn typo_matching_cases() {
         for (needle, haystack, max_typos, want) in [
+            ("abc", "", 2, false),
+            ("abc", "", 3, true),
+            ("abc", "bc", 1, true),
+            ("abc", "ac", 1, true),
+            ("abc", "ab", 1, true),
             ("bar", "ba", 1, true),
             ("bar", "ar", 1, true),
             ("hello", "hll", 2, true),
@@ -141,7 +146,12 @@ mod tests {
             ("bar", "rb", 1, false),
             ("abcdef", "fcda", 2, false),
             ("TeSt", "ES", 1, false),
-            ("abc", "", 2, false),
+            ("abc", "cba", 1, false),
+            ("abc", "cba", 2, true),
+            ("aaa", "aa", 0, false),
+            ("aaa", "aa", 1, true),
+            ("aba", "aa", 1, true),
+            ("aaba", "aba", 1, true),
         ] {
             assert_eq!(
                 matched(needle, haystack, max_typos),
@@ -161,6 +171,9 @@ mod tests {
             ("abc", "xAxBxCx", 0, false),
             ("TeSt", "eS", 2, true),
             ("TeSt", "ES", 2, false),
+            ("Ab", "b", 1, true),
+            ("Ab", "ab", 0, false),
+            ("Ab", "ab", 1, true),
         ] {
             assert_eq!(
                 matched_sensitive(needle, haystack, max_typos),
@@ -197,8 +210,83 @@ mod tests {
             ("abcdefghij", "abxxcxxdxxe", 5),
             ("abcdefghij", "jihgfedcba", 5),
             ("abcdefghij", "abc", 8),
+            ("abcdefghijklmnop", "abcxxxdefxxxghixxxjklxxxmnop", 4),
+            ("abcdefghijklmnop", "ponmlkjihgfedcba", 10),
         ] {
             result_generic(needle, haystack, max_typos);
+        }
+    }
+
+    #[test]
+    fn reference_oracle_manual_cases() {
+        for (needle, haystack, max_typos, case_sensitive, want) in [
+            (b"abc".as_slice(), b"".as_slice(), 2, false, false),
+            (b"abc".as_slice(), b"".as_slice(), 3, false, true),
+            (b"abc".as_slice(), b"bc".as_slice(), 1, false, true),
+            (b"abc".as_slice(), b"ac".as_slice(), 1, false, true),
+            (b"abc".as_slice(), b"ab".as_slice(), 1, false, true),
+            (b"abc".as_slice(), b"cba".as_slice(), 2, false, true),
+            (b"aaa".as_slice(), b"aa".as_slice(), 1, false, true),
+            (b"aba".as_slice(), b"aa".as_slice(), 1, false, true),
+            (b"Ab".as_slice(), b"ab".as_slice(), 0, false, true),
+            (b"Ab".as_slice(), b"ab".as_slice(), 0, true, false),
+            (b"A\0b".as_slice(), b"a\0b".as_slice(), 0, false, true),
+            (b"A\0b".as_slice(), b"a\0b".as_slice(), 0, true, false),
+            (&[0x80, b'a'], &[0x80, b'_', b'a'], 0, false, true),
+            (&[0xff, b'A'], &[0xff, b'a'], 0, false, true),
+            (&[0xff, b'A'], &[0xff, b'a'], 0, true, false),
+        ] {
+            let oracle = reference_matches_by_deleting_needle_bytes(
+                needle,
+                haystack,
+                max_typos,
+                case_sensitive,
+            );
+            assert_eq!(
+                oracle, want,
+                "oracle mismatch needle={needle:?} haystack={haystack:?} max_typos={max_typos} case_sensitive={case_sensitive}"
+            );
+
+            let case = PrefilterCase {
+                needle: needle.to_vec(),
+                haystack: haystack.to_vec(),
+                max_typos,
+                case_sensitive,
+            };
+            assert_case_matches_oracle(&case);
+        }
+    }
+
+    #[test]
+    fn reference_oracle_chunk_boundaries() {
+        for prefix_len in [0usize, 1, 7, 8, 15, 16, 31, 32, 63, 64] {
+            let mut haystack = vec![b'x'; prefix_len];
+            haystack.extend_from_slice(b"abc");
+
+            for (needle, max_typos, want) in [
+                (b"abc".as_slice(), 0, true),
+                (b"ac".as_slice(), 0, true),
+                (b"abcd".as_slice(), 0, false),
+                (b"abcd".as_slice(), 1, true),
+            ] {
+                let case = PrefilterCase {
+                    needle: needle.to_vec(),
+                    haystack: haystack.clone(),
+                    max_typos,
+                    case_sensitive: false,
+                };
+                assert_eq!(
+                    reference_matches_by_deleting_needle_bytes(
+                        &case.needle,
+                        &case.haystack,
+                        case.max_typos,
+                        case.case_sensitive,
+                    ),
+                    want,
+                    "prefix_len={prefix_len} needle={needle:?} max_typos={max_typos}"
+                );
+                assert_case_matches_oracle(&case);
+            }
         }
     }
 
@@ -257,135 +345,264 @@ mod tests {
         }
     }
 
-    fn ascii_byte() -> BoxedStrategy<u8> {
-        prop_oneof![
-            b'a'..=b'z',
-            b'A'..=b'Z',
-            b'0'..=b'9',
-            prop::sample::select(b" /.,_-:".to_vec()),
-        ]
-        .boxed()
+    #[derive(Debug, Clone)]
+    struct PrefilterCase {
+        needle: Vec<u8>,
+        haystack: Vec<u8>,
+        max_typos: u16,
+        case_sensitive: bool,
     }
 
-    fn byte_vec(max_len: usize) -> BoxedStrategy<Vec<u8>> {
-        let boundary_lengths = [0usize, 1, 7, 8, 15, 16, 31, 32, 63, 64, 511, 512, 513]
-            .into_iter()
-            .filter(move |len| *len <= max_len)
-            .collect::<Vec<_>>();
-        let regular = prop::collection::vec(ascii_byte(), 0..=max_len).boxed();
-        let boundary = prop::sample::select(boundary_lengths)
-            .prop_flat_map(|len| prop::collection::vec(ascii_byte(), len))
-            .boxed();
+    impl PrefilterCase {
+        fn from_bytes(input: &[u8]) -> Self {
+            let mut cursor = ByteCursor::new(input);
+            let needle_len = cursor
+                .len(test_bound(96, 32), &[1, 7, 8, 15, 16, 31, 32, 63, 64])
+                .max(1);
+            let haystack_len = cursor.len(
+                test_bound(768, 128),
+                &[0, 1, 7, 8, 15, 16, 31, 32, 63, 64, 511, 512, 513],
+            );
+            let max_typos = (cursor.next() as u16) % 17;
+            let case_sensitive = cursor.bool();
 
-        prop_oneof![4 => regular, 1 => boundary].boxed()
-    }
-
-    fn proptest_config(cases: u32, max_shrink_iters: u32) -> ProptestConfig {
-        let mut config = ProptestConfig {
-            cases,
-            max_shrink_iters,
-            ..ProptestConfig::default()
-        };
-        if cfg!(miri) {
-            config.cases = cases.min(4);
-            config.max_shrink_iters = max_shrink_iters.min(64);
-            config.failure_persistence = None;
+            Self {
+                needle: cursor.bytes(needle_len),
+                haystack: cursor.bytes(haystack_len),
+                max_typos,
+                case_sensitive,
+            }
         }
-        config
     }
 
-    fn proptest_bound(max: usize, miri_max: usize) -> usize {
+    struct ByteCursor<'a> {
+        input: &'a [u8],
+        pos: usize,
+    }
+
+    impl<'a> ByteCursor<'a> {
+        fn new(input: &'a [u8]) -> Self {
+            Self { input, pos: 0 }
+        }
+
+        fn next(&mut self) -> u8 {
+            let byte = if self.input.is_empty() {
+                (self.pos as u8).wrapping_mul(37).wrapping_add(11)
+            } else {
+                self.input[self.pos % self.input.len()]
+                    .wrapping_add(((self.pos / self.input.len()) as u8).wrapping_mul(17))
+            };
+            self.pos += 1;
+            byte
+        }
+
+        fn bool(&mut self) -> bool {
+            self.next() & 1 == 1
+        }
+
+        fn usize(&mut self) -> usize {
+            let mut value = 0usize;
+            for shift in (0..usize::BITS as usize).step_by(8) {
+                value |= (self.next() as usize) << shift;
+            }
+            value
+        }
+
+        fn len(&mut self, max: usize, boundaries: &[usize]) -> usize {
+            if self.next() % 4 == 0 {
+                boundaries[(self.next() as usize) % boundaries.len()].min(max)
+            } else {
+                self.usize() % (max + 1)
+            }
+        }
+
+        fn bytes(&mut self, len: usize) -> Vec<u8> {
+            (0..len).map(|_| self.byte()).collect()
+        }
+
+        fn byte(&mut self) -> u8 {
+            let byte = self.next();
+            match byte % 18 {
+                0 => 0,
+                1 => b' ',
+                2 => b'/',
+                3 => b'.',
+                4 => b',',
+                5 => b'_',
+                6 => b'-',
+                7 => b':',
+                8..=10 => b'a' + (byte % 26),
+                11..=13 => b'A' + (byte % 26),
+                14..=15 => b'0' + (byte % 10),
+                16 => 0x80 | (byte & 0x3f),
+                _ => byte,
+            }
+        }
+    }
+
+    fn test_bound(max: usize, miri_max: usize) -> usize {
         if cfg!(miri) { max.min(miri_max) } else { max }
     }
 
-    proptest! {
-        #![proptest_config(proptest_config(256, 2048))]
+    fn test_iterations(default: usize) -> usize {
+        if cfg!(miri) { default.min(4) } else { default }
+    }
 
-        #[test]
-        fn randomized_backend_parity_and_oracle(
-            needle in byte_vec(proptest_bound(96, 32)),
-            haystack in byte_vec(proptest_bound(768, 128)),
-            max_typos in 0u16..=16,
-            case_sensitive in any::<bool>(),
-        ) {
-            prop_assume!(!needle.is_empty());
-            prop_assume!(!needle.contains(&0) && !haystack.contains(&0));
+    #[test]
+    fn randomized_backend_parity_and_oracle() {
+        if cfg!(miri) {
+            for input in miri_inputs() {
+                let case = PrefilterCase::from_bytes(input);
+                assert_case_matches_oracle(&case);
+            }
+            return;
+        }
 
-            let scalar_result =
-                kernel_result::<PrefilterScalar>(&needle, &haystack, max_typos, case_sensitive);
-            prop_assert_valid_window(scalar_result, &haystack, "Scalar")?;
+        check!()
+            .with_iterations(test_iterations(256))
+            .with_max_len(test_bound(2048, 384))
+            .for_each(|input: &[u8]| {
+                let case = PrefilterCase::from_bytes(input);
+                assert_case_matches_oracle(&case);
+            });
+    }
 
-            #[cfg(target_arch = "x86_64")]
-            {
-                use crate::prefilter::backend::{PrefilterAVX, PrefilterAVX512, PrefilterSSE};
+    fn miri_inputs() -> &'static [&'static [u8]] {
+        &[b"", b"\0", b"abcABC012 /.,_-:", b"\xff\x80\0needlehaystack"]
+    }
 
-                if PrefilterSSE::is_available() {
-                    let sse_result =
-                        kernel_result::<PrefilterSSE>(&needle, &haystack, max_typos, case_sensitive);
-                    prop_assert_same_result(sse_result, scalar_result, "SSE")?;
-                    prop_assert_valid_window(sse_result, &haystack, "SSE")?;
-                }
+    fn assert_case_matches_oracle(case: &PrefilterCase) {
+        let scalar_result = kernel_result::<PrefilterScalar>(
+            &case.needle,
+            &case.haystack,
+            case.max_typos,
+            case.case_sensitive,
+        );
+        let oracle = reference_matches_by_deleting_needle_bytes(
+            &case.needle,
+            &case.haystack,
+            case.max_typos,
+            case.case_sensitive,
+        );
+        assert_eq!(
+            scalar_result.0, oracle,
+            "scalar/oracle mismatch for {case:?}"
+        );
+        assert_valid_window(scalar_result, &case.haystack, "Scalar", case);
 
-                if PrefilterAVX::is_available() {
-                    let avx_result =
-                        kernel_result::<PrefilterAVX>(&needle, &haystack, max_typos, case_sensitive);
-                    prop_assert_same_result(avx_result, scalar_result, "AVX2")?;
-                    prop_assert_valid_window(avx_result, &haystack, "AVX2")?;
-                }
+        #[cfg(target_arch = "x86_64")]
+        {
+            use crate::prefilter::backend::{PrefilterAVX, PrefilterAVX512, PrefilterSSE};
 
-                if PrefilterAVX512::is_available() {
-                    let avx512_result =
-                        kernel_result::<PrefilterAVX512>(&needle, &haystack, max_typos, case_sensitive);
-                    prop_assert_same_result(avx512_result, scalar_result, "AVX-512")?;
-                    prop_assert_valid_window(avx512_result, &haystack, "AVX-512")?;
-                }
+            if PrefilterSSE::is_available() {
+                let result = kernel_result::<PrefilterSSE>(
+                    &case.needle,
+                    &case.haystack,
+                    case.max_typos,
+                    case.case_sensitive,
+                );
+                assert_same_case_result(result, scalar_result, "SSE", case);
+                assert_valid_window(result, &case.haystack, "SSE", case);
             }
 
-            #[cfg(target_arch = "aarch64")]
-            {
-                use crate::prefilter::backend::PrefilterNEON;
+            if PrefilterAVX::is_available() {
+                let result = kernel_result::<PrefilterAVX>(
+                    &case.needle,
+                    &case.haystack,
+                    case.max_typos,
+                    case.case_sensitive,
+                );
+                assert_same_case_result(result, scalar_result, "AVX2", case);
+                assert_valid_window(result, &case.haystack, "AVX2", case);
+            }
 
-                let neon_result =
-                    kernel_result::<PrefilterNEON>(&needle, &haystack, max_typos, case_sensitive);
-                prop_assert_same_result(neon_result, scalar_result, "NEON")?;
-                prop_assert_valid_window(
-                    neon_result,
-                    &needle,
-                    &haystack,
-                    max_typos,
-                    case_sensitive,
-                    "NEON",
-                )?;
+            if PrefilterAVX512::is_available() {
+                let result = kernel_result::<PrefilterAVX512>(
+                    &case.needle,
+                    &case.haystack,
+                    case.max_typos,
+                    case.case_sensitive,
+                );
+                assert_same_case_result(result, scalar_result, "AVX-512", case);
+                assert_valid_window(result, &case.haystack, "AVX-512", case);
+            }
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            use crate::prefilter::backend::PrefilterNEON;
+
+            if PrefilterNEON::is_available() {
+                let result = kernel_result::<PrefilterNEON>(
+                    &case.needle,
+                    &case.haystack,
+                    case.max_typos,
+                    case.case_sensitive,
+                );
+                assert_same_case_result(result, scalar_result, "NEON", case);
+                assert_valid_window(result, &case.haystack, "NEON", case);
             }
         }
     }
 
-    fn prop_assert_valid_window(
+    fn reference_matches_by_deleting_needle_bytes(
+        needle: &[u8],
+        haystack: &[u8],
+        max_typos: u16,
+        case_sensitive: bool,
+    ) -> bool {
+        if max_typos as usize >= needle.len() {
+            return true;
+        }
+
+        longest_common_subsequence_len(needle, haystack, case_sensitive) + max_typos as usize
+            >= needle.len()
+    }
+
+    fn longest_common_subsequence_len(
+        needle: &[u8],
+        haystack: &[u8],
+        case_sensitive: bool,
+    ) -> usize {
+        let mut previous = vec![0usize; haystack.len() + 1];
+        let mut current = vec![0usize; haystack.len() + 1];
+        for &needle_byte in needle {
+            current[0] = 0;
+            for (idx, &haystack_byte) in haystack.iter().enumerate() {
+                current[idx + 1] = if bytes_match(needle_byte, haystack_byte, case_sensitive) {
+                    previous[idx] + 1
+                } else {
+                    previous[idx + 1].max(current[idx])
+                };
+            }
+            std::mem::swap(&mut previous, &mut current);
+        }
+
+        previous[haystack.len()]
+    }
+
+    fn bytes_match(needle: u8, haystack: u8, case_sensitive: bool) -> bool {
+        needle == haystack || (!case_sensitive && needle.eq_ignore_ascii_case(&haystack))
+    }
+
+    fn assert_valid_window(
         result: (bool, usize, usize),
         haystack: &[u8],
         context: &str,
-    ) -> Result<(), TestCaseError> {
+        case: &PrefilterCase,
+    ) {
         if !result.0 {
-            return Ok(());
+            return;
         }
 
-        prop_assert!(
+        assert!(
             result.1 <= result.2 && result.2 <= haystack.len(),
-            "{} returned invalid window {:?} for haystack_len={}",
+            "{} returned invalid window {:?} for haystack_len={} case={:?}",
             context,
             result,
-            haystack.len()
+            haystack.len(),
+            case
         );
-        Ok(())
-    }
-
-    fn prop_assert_same_result(
-        got: (bool, usize, usize),
-        want: (bool, usize, usize),
-        context: &str,
-    ) -> Result<(), TestCaseError> {
-        prop_assert_eq!(got.0, want.0, "{}", context);
-        Ok(())
     }
 
     fn assert_same_result(got: (bool, usize, usize), want: (bool, usize, usize), context: &str) {
@@ -393,6 +610,19 @@ mod tests {
             assert_eq!(got, want, "{context}");
         } else {
             assert_eq!(got.0, want.0, "{context}");
+        }
+    }
+
+    fn assert_same_case_result(
+        got: (bool, usize, usize),
+        want: (bool, usize, usize),
+        context: &str,
+        case: &PrefilterCase,
+    ) {
+        if want.0 {
+            assert_eq!(got, want, "{context} mismatch for {case:?}");
+        } else {
+            assert_eq!(got.0, want.0, "{context} mismatch for {case:?}");
         }
     }
 }

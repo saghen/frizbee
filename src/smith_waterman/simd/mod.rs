@@ -96,8 +96,20 @@ mod tests {
     }
 
     fn get_score_typos(needle: &str, haystack: &str, max_typos: u16) -> Option<u16> {
-        let mut matcher =
-            SmithWaterman::<BackendScalar8>::new(needle.as_bytes(), &Scoring::default(), false);
+        get_score_typos_case(needle, haystack, max_typos, false)
+    }
+
+    fn get_score_typos_case(
+        needle: &str,
+        haystack: &str,
+        max_typos: u16,
+        case_sensitive: bool,
+    ) -> Option<u16> {
+        let mut matcher = SmithWaterman::<BackendScalar8>::new(
+            needle.as_bytes(),
+            &Scoring::default(),
+            case_sensitive,
+        );
 
         matcher.match_haystack(haystack.as_bytes(), Some(max_typos))
     }
@@ -197,6 +209,49 @@ mod tests {
         assert!(get_score("fo", "foo") > get_score("fo", "faOo"));
     }
 
+    #[test]
+    fn tie_prone_alignment_indices_are_stable() {
+        assert_eq!(get_indices("aa", "aaa"), Some(vec![1, 0]));
+        assert_eq!(get_indices("ab", "abab"), Some(vec![1, 0]));
+        assert_eq!(get_indices("abc", "xabcabc"), Some(vec![3, 2, 1]));
+    }
+
+    #[test]
+    fn typo_threshold_distinguishes_mismatch_deletion_and_haystack_gap() {
+        assert_eq!(get_score_typos("abc", "axc", 0), None);
+        assert!(get_score_typos("abc", "axc", 1).is_some());
+
+        assert_eq!(get_score_typos("abc", "ac", 0), None);
+        assert!(get_score_typos("abc", "ac", 1).is_some());
+
+        assert!(get_score_typos("abc", "abbc", 0).is_some());
+    }
+
+    #[test]
+    fn one_long_gap_beats_repeated_gap_opens() {
+        assert!(get_score("abc", "a111bc") > get_score("abc", "a1b1c"));
+    }
+
+    #[test]
+    fn bonus_precedence_manual_cases() {
+        assert!(get_score("b", "b") > get_score("b", "a-b"));
+        assert!(get_score("b", "a-b") > get_score("b", "ab"));
+        assert!(get_score("B", "aB") > get_score("b", "aB"));
+    }
+
+    #[test]
+    fn case_sensitive_scoring_rejects_folded_bytes() {
+        assert_eq!(
+            get_score_typos_case("A", "A", 0, true),
+            Some(CHAR_SCORE + PREFIX_BONUS)
+        );
+        assert_eq!(get_score_typos_case("A", "a", 0, true), None);
+        assert_eq!(
+            get_score_typos_case("A", "a", 0, false),
+            Some(MATCH_SCORE + PREFIX_BONUS)
+        );
+    }
+
     #[cfg(feature = "match_end_col")]
     fn get_end_col(needle: &str, haystack: &str) -> u16 {
         let mut matcher =
@@ -220,6 +275,15 @@ mod tests {
     fn long_input_end_col_uses_original_haystack_offsets() {
         let haystack = format!("{}abc", "x".repeat(510));
         assert_eq!(get_end_col("abc", &haystack), 512);
+    }
+
+    #[test]
+    #[cfg(feature = "match_end_col")]
+    fn long_input_boundary_end_cols_cover_matrix_and_greedy() {
+        for (prefix_len, want) in [(509usize, 511u16), (510, 512)] {
+            let haystack = format!("{}abc", "x".repeat(prefix_len));
+            assert_eq!(get_end_col("abc", &haystack), want);
+        }
     }
 
     #[test]
@@ -258,7 +322,7 @@ mod tests {
     fn long_input_boundary_indices_stay_reverse_ordered() {
         for len in [511usize, 512, 513] {
             let haystack = format!("{}abc", "x".repeat(len - 3));
-            assert!(get_score("abc", &haystack) > 0, "len={len}");
+            assert_eq!(get_score("abc", &haystack), 3 * CHAR_SCORE, "len={len}");
             assert_eq!(
                 get_indices("abc", &haystack),
                 Some(vec![len - 1, len - 2, len - 3]),
