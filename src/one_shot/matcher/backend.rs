@@ -86,6 +86,27 @@ macro_rules! impl_matcher_entrypoints {
 
             #[inline]
             $(#[target_feature(enable = $feature)])?
+            pub unsafe fn match_indexed_list<S: AsRef<str>>(
+                &mut self,
+                haystacks: &[S],
+                indices: impl Iterator<Item = u32>,
+            ) -> Vec<Match> {
+                self.match_indexed_list_impl(haystacks, indices)
+            }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
+            pub unsafe fn match_indexed_list_into<S: AsRef<str>>(
+                &mut self,
+                haystacks: &[S],
+                indices: impl Iterator<Item = u32>,
+                matches: &mut Vec<Match>,
+            ) {
+                self.match_indexed_list_into_impl(haystacks, indices, matches)
+            }
+
+            #[inline]
+            $(#[target_feature(enable = $feature)])?
             pub unsafe fn match_list_indices<S: AsRef<str>>(
                 &mut self,
                 haystacks: &[S],

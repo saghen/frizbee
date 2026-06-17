@@ -60,11 +60,21 @@ impl Matcher {
         unsafe { dispatch!(&mut self.backend, matcher => matcher.match_list(haystacks)) }
     }
 
+    pub fn match_indexed_list<S: AsRef<str>>(
+        &mut self,
+        haystacks: &[S],
+        indices: impl Iterator<Item = u32>,
+    ) -> Vec<Match> {
+        unsafe {
+            dispatch!(&mut self.backend, matcher => matcher.match_indexed_list(haystacks, indices))
+        }
+    }
+
     pub fn match_list_indices<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<MatchIndices> {
         unsafe { dispatch!(&mut self.backend, matcher => matcher.match_list_indices(haystacks)) }
     }
 
-    pub(super) fn match_list_into<S: AsRef<str>>(
+    pub fn match_list_into<S: AsRef<str>>(
         &mut self,
         haystacks: &[S],
         haystack_index_offset: u32,
@@ -75,6 +85,42 @@ impl Matcher {
                 matcher.match_list_into(haystacks, haystack_index_offset, matches)
             })
         }
+    }
+
+    pub fn match_indexed_list_into<S: AsRef<str>>(
+        &mut self,
+        haystacks: &[S],
+        indices: impl Iterator<Item = u32>,
+        matches: &mut Vec<Match>,
+    ) {
+        unsafe {
+            dispatch!(&mut self.backend, matcher => {
+                matcher.match_indexed_list_into(haystacks, indices, matches)
+            })
+        }
+    }
+
+    pub fn match_list_indices_into<S: AsRef<str>>(
+        &mut self,
+        haystacks: &[S],
+        haystack_index_offset: u32,
+        matches: &mut Vec<MatchIndices>,
+    ) {
+        Self::guard_against_haystack_overflow(haystacks.len(), haystack_index_offset);
+
+        if self.needle.is_empty() {
+            matches.extend(
+                (0..haystacks.len())
+                    .map(|index| MatchIndices::from_index(index + haystack_index_offset as usize)),
+            );
+            return;
+        }
+
+        let mut new_matches = self.match_list_indices(haystacks);
+        for match_ in &mut new_matches {
+            match_.index += haystack_index_offset;
+        }
+        matches.extend(new_matches);
     }
 
     #[inline(always)]

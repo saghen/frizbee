@@ -24,6 +24,10 @@ harness = false
 name = "sort"
 harness = false
 
+[[bench]]
+name = "incremental"
+harness = false
+
 [lib]
 bench = false
 

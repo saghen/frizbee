@@ -111,20 +111,20 @@ impl<'a> Iterator for AlignmentPathIter<'a> {
             return None;
         }
 
-        if let Some(max_typos) = self.max_typos
-            && self.typo_count > max_typos
-        {
-            self.finished = true;
-            return Some(None);
+        if let Some(max_typos) = self.max_typos {
+            if self.typo_count > max_typos {
+                self.finished = true;
+                return Some(None);
+            }
         }
 
         // Must be moving up only (at left edge), or lost alignment
         if self.col_idx < self.lanes_per_chunk || self.score == 0 {
-            if let Some(max_typos) = self.max_typos
-                && (self.typo_count + self.row_idx as u16) > max_typos
-            {
-                self.finished = true;
-                return Some(None);
+            if let Some(max_typos) = self.max_typos {
+                if (self.typo_count + self.row_idx as u16) > max_typos {
+                    self.finished = true;
+                    return Some(None);
+                }
             }
             return None;
         }
