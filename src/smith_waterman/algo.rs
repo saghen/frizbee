@@ -90,7 +90,10 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
                     }
                 }
                 Some(_) => {}
-                None => return None,
+                // TODO: it's possible for us to lose alignment due to score == 0
+                // but to stay consistent with results of `match_list`, we simply
+                // don't return the full list of indices
+                None => break,
             }
         }
 
