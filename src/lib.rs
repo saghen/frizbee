@@ -43,6 +43,9 @@ use std::cmp::Ordering;
 use serde::{Deserialize, Serialize};
 
 mod r#const;
+#[cfg(any(test, feature = "fuzzing"))]
+#[doc(hidden)]
+pub mod fuzz_support;
 mod k_merge;
 mod one_shot;
 mod prefilter;

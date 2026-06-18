@@ -29,7 +29,11 @@
       in
       {
         devShells.default = pkgs.mkShell {
-          packages = [ toolchainWithTargets ];
+          packages = with pkgs; [
+            toolchainWithTargets
+            aflplusplus
+            cargo-bolero
+          ];
         };
       }
     );

@@ -60,7 +60,7 @@ use matrix::Matrix;
 mod algo;
 mod alignment;
 mod alignment_iter;
-mod backend;
+pub(crate) mod backend;
 mod greedy;
 mod matrix;
 
