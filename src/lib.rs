@@ -51,6 +51,11 @@ mod one_shot;
 mod prefilter;
 mod smith_waterman;
 pub mod sort;
+#[cfg(feature = "benching")]
+#[doc(hidden)]
+pub mod unicode;
+#[cfg(not(feature = "benching"))]
+mod unicode;
 
 pub use k_merge::k_merge;
 pub use one_shot::{Matcher, match_list, match_list_indices, match_list_parallel};

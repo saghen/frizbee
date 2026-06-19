@@ -20,6 +20,7 @@ criterion = "0.8"
 nucleo = "0.5.0"
 rand = "0.10"
 rand_distr = "0.6"
+simdutf = "0.7.0"
 
 [[bench]]
 name = "lib"
@@ -28,6 +29,11 @@ harness = false
 [[bench]]
 name = "sort"
 harness = false
+
+[[bench]]
+name = "unicode"
+harness = false
+required-features = ["benching"]
 
 [[test]]
 name = "fuzz_api_equivalence"
@@ -53,6 +59,12 @@ path = "fuzz/targets/smith_waterman.rs"
 harness = false
 required-features = ["fuzzing"]
 
+[[test]]
+name = "fuzz_unicode"
+path = "fuzz/targets/unicode.rs"
+harness = false
+required-features = ["fuzzing"]
+
 [lib]
 bench = false
 
@@ -61,6 +73,7 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 
 [features]
 serde = ["dep:serde"]
+benching = []
 match_end_col = []
 safe_read = []
 fuzzing = []

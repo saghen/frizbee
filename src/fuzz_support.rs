@@ -776,6 +776,33 @@ fn assert_indices_valid(label: &str, needle: &[u8], haystack: &[u8], indices: &[
     }
 }
 
+pub fn assert_unicode(input: &[u8]) {
+    let mut cursor = ByteCursor::new(input);
+    let len = cursor.len(
+        512,
+        &[
+            0, 1, 2, 3, 4, 7, 8, 15, 16, 31, 32, 63, 64, 127, 128, 255, 256,
+        ],
+    );
+    let text = cursor.unicode_string(len);
+    let want = text.chars().map(|c| c as u32).collect::<Vec<_>>();
+
+    let mut unicode = crate::unicode::Unicode::new();
+    let got = unicode.prepare(&text);
+    assert_eq!(got, want.as_slice(), "runtime Unicode conversion mismatch");
+
+    let mut scalar = crate::unicode::Unicode::new_scalar();
+    let scalar = scalar.prepare(&text);
+    assert_eq!(
+        scalar,
+        want.as_slice(),
+        "scalar Unicode conversion mismatch"
+    );
+
+    assert_eq!(unicode.prepare(&text), want.as_slice());
+    assert_eq!(unicode.needs_unicode(&text), !text.is_ascii());
+}
+
 struct ByteCursor<'a> {
     input: &'a [u8],
     pos: usize,
@@ -821,6 +848,10 @@ impl<'a> ByteCursor<'a> {
         (0..len).map(|_| self.char()).collect()
     }
 
+    fn unicode_string(&mut self, len: usize) -> String {
+        (0..len).map(|_| self.unicode_char()).collect()
+    }
+
     fn char(&mut self) -> char {
         let byte = self.next();
         match byte % 18 {
@@ -835,6 +866,33 @@ impl<'a> ByteCursor<'a> {
             8..=11 => (b'a' + (byte % 26)) as char,
             12..=15 => (b'A' + (byte % 26)) as char,
             _ => (b'0' + (byte % 10)) as char,
+        }
+    }
+
+    fn unicode_char(&mut self) -> char {
+        let byte = self.next();
+        match byte % 24 {
+            0 => '\0',
+            1 => ' ',
+            2 => '/',
+            3 => '.',
+            4 => ',',
+            5 => '_',
+            6 => '-',
+            7 => ':',
+            8..=10 => (b'a' + (byte % 26)) as char,
+            11..=12 => (b'A' + (byte % 26)) as char,
+            13 => (b'0' + (byte % 10)) as char,
+            14 => '\u{e9}',
+            15 => '\u{df}',
+            16 => '\u{416}',
+            17 => '\u{3a9}',
+            18 => '\u{4e2d}',
+            19 => '\u{6771}',
+            20 => '\u{301}',
+            21 => '\u{1f600}',
+            22 => '\u{1f680}',
+            _ => '\u{1f4a1}',
         }
     }
 
