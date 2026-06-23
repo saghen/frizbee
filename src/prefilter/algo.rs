@@ -1,6 +1,7 @@
-use crate::prefilter::{
+use super::{
+    UnicodeChar,
     backend::{Backend, BitMaskOps},
-    case_needle,
+    case_needle, case_needle_unicode,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -11,7 +12,8 @@ pub(crate) struct PathState<M> {
 
 #[derive(Debug, Clone)]
 pub(crate) struct Prefilter<B: Backend> {
-    needle: Vec<B::Needle>,
+    needle_ascii: Vec<(B::Chunk, B::Chunk)>,
+    needle_unicode: Vec<UnicodeChar<B::Chunk>>,
     paths: Vec<PathState<B::Mask>>,
 }
 
@@ -19,20 +21,26 @@ impl<B: Backend> Prefilter<B> {
     /// # Safety
     /// The backend's target features must be enabled.
     #[inline(always)]
-    pub unsafe fn new(needle: &[u8], case_sensitive: bool) -> Self {
-        let needle = case_needle(needle, case_sensitive)
-            .iter()
-            .map(|&(c1, c2)| unsafe { B::broadcast(c1, c2) })
+    pub unsafe fn new(needle: &str, case_sensitive: bool) -> Self {
+        let needle_ascii = case_needle(needle.as_bytes(), case_sensitive)
+            .into_iter()
+            .map(|c| unsafe { B::broadcast(c) })
             .collect();
+        let needle_unicode = case_needle_unicode(needle, case_sensitive)
+            .into_iter()
+            .map(|c| unsafe { c.broadcast::<B>() })
+            .collect();
+
         Self {
-            needle,
+            needle_ascii,
+            needle_unicode,
             paths: Vec::new(),
         }
     }
 
     #[inline(always)]
-    unsafe fn needle_unchecked(&self, idx: usize) -> B::Needle {
-        unsafe { *self.needle.get_unchecked(idx) }
+    unsafe fn needle_unchecked(&self, idx: usize) -> (B::Chunk, B::Chunk) {
+        unsafe { *self.needle_ascii.get_unchecked(idx) }
     }
 
     #[inline(always)]
@@ -44,7 +52,7 @@ impl<B: Backend> Prefilter<B> {
 
         let mut can_skip_chunks = true;
         let mut match_start_pos = 0usize;
-        let needle = self.needle.as_slice();
+        let needle = self.needle_ascii.as_slice();
         let mut needle_iter = needle.iter();
         let mut needle_char = *needle_iter.next().unwrap();
         let mut start = 0usize;
@@ -87,6 +95,106 @@ impl<B: Backend> Prefilter<B> {
     }
 
     #[inline(always)]
+    pub unsafe fn match_haystack_unicode(&self, haystack: &[u8]) -> (bool, usize, usize) {
+        let len = haystack.len();
+        if len == 0 {
+            return (false, 0, 0);
+        }
+
+        let mut can_skip_chunks = true;
+        let mut match_start_pos = 0usize;
+        let needle = self.needle_unicode.as_slice();
+        let mut needle_iter = needle.iter();
+        let mut needle_char = needle_iter.next().unwrap();
+        let mut last_needle_char_byte = needle_char.chars[needle_char.len - 1];
+        let mut start = 0usize;
+
+        let mut prev_chunk = unsafe { B::zero() };
+        while start < len {
+            let (chunk, mut chunk_mask) = unsafe { load_window::<B>(haystack, start, len) };
+
+            loop {
+                // check the last byte first since it's the most discriminating
+                // since the prefix bytes indentify the script/block, not the char
+                // and nearby chars are likely to be all in the same script/block
+                let mut mask = unsafe { B::occ(chunk, last_needle_char_byte) }.and(chunk_mask);
+                if mask.is_zero() {
+                    break;
+                }
+
+                // check that the rest of the bytes in the char match
+                if needle_char.len == 2 {
+                    let shifted_chunk = unsafe { B::shift_left::<1>(chunk, prev_chunk) };
+                    let occ =
+                        unsafe { B::occ(shifted_chunk, needle_char.chars[needle_char.len - 2]) };
+                    mask = mask.and(occ);
+                    if mask.is_zero() {
+                        break;
+                    }
+                } else if needle_char.len == 3 {
+                    let shifted_chunk_1 = unsafe { B::shift_left::<1>(chunk, prev_chunk) };
+                    let shifted_chunk_2 = unsafe { B::shift_left::<2>(chunk, prev_chunk) };
+                    let occ_1 =
+                        unsafe { B::occ(shifted_chunk_1, needle_char.chars[needle_char.len - 2]) };
+                    let occ_2 =
+                        unsafe { B::occ(shifted_chunk_2, needle_char.chars[needle_char.len - 3]) };
+                    mask = mask.and(occ_1).and(occ_2);
+                    if mask.is_zero() {
+                        break;
+                    }
+                } else if needle_char.len == 4 {
+                    let shifted_chunk_1 = unsafe { B::shift_left::<1>(chunk, prev_chunk) };
+                    let shifted_chunk_2 = unsafe { B::shift_left::<2>(chunk, prev_chunk) };
+                    let shifted_chunk_3 = unsafe { B::shift_left::<3>(chunk, prev_chunk) };
+                    let occ_1 =
+                        unsafe { B::occ(shifted_chunk_1, needle_char.chars[needle_char.len - 2]) };
+                    let occ_2 =
+                        unsafe { B::occ(shifted_chunk_2, needle_char.chars[needle_char.len - 3]) };
+                    let occ_3 =
+                        unsafe { B::occ(shifted_chunk_3, needle_char.chars[needle_char.len - 4]) };
+                    mask = mask.and(occ_1).and(occ_2).and(occ_3);
+                    if mask.is_zero() {
+                        break;
+                    }
+                }
+
+                chunk_mask = chunk_mask.clear_through_lowest(mask);
+                if can_skip_chunks {
+                    // since we match on the final byte, subtract the byte length of the char
+                    match_start_pos = start + mask.trailing_zeros() + 1 - needle_char.len;
+                    can_skip_chunks = false;
+                }
+
+                if let Some(next_needle_char) = needle_iter.next() {
+                    needle_char = next_needle_char;
+                    last_needle_char_byte = needle_char.chars[needle_char.len - 1];
+                } else if start + B::LANES > len - needle_char.len {
+                    return (
+                        true,
+                        match_start_pos,
+                        start + B::LANES - mask.leading_zeros(),
+                    );
+                } else {
+                    // this still works for multi-byte unicode, since on a false positive, we
+                    // end up including extra suffix which doesn't affect correctness
+                    let last = *needle.last().unwrap();
+                    let last_needle_char_byte = last.chars[last.len - 1];
+                    let end_pos = start
+                        + unsafe {
+                            find_last_char_pos::<B>(last_needle_char_byte, &haystack[start..])
+                        };
+                    return (true, match_start_pos, end_pos);
+                }
+            }
+
+            start += B::LANES;
+            prev_chunk = chunk;
+        }
+
+        (false, match_start_pos, len)
+    }
+
+    #[inline(always)]
     pub unsafe fn match_haystack_many_typos(
         &mut self,
         haystack: &[u8],
@@ -98,7 +206,7 @@ impl<B: Backend> Prefilter<B> {
     #[inline(always)]
     pub unsafe fn match_haystack_1_typo(&self, haystack: &[u8]) -> (bool, usize, usize) {
         let len = haystack.len();
-        let needle_len = self.needle.len();
+        let needle_len = self.needle_ascii.len();
         if needle_len <= 1 {
             return (true, 0, len);
         }
@@ -196,7 +304,7 @@ impl<B: Backend> Prefilter<B> {
     #[inline(always)]
     pub unsafe fn match_haystack_2_typos(&self, haystack: &[u8]) -> (bool, usize, usize) {
         let len = haystack.len();
-        let needle_len = self.needle.len();
+        let needle_len = self.needle_ascii.len();
         if needle_len <= 2 {
             return (true, 0, len);
         }
@@ -341,7 +449,7 @@ impl<B: Backend> Prefilter<B> {
         max_typos: usize,
     ) -> (bool, usize, usize) {
         let len = haystack.len();
-        let needle_len = self.needle.len();
+        let needle_len = self.needle_ascii.len();
         if needle_len <= max_typos {
             return (true, 0, len);
         }
@@ -363,7 +471,7 @@ impl<B: Backend> Prefilter<B> {
         }
 
         let paths = self.paths.as_mut_ptr();
-        let needle = self.needle.as_slice();
+        let needle = self.needle_ascii.as_slice();
         let mut match_start_pos = usize::MAX;
 
         for start in (0..len).step_by(B::LANES) {
@@ -450,14 +558,14 @@ impl<B: Backend> Prefilter<B> {
     #[inline(always)]
     unsafe fn find_end_pos_with_typos(&self, haystack: &[u8], max_typos: usize) -> usize {
         let len = haystack.len();
-        let needle_len = self.needle.len();
+        let needle_len = self.needle_ascii.len();
         let first = needle_len - 1 - max_typos;
 
         let mut start = (len - 1) / B::LANES * B::LANES;
         loop {
             let (chunk, chunk_mask) = unsafe { load_window::<B>(haystack, start, len) };
             let mut mask = B::Mask::zero();
-            for &needle in &self.needle[first..] {
+            for &needle in &self.needle_ascii[first..] {
                 mask = mask.or(unsafe { B::occ(chunk, needle) });
             }
             mask = mask.and(chunk_mask);
@@ -474,7 +582,10 @@ impl<B: Backend> Prefilter<B> {
 }
 
 #[inline(always)]
-pub(crate) unsafe fn find_last_char_pos<B: Backend>(needle: B::Needle, haystack: &[u8]) -> usize {
+pub(crate) unsafe fn find_last_char_pos<B: Backend>(
+    needle: (B::Chunk, B::Chunk),
+    haystack: &[u8],
+) -> usize {
     let len = haystack.len();
     let mut start = len.saturating_sub(B::LANES);
     loop {

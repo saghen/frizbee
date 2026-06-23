@@ -9,7 +9,6 @@ impl Backend for PrefilterSSEBackend {
     const LANES: usize = 16;
 
     type Chunk = __m128i;
-    type Needle = (__m128i, __m128i);
     type Mask = u16;
 
     fn is_available() -> bool {
@@ -17,8 +16,13 @@ impl Backend for PrefilterSSEBackend {
     }
 
     #[inline(always)]
-    unsafe fn broadcast(c1: u8, c2: u8) -> Self::Needle {
-        unsafe { (_mm_set1_epi8(c1 as i8), _mm_set1_epi8(c2 as i8)) }
+    unsafe fn zero() -> __m128i {
+        unsafe { _mm_setzero_si128() }
+    }
+
+    #[inline(always)]
+    unsafe fn broadcast(c: (u8, u8)) -> (Self::Chunk, Self::Chunk) {
+        unsafe { (_mm_set1_epi8(c.0 as i8), _mm_set1_epi8(c.1 as i8)) }
     }
 
     #[inline(always)]
@@ -27,13 +31,26 @@ impl Backend for PrefilterSSEBackend {
     }
 
     #[inline(always)]
-    unsafe fn occ(chunk: Self::Chunk, needle: Self::Needle) -> Self::Mask {
+    unsafe fn occ(chunk: Self::Chunk, needle: (Self::Chunk, Self::Chunk)) -> Self::Mask {
         unsafe {
             let mask = _mm_or_si128(
                 _mm_cmpeq_epi8(needle.0, chunk),
                 _mm_cmpeq_epi8(needle.1, chunk),
             );
             _mm_movemask_epi8(mask) as u16
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn shift_left<const N: usize>(a: __m128i, b: __m128i) -> __m128i {
+        unsafe {
+            match N {
+                0 => a,
+                1 => _mm_or_si128(_mm_slli_si128::<1>(a), _mm_srli_si128::<15>(b)),
+                2 => _mm_or_si128(_mm_slli_si128::<2>(a), _mm_srli_si128::<14>(b)),
+                3 => _mm_or_si128(_mm_slli_si128::<3>(a), _mm_srli_si128::<13>(b)),
+                _ => unreachable!("shift amount must be <= 3"),
+            }
         }
     }
 }

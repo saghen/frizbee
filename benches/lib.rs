@@ -7,7 +7,7 @@ use match_list::{match_list_bench, match_list_generated_bench};
 
 fn criterion_benchmark(c: &mut Criterion) {
     // Bench on real data
-    let haystack_bytes = std::fs::read("benches/match_list/data.txt")
+    let haystack_bytes = std::fs::read("benches/data/chromium.txt")
         .expect("Failed to read benchmark data. Run `wget -O benches/match_list/data.txt https://gist.github.com/ii14/637689ef8d071824e881a78044670310/raw/dc1dbc859daa38b62f4b9a69dec1fc599e4735e7/data.txt`");
     let haystack_str =
         String::from_utf8(haystack_bytes).expect("Failed to parse chromium benchmark data");

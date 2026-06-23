@@ -19,8 +19,8 @@ pub struct PrefilterAVX {
 
 impl Kernel for PrefilterAVX {
     #[inline(always)]
-    fn new(needle: &[u8], case_sensitive: bool) -> Self {
-        let needle_cases = case_needle(needle, case_sensitive);
+    fn new(needle: &str, case_sensitive: bool) -> Self {
+        let needle_cases = case_needle(needle.as_bytes(), case_sensitive);
         let needle_len = needle_cases.len();
         let mut needle_simd = needle_cases
             .iter()
@@ -159,6 +159,11 @@ impl Kernel for PrefilterAVX {
     }
 
     #[inline(always)]
+    fn match_haystack_unicode(&self, haystack: &[u8]) -> Window {
+        unsafe { self.inner.match_haystack_unicode(haystack) }
+    }
+
+    #[inline(always)]
     fn match_haystack_1_typo(&self, haystack: &[u8]) -> Window {
         unsafe { self.inner.match_haystack_1_typo(haystack) }
     }
@@ -181,7 +186,6 @@ impl Backend for PrefilterAVXBackend {
     const LANES: usize = 32;
 
     type Chunk = __m256i;
-    type Needle = (__m256i, __m256i);
     type Mask = u32;
 
     fn is_available() -> bool {
@@ -189,8 +193,13 @@ impl Backend for PrefilterAVXBackend {
     }
 
     #[inline(always)]
-    unsafe fn broadcast(c1: u8, c2: u8) -> Self::Needle {
-        unsafe { (_mm256_set1_epi8(c1 as i8), _mm256_set1_epi8(c2 as i8)) }
+    unsafe fn zero() -> __m256i {
+        unsafe { _mm256_setzero_si256() }
+    }
+
+    #[inline(always)]
+    unsafe fn broadcast(c: (u8, u8)) -> (Self::Chunk, Self::Chunk) {
+        unsafe { (_mm256_set1_epi8(c.0 as i8), _mm256_set1_epi8(c.1 as i8)) }
     }
 
     #[inline(always)]
@@ -199,13 +208,35 @@ impl Backend for PrefilterAVXBackend {
     }
 
     #[inline(always)]
-    unsafe fn occ(chunk: Self::Chunk, needle: Self::Needle) -> Self::Mask {
+    unsafe fn occ(chunk: Self::Chunk, needle: (Self::Chunk, Self::Chunk)) -> Self::Mask {
         unsafe {
             let mask = _mm256_or_si256(
                 _mm256_cmpeq_epi8(needle.0, chunk),
                 _mm256_cmpeq_epi8(needle.1, chunk),
             );
             _mm256_movemask_epi8(mask) as u32
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn shift_left<const N: usize>(a: __m256i, b: __m256i) -> __m256i {
+        unsafe {
+            match N {
+                0 => a,
+                1 => {
+                    let shifted = _mm256_permute2x128_si256::<0x21>(b, a);
+                    _mm256_alignr_epi8::<15>(a, shifted)
+                }
+                2 => {
+                    let shifted = _mm256_permute2x128_si256::<0x21>(b, a);
+                    _mm256_alignr_epi8::<14>(a, shifted)
+                }
+                3 => {
+                    let shifted = _mm256_permute2x128_si256::<0x21>(b, a);
+                    _mm256_alignr_epi8::<13>(a, shifted)
+                }
+                _ => unreachable!("shift amount must be <= 3"),
+            }
         }
     }
 }

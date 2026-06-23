@@ -18,6 +18,24 @@ pub(crate) mod backend;
 use algo::Prefilter;
 use backend::Backend;
 
+#[derive(Debug, Clone, Copy)]
+pub struct UnicodeChar<T> {
+    pub chars: [(T, T); 4],
+    pub len: usize,
+}
+
+impl UnicodeChar<u8> {
+    /// # Safety
+    /// The backend's target features must be enabled.
+    pub unsafe fn broadcast<B: Backend>(self) -> UnicodeChar<B::Chunk> {
+        let chars = self.chars.map(|c| unsafe { B::broadcast(c) });
+        UnicodeChar {
+            chars,
+            len: self.len,
+        }
+    }
+}
+
 pub(crate) fn case_needle(needle: &[u8], case_sensitive: bool) -> Vec<(u8, u8)> {
     needle
         .iter()
@@ -36,14 +54,56 @@ pub(crate) fn case_needle(needle: &[u8], case_sensitive: bool) -> Vec<(u8, u8)> 
         .collect()
 }
 
+pub(crate) fn case_needle_unicode(needle: &str, case_sensitive: bool) -> Vec<UnicodeChar<u8>> {
+    needle
+        .chars()
+        .map(|c| {
+            let len = c.len_utf8();
+            // TODO: for now, this should ignore cases where more than one byte is changed
+            let opposite_case = (if case_sensitive && c.is_uppercase() {
+                let mut lower = c.to_lowercase();
+                let lower_char = lower.next().unwrap_or(c);
+
+                // ignore cases where there's multiple variations or the length doesnt match
+                (lower.next().is_none() && lower_char.len_utf8() == len).then_some(lower_char)
+            } else if case_sensitive && c.is_lowercase() {
+                let mut upper = c.to_uppercase();
+                let upper_char = upper.next().unwrap_or(c);
+
+                (upper.next().is_none() && upper_char.len_utf8() == len).then_some(upper_char)
+            } else {
+                None
+            })
+            .unwrap_or(c);
+
+            // TODO: nicer way to write this?
+            let mut normal_case_char = [0u8; 4];
+            let mut opposite_case_char = [0u8; 4];
+            c.encode_utf8(&mut normal_case_char);
+            opposite_case.encode_utf8(&mut opposite_case_char);
+
+            let mut chars = [(0u8, 0u8); 4];
+            for i in 0..c.len_utf8() {
+                chars[i] = (normal_case_char[i], opposite_case_char[i]);
+            }
+
+            UnicodeChar {
+                chars,
+                len: c.len_utf8(),
+            }
+        })
+        .collect()
+}
+
 pub(crate) type Window = (bool, usize, usize);
 
 /// Ordered prefiltering kernel which allows score-level false positives.
 pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
-    fn new(needle: &[u8], case_sensitive: bool) -> Self;
+    fn new(needle: &str, case_sensitive: bool) -> Self;
     fn is_available() -> bool;
 
     fn match_haystack(&self, haystack: &[u8]) -> Window;
+    fn match_haystack_unicode(&self, haystack: &[u8]) -> Window;
     fn match_haystack_1_typo(&self, haystack: &[u8]) -> Window;
     fn match_haystack_2_typos(&self, haystack: &[u8]) -> Window;
     fn match_haystack_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window;
@@ -51,7 +111,7 @@ pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
 
 impl<B: Backend> Kernel for Prefilter<B> {
     #[inline(always)]
-    fn new(needle: &[u8], case_sensitive: bool) -> Self {
+    fn new(needle: &str, case_sensitive: bool) -> Self {
         unsafe { Self::new(needle, case_sensitive) }
     }
 
@@ -63,6 +123,11 @@ impl<B: Backend> Kernel for Prefilter<B> {
     #[inline(always)]
     fn match_haystack(&self, haystack: &[u8]) -> Window {
         unsafe { self.match_haystack(haystack) }
+    }
+
+    #[inline(always)]
+    fn match_haystack_unicode(&self, haystack: &[u8]) -> Window {
+        unsafe { self.match_haystack_unicode(haystack) }
     }
 
     #[inline(always)]
@@ -331,7 +396,7 @@ mod tests {
     }
 
     fn kernel_result<P: Kernel>(
-        needle: &[u8],
+        needle: &str,
         haystack: &[u8],
         max_typos: u16,
         case_sensitive: bool,

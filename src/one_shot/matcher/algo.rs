@@ -25,7 +25,7 @@ where
         let matcher = Self {
             needle: needle.to_string(),
             config: config.clone(),
-            prefilter: P::new(needle.as_bytes(), case_sensitive),
+            prefilter: P::new(needle, case_sensitive),
             smith_waterman: S::new(needle.as_bytes(), &config.scoring, case_sensitive),
         };
         matcher.guard_against_score_overflow();
@@ -62,30 +62,38 @@ where
         }
 
         let min_haystack_len = self.min_haystack_len();
-        match self.config.max_typos {
-            None => self.match_list_unfiltered_into(haystacks, haystack_index_offset, matches),
-            Some(0) => self.match_list_prefiltered_into::<0, H>(
+        let needs_unicode = !self.needle.is_ascii();
+        match (self.config.max_typos, needs_unicode) {
+            (None, _) => self.match_list_unfiltered_into(haystacks, haystack_index_offset, matches),
+            (Some(0), false) => self.match_list_prefiltered_into::<0, false, H>(
                 haystacks,
                 haystack_index_offset,
                 min_haystack_len,
                 0,
                 matches,
             ),
-            Some(1) => self.match_list_prefiltered_into::<1, H>(
+            (Some(0), true) => self.match_list_prefiltered_into::<0, true, H>(
+                haystacks,
+                haystack_index_offset,
+                min_haystack_len,
+                0,
+                matches,
+            ),
+            (Some(1), _) => self.match_list_prefiltered_into::<1, false, H>(
                 haystacks,
                 haystack_index_offset,
                 min_haystack_len,
                 1,
                 matches,
             ),
-            Some(2) => self.match_list_prefiltered_into::<2, H>(
+            (Some(2), _) => self.match_list_prefiltered_into::<2, false, H>(
                 haystacks,
                 haystack_index_offset,
                 min_haystack_len,
                 2,
                 matches,
             ),
-            Some(max_typos) => self.match_list_prefiltered_into::<MANY_TYPOS, H>(
+            (Some(max_typos), _) => self.match_list_prefiltered_into::<MANY_TYPOS, false, H>(
                 haystacks,
                 haystack_index_offset,
                 min_haystack_len,
@@ -103,12 +111,22 @@ where
         }
 
         let min_haystack_len = self.min_haystack_len();
-        let mut matches = match self.config.max_typos {
-            None => self.match_list_indices_unfiltered(haystacks),
-            Some(0) => self.match_list_indices_prefiltered::<0, H>(haystacks, min_haystack_len, 0),
-            Some(1) => self.match_list_indices_prefiltered::<1, H>(haystacks, min_haystack_len, 1),
-            Some(2) => self.match_list_indices_prefiltered::<2, H>(haystacks, min_haystack_len, 2),
-            Some(max_typos) => self.match_list_indices_prefiltered::<MANY_TYPOS, H>(
+        let needs_unicode = !self.needle.is_ascii();
+        let mut matches = match (self.config.max_typos, needs_unicode) {
+            (None, _) => self.match_list_indices_unfiltered(haystacks),
+            (Some(0), false) => {
+                self.match_list_indices_prefiltered::<0, false, H>(haystacks, min_haystack_len, 0)
+            }
+            (Some(0), true) => {
+                self.match_list_indices_prefiltered::<0, true, H>(haystacks, min_haystack_len, 0)
+            }
+            (Some(1), _) => {
+                self.match_list_indices_prefiltered::<1, false, H>(haystacks, min_haystack_len, 1)
+            }
+            (Some(2), _) => {
+                self.match_list_indices_prefiltered::<2, false, H>(haystacks, min_haystack_len, 2)
+            }
+            (Some(max_typos), _) => self.match_list_indices_prefiltered::<MANY_TYPOS, false, H>(
                 haystacks,
                 min_haystack_len,
                 max_typos,
@@ -122,7 +140,6 @@ where
         matches
     }
 
-    #[inline(always)]
     fn match_list_unfiltered_into<H: AsRef<str>>(
         &mut self,
         haystacks: &[H],
@@ -136,8 +153,7 @@ where
         }
     }
 
-    #[inline(always)]
-    fn match_list_prefiltered_into<const TYPOS: u16, H: AsRef<str>>(
+    fn match_list_prefiltered_into<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
         &mut self,
         haystacks: &[H],
         haystack_index_offset: u32,
@@ -151,7 +167,7 @@ where
             let original_len = haystack.len();
             if original_len >= min_haystack_len {
                 let (matched, start_pos, end_pos) =
-                    self.prefilter_haystack::<TYPOS>(haystack, max_typos);
+                    self.prefilter_haystack::<TYPOS, UNICODE>(haystack, max_typos);
                 if matched {
                     let trimmed = &haystack[start_pos..end_pos];
                     let include_exact = start_pos == 0 && end_pos == original_len;
@@ -168,8 +184,13 @@ where
     }
 
     #[inline(always)]
-    fn prefilter_haystack<const TYPOS: u16>(&mut self, haystack: &[u8], max_typos: u16) -> Window {
+    fn prefilter_haystack<const TYPOS: u16, const UNICODE: bool>(
+        &mut self,
+        haystack: &[u8],
+        max_typos: u16,
+    ) -> Window {
         match TYPOS {
+            0 if UNICODE => self.prefilter.match_haystack_unicode(haystack),
             0 => self.prefilter.match_haystack(haystack),
             1 => self.prefilter.match_haystack_1_typo(haystack),
             2 => self.prefilter.match_haystack_2_typos(haystack),
@@ -198,7 +219,7 @@ where
     }
 
     #[inline(always)]
-    fn match_list_indices_prefiltered<const TYPOS: u16, H: AsRef<str>>(
+    fn match_list_indices_prefiltered<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
         &mut self,
         haystacks: &[H],
         min_haystack_len: usize,
@@ -210,7 +231,7 @@ where
             let original_len = haystack.len();
             if original_len >= min_haystack_len {
                 let (matched, start_pos, end_pos) =
-                    self.prefilter_haystack::<TYPOS>(haystack, max_typos);
+                    self.prefilter_haystack::<TYPOS, UNICODE>(haystack, max_typos);
                 if matched {
                     let trimmed = &haystack[start_pos..end_pos];
                     let include_exact = start_pos == 0 && end_pos == original_len;

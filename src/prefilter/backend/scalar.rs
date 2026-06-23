@@ -7,7 +7,6 @@ impl Backend for PrefilterScalarBackend {
     const LANES: usize = 16;
 
     type Chunk = [u8; 16];
-    type Needle = (u8, u8);
     type Mask = u16;
 
     fn is_available() -> bool {
@@ -15,8 +14,13 @@ impl Backend for PrefilterScalarBackend {
     }
 
     #[inline(always)]
-    unsafe fn broadcast(c1: u8, c2: u8) -> Self::Needle {
-        (c1, c2)
+    unsafe fn zero() -> Self::Chunk {
+        [0; 16]
+    }
+
+    #[inline(always)]
+    unsafe fn broadcast(c: (u8, u8)) -> (Self::Chunk, Self::Chunk) {
+        ([c.0; 16], [c.1; 16])
     }
 
     #[inline(always)]
@@ -38,13 +42,28 @@ impl Backend for PrefilterScalarBackend {
     }
 
     #[inline(always)]
-    unsafe fn occ(chunk: Self::Chunk, needle: Self::Needle) -> Self::Mask {
+    unsafe fn occ(chunk: Self::Chunk, needle: (Self::Chunk, Self::Chunk)) -> Self::Mask {
         let mut mask = 0u16;
         for (idx, &byte) in chunk.iter().enumerate() {
-            if byte == needle.0 || byte == needle.1 {
+            if byte == needle.0[idx] || byte == needle.1[idx] {
                 mask |= 1u16 << idx;
             }
         }
         mask
+    }
+
+    #[inline(always)]
+    unsafe fn shift_left<const N: usize>(a: Self::Chunk, b: Self::Chunk) -> Self::Chunk {
+        debug_assert!(N <= Self::LANES);
+
+        let mut out = [0; 16];
+        for (idx, byte) in out.iter_mut().enumerate() {
+            *byte = if idx >= N {
+                a[idx - N]
+            } else {
+                b[Self::LANES - N + idx]
+            };
+        }
+        out
     }
 }
