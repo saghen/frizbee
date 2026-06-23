@@ -44,6 +44,36 @@ haystack_size: 1406941
 ```
 """
 
+unicode_arabic = """
+Arabic sentence dataset sized to roughly one fifth of the Chromium benchmark item count.
+
+```rust
+needle: "إن"
+match_percentage: 0.07934
+partial_match_percentage: 0.59514
+median_length: 37 bytes / 21 chars
+mean_length: 43.18 bytes / 23.80 chars
+std_dev_length: 33.27 bytes / 18.40 chars
+haystack_size: 285587
+total_bytes: 12331053
+```
+"""
+
+unicode_korean = """
+Korean sentence dataset sized to roughly one fifth of the Chromium benchmark item count.
+
+```rust
+needle: "니다"
+match_percentage: 0.08419
+partial_match_percentage: 0.40674
+median_length: 36 bytes / 15 chars
+mean_length: 39.95 bytes / 16.38 chars
+std_dev_length: 24.76 bytes / 10.20 chars
+haystack_size: 281471
+total_bytes: 11244535
+```
+"""
+
 partial_match = """
 What I would consider the typical case, where 5% of the haystack matches the needle and 20% of the haystack includes characters from the needle, but doesn't fully match.
 
