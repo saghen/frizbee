@@ -18,11 +18,6 @@ impl Backend for PrefilterNEONBackend {
     }
 
     #[inline(always)]
-    unsafe fn zero() -> uint8x16_t {
-        unsafe { vdupq_n_u8(0) }
-    }
-
-    #[inline(always)]
     unsafe fn broadcast(c: (u8, u8)) -> (Self::Chunk, Self::Chunk) {
         unsafe { (vdupq_n_u8(c.0), vdupq_n_u8(c.1)) }
     }
@@ -37,19 +32,6 @@ impl Backend for PrefilterNEONBackend {
         unsafe {
             let mask = vorrq_u8(vceqq_u8(needle.0, chunk), vceqq_u8(needle.1, chunk));
             movemask_u8(mask)
-        }
-    }
-
-    #[inline(always)]
-    unsafe fn shift_left<const N: usize>(a: uint8x16_t, b: uint8x16_t) -> uint8x16_t {
-        unsafe {
-            match N {
-                0 => a,
-                1 => vextq_u8::<15>(b, a),
-                2 => vextq_u8::<14>(b, a),
-                3 => vextq_u8::<13>(b, a),
-                _ => unreachable!("shift amount must be <= 3"),
-            }
         }
     }
 }

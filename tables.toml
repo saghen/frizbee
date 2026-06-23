@@ -44,8 +44,8 @@ haystack_size: 1406941
 ```
 """
 
-unicode_arabic = """
-Arabic sentence dataset sized to roughly one fifth of the Chromium benchmark item count.
+arabic = """
+Arabic sentence dataset to test UTF-8 throughput for 2-bytes per character
 
 ```rust
 needle: "إن"
@@ -59,8 +59,8 @@ total_bytes: 12331053
 ```
 """
 
-unicode_korean = """
-Korean sentence dataset sized to roughly one fifth of the Chromium benchmark item count.
+korean = """
+Korean sentence dataset to test UTF-8 throughput for 3-bytes per character
 
 ```rust
 needle: "니다"

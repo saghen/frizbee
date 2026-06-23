@@ -19,8 +19,13 @@ impl Backend for PrefilterAVX512Backend {
     }
 
     #[inline(always)]
-    unsafe fn zero() -> __m512i {
-        unsafe { _mm512_setzero_si512() }
+    unsafe fn splat(c: u8) -> Self::Chunk {
+        unsafe { _mm512_set1_epi8(c as i8) }
+    }
+
+    #[inline(always)]
+    unsafe fn eq(a: Self::Chunk, b: Self::Chunk) -> Self::Mask {
+        unsafe { _mm512_cmpeq_epi8_mask(a, b) }
     }
 
     #[inline(always)]
@@ -54,30 +59,4 @@ impl Backend for PrefilterAVX512Backend {
     unsafe fn clear_through_lowest(mask: Self::Mask, hit: Self::Mask) -> Self::Mask {
         unsafe { mask & !_blsmsk_u64(hit) }
     }
-
-    #[inline(always)]
-    unsafe fn shift_left<const N: usize>(a: __m512i, b: __m512i) -> __m512i {
-        const { assert!(N <= 64, "shift amount must be <= 64") };
-        let idx: __m512i = unsafe { core::mem::transmute(left_shift_idx::<N>()) };
-        unsafe { _mm512_permutex2var_epi8(a, idx, b) }
-    }
-}
-
-/// Build the VPERMI2B index table for a left shift by `N` bytes.
-///
-/// Sources: bytes 0..=63 are `a`, bytes 64..=127 are `b`.
-/// result[i] = a[i - N]           for i >= N
-/// result[i] = b[64 - N + i]      for i <  N   (top N bytes of b shifted in)
-const fn left_shift_idx<const N: usize>() -> [i8; 64] {
-    let mut idx = [0i8; 64];
-    let mut i = 0;
-    while i < 64 {
-        idx[i] = if i >= N {
-            (i - N) as i8 // pull from a
-        } else {
-            (128 - N + i) as i8 // pull from top of b
-        };
-        i += 1;
-    }
-    idx
 }

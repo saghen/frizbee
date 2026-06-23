@@ -140,6 +140,7 @@ where
         matches
     }
 
+    #[inline(always)]
     fn match_list_unfiltered_into<H: AsRef<str>>(
         &mut self,
         haystacks: &[H],
@@ -153,6 +154,7 @@ where
         }
     }
 
+    #[inline(always)]
     fn match_list_prefiltered_into<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
         &mut self,
         haystacks: &[H],

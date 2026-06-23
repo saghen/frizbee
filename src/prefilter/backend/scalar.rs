@@ -14,8 +14,19 @@ impl Backend for PrefilterScalarBackend {
     }
 
     #[inline(always)]
-    unsafe fn zero() -> Self::Chunk {
-        [0; 16]
+    unsafe fn splat(c: u8) -> Self::Chunk {
+        [c; 16]
+    }
+
+    #[inline(always)]
+    unsafe fn eq(a: Self::Chunk, b: Self::Chunk) -> Self::Mask {
+        let mut mask = 0u16;
+        for (idx, &byte) in a.iter().enumerate() {
+            if byte == b[idx] {
+                mask |= 1u16 << idx;
+            }
+        }
+        mask
     }
 
     #[inline(always)]
@@ -50,20 +61,5 @@ impl Backend for PrefilterScalarBackend {
             }
         }
         mask
-    }
-
-    #[inline(always)]
-    unsafe fn shift_left<const N: usize>(a: Self::Chunk, b: Self::Chunk) -> Self::Chunk {
-        debug_assert!(N <= Self::LANES);
-
-        let mut out = [0; 16];
-        for (idx, byte) in out.iter_mut().enumerate() {
-            *byte = if idx >= N {
-                a[idx - N]
-            } else {
-                b[Self::LANES - N + idx]
-            };
-        }
-        out
     }
 }

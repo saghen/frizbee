@@ -19,19 +19,18 @@ use algo::Prefilter;
 use backend::Backend;
 
 #[derive(Debug, Clone, Copy)]
-pub struct UnicodeChar<T> {
-    pub chars: [(T, T); 4],
+pub struct UnicodeChar {
+    pub chars: [u8; 4],
     pub len: usize,
 }
 
-impl UnicodeChar<u8> {
-    /// # Safety
-    /// The backend's target features must be enabled.
-    pub unsafe fn broadcast<B: Backend>(self) -> UnicodeChar<B::Chunk> {
-        let chars = self.chars.map(|c| unsafe { B::broadcast(c) });
-        UnicodeChar {
+impl UnicodeChar {
+    pub fn new(c: char) -> Self {
+        let mut chars = [0; 4];
+        c.encode_utf8(&mut chars);
+        Self {
             chars,
-            len: self.len,
+            len: c.len_utf8(),
         }
     }
 }
@@ -54,46 +53,46 @@ pub(crate) fn case_needle(needle: &[u8], case_sensitive: bool) -> Vec<(u8, u8)> 
         .collect()
 }
 
-pub(crate) fn case_needle_unicode(needle: &str, case_sensitive: bool) -> Vec<UnicodeChar<u8>> {
-    needle
-        .chars()
-        .map(|c| {
-            let len = c.len_utf8();
-            // TODO: for now, this should ignore cases where more than one byte is changed
-            let opposite_case = (if case_sensitive && c.is_uppercase() {
-                let mut lower = c.to_lowercase();
-                let lower_char = lower.next().unwrap_or(c);
-
-                // ignore cases where there's multiple variations or the length doesnt match
-                (lower.next().is_none() && lower_char.len_utf8() == len).then_some(lower_char)
-            } else if case_sensitive && c.is_lowercase() {
-                let mut upper = c.to_uppercase();
-                let upper_char = upper.next().unwrap_or(c);
-
-                (upper.next().is_none() && upper_char.len_utf8() == len).then_some(upper_char)
-            } else {
-                None
-            })
-            .unwrap_or(c);
-
-            // TODO: nicer way to write this?
-            let mut normal_case_char = [0u8; 4];
-            let mut opposite_case_char = [0u8; 4];
-            c.encode_utf8(&mut normal_case_char);
-            opposite_case.encode_utf8(&mut opposite_case_char);
-
-            let mut chars = [(0u8, 0u8); 4];
-            for i in 0..c.len_utf8() {
-                chars[i] = (normal_case_char[i], opposite_case_char[i]);
-            }
-
-            UnicodeChar {
-                chars,
-                len: c.len_utf8(),
-            }
-        })
-        .collect()
-}
+// pub(crate) fn case_needle_unicode(needle: &str, case_sensitive: bool) -> Vec<UnicodeChar<u8>> {
+//     needle
+//         .chars()
+//         .map(|c| {
+//             let len = c.len_utf8();
+//             // TODO: for now, this should ignore cases where more than one byte is changed
+//             let opposite_case = (if !case_sensitive && c.is_uppercase() {
+//                 let mut lower = c.to_lowercase();
+//                 let lower_char = lower.next().unwrap_or(c);
+//
+//                 // ignore cases where there's multiple variations or the length doesnt match
+//                 (lower.next().is_none() && lower_char.len_utf8() == len).then_some(lower_char)
+//             } else if !case_sensitive && c.is_lowercase() {
+//                 let mut upper = c.to_uppercase();
+//                 let upper_char = upper.next().unwrap_or(c);
+//
+//                 (upper.next().is_none() && upper_char.len_utf8() == len).then_some(upper_char)
+//             } else {
+//                 None
+//             })
+//             .unwrap_or(c);
+//
+//             // TODO: nicer way to write this?
+//             let mut normal_case_char = [0u8; 4];
+//             let mut opposite_case_char = [0u8; 4];
+//             c.encode_utf8(&mut normal_case_char);
+//             opposite_case.encode_utf8(&mut opposite_case_char);
+//
+//             let mut chars = [(0u8, 0u8); 4];
+//             for i in 0..c.len_utf8() {
+//                 chars[i] = (normal_case_char[i], opposite_case_char[i]);
+//             }
+//
+//             UnicodeChar {
+//                 chars,
+//                 len: c.len_utf8(),
+//             }
+//         })
+//         .collect()
+// }
 
 pub(crate) type Window = (bool, usize, usize);
 
@@ -160,7 +159,7 @@ mod tests {
     }
 
     fn matched_sensitive(needle: &str, haystack: &str, max_typos: u16) -> bool {
-        kernel_result::<PrefilterScalar>(needle.as_bytes(), haystack.as_bytes(), max_typos, true).0
+        kernel_result::<PrefilterScalar>(needle, haystack.as_bytes(), max_typos, true).0
     }
 
     #[test]
@@ -257,6 +256,62 @@ mod tests {
     }
 
     #[test]
+    fn unicode_prefilter_matches_full_utf8_chars() {
+        for (needle, haystack, want) in [
+            ("إن", "xxإنyy", (true, 2, 6)),
+            ("니다", "xx니__다yy", (true, 2, 10)),
+            ("😀", "xx😀yy", (true, 2, 6)),
+        ] {
+            assert_eq!(
+                unicode_result_generic(needle, haystack, false),
+                want,
+                "needle={needle:?} haystack={haystack:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unicode_prefilter_rejects_same_final_bytes_with_wrong_prefixes() {
+        let wrong_first = "\u{06e5}";
+        let wrong_second = "\u{0606}";
+        assert_eq!("إ".as_bytes()[1], wrong_first.as_bytes()[1]);
+        assert_ne!("إ".as_bytes()[0], wrong_first.as_bytes()[0]);
+        assert_eq!("ن".as_bytes()[1], wrong_second.as_bytes()[1]);
+        assert_ne!("ن".as_bytes()[0], wrong_second.as_bytes()[0]);
+
+        let false_positive_bytes = format!("{wrong_first}{wrong_second}");
+        assert_eq!(
+            unicode_result_generic("إن", &false_positive_bytes, false).0,
+            false,
+            "last-byte-only match should not pass UTF-8 sequence verification"
+        );
+
+        let haystack = format!("{false_positive_bytes}__إن");
+        assert_eq!(
+            unicode_result_generic("إن", &haystack, false),
+            (true, false_positive_bytes.len() + 2, haystack.len())
+        );
+    }
+
+    #[test]
+    fn unicode_prefilter_matches_across_chunk_boundaries() {
+        for prefix_len in [0usize, 1, 7, 14, 15, 16, 31, 32, 63, 64] {
+            let haystack = format!("{}إن", "x".repeat(prefix_len));
+            assert_eq!(
+                unicode_result_generic("إن", &haystack, false),
+                (true, prefix_len, haystack.len()),
+                "prefix_len={prefix_len}"
+            );
+        }
+    }
+
+    #[test]
+    fn unicode_prefilter_respects_case_setting() {
+        assert_eq!(unicode_result_generic("É", "é", false), (true, 0, 2));
+        assert_eq!(unicode_result_generic("É", "é", true).0, false);
+    }
+
+    #[test]
     fn backend_parity_suite() {
         for (needle, haystack, max_typos) in [
             ("foo", "foo", 0),
@@ -285,24 +340,24 @@ mod tests {
     #[test]
     fn reference_oracle_manual_cases() {
         for (needle, haystack, max_typos, case_sensitive, want) in [
-            (b"abc".as_slice(), b"".as_slice(), 2, false, false),
-            (b"abc".as_slice(), b"".as_slice(), 3, false, true),
-            (b"abc".as_slice(), b"bc".as_slice(), 1, false, true),
-            (b"abc".as_slice(), b"ac".as_slice(), 1, false, true),
-            (b"abc".as_slice(), b"ab".as_slice(), 1, false, true),
-            (b"abc".as_slice(), b"cba".as_slice(), 2, false, true),
-            (b"aaa".as_slice(), b"aa".as_slice(), 1, false, true),
-            (b"aba".as_slice(), b"aa".as_slice(), 1, false, true),
-            (b"Ab".as_slice(), b"ab".as_slice(), 0, false, true),
-            (b"Ab".as_slice(), b"ab".as_slice(), 0, true, false),
-            (b"A\0b".as_slice(), b"a\0b".as_slice(), 0, false, true),
-            (b"A\0b".as_slice(), b"a\0b".as_slice(), 0, true, false),
-            (&[0x80, b'a'], &[0x80, b'_', b'a'], 0, false, true),
-            (&[0xff, b'A'], &[0xff, b'a'], 0, false, true),
-            (&[0xff, b'A'], &[0xff, b'a'], 0, true, false),
+            ("abc", b"".as_slice(), 2, false, false),
+            ("abc", b"".as_slice(), 3, false, true),
+            ("abc", b"bc".as_slice(), 1, false, true),
+            ("abc", b"ac".as_slice(), 1, false, true),
+            ("abc", b"ab".as_slice(), 1, false, true),
+            ("abc", b"cba".as_slice(), 2, false, true),
+            ("aaa", b"aa".as_slice(), 1, false, true),
+            ("aba", b"aa".as_slice(), 1, false, true),
+            ("Ab", b"ab".as_slice(), 0, false, true),
+            ("Ab", b"ab".as_slice(), 0, true, false),
+            ("A\0b", b"a\0b".as_slice(), 0, false, true),
+            ("A\0b", b"a\0b".as_slice(), 0, true, false),
+            ("éa", "é_a".as_bytes(), 0, false, true),
+            ("ÿA", "ÿa".as_bytes(), 0, false, true),
+            ("ÿA", "ÿa".as_bytes(), 0, true, false),
         ] {
             let oracle = reference_matches_by_deleting_needle_bytes(
-                needle,
+                needle.as_bytes(),
                 haystack,
                 max_typos,
                 case_sensitive,
@@ -313,7 +368,7 @@ mod tests {
             );
 
             let case = PrefilterCase {
-                needle: needle.to_vec(),
+                needle: needle.to_owned(),
                 haystack: haystack.to_vec(),
                 max_typos,
                 case_sensitive,
@@ -329,20 +384,20 @@ mod tests {
             haystack.extend_from_slice(b"abc");
 
             for (needle, max_typos, want) in [
-                (b"abc".as_slice(), 0, true),
-                (b"ac".as_slice(), 0, true),
-                (b"abcd".as_slice(), 0, false),
-                (b"abcd".as_slice(), 1, true),
+                ("abc", 0, true),
+                ("ac", 0, true),
+                ("abcd", 0, false),
+                ("abcd", 1, true),
             ] {
                 let case = PrefilterCase {
-                    needle: needle.to_vec(),
+                    needle: needle.to_owned(),
                     haystack: haystack.clone(),
                     max_typos,
                     case_sensitive: false,
                 };
                 assert_eq!(
                     reference_matches_by_deleting_needle_bytes(
-                        &case.needle,
+                        case.needle.as_bytes(),
                         &case.haystack,
                         case.max_typos,
                         case.case_sensitive,
@@ -357,28 +412,25 @@ mod tests {
 
     fn result_generic(needle: &str, haystack: &str, max_typos: u16) -> (bool, usize, usize) {
         let haystack = haystack.as_bytes();
-        let scalar_result =
-            kernel_result::<PrefilterScalar>(needle.as_bytes(), haystack, max_typos, false);
+        let scalar_result = kernel_result::<PrefilterScalar>(needle, haystack, max_typos, false);
 
         #[cfg(target_arch = "x86_64")]
         {
             use crate::prefilter::backend::{PrefilterAVX, PrefilterAVX512, PrefilterSSE};
 
             if PrefilterAVX::is_available() {
-                let avx_result =
-                    kernel_result::<PrefilterAVX>(needle.as_bytes(), haystack, max_typos, false);
+                let avx_result = kernel_result::<PrefilterAVX>(needle, haystack, max_typos, false);
                 assert_same_result(avx_result, scalar_result, "AVX2 mismatch");
             }
 
             if PrefilterSSE::is_available() {
-                let sse_result =
-                    kernel_result::<PrefilterSSE>(needle.as_bytes(), haystack, max_typos, false);
+                let sse_result = kernel_result::<PrefilterSSE>(needle, haystack, max_typos, false);
                 assert_same_result(sse_result, scalar_result, "SSE mismatch");
             }
 
             if PrefilterAVX512::is_available() {
                 let avx512_result =
-                    kernel_result::<PrefilterAVX512>(needle.as_bytes(), haystack, max_typos, false);
+                    kernel_result::<PrefilterAVX512>(needle, haystack, max_typos, false);
                 assert_same_result(avx512_result, scalar_result, "AVX-512 mismatch");
             }
         }
@@ -387,9 +439,54 @@ mod tests {
         {
             use crate::prefilter::backend::PrefilterNEON;
 
-            let neon_result =
-                kernel_result::<PrefilterNEON>(needle.as_bytes(), haystack, max_typos, false);
+            let neon_result = kernel_result::<PrefilterNEON>(needle, haystack, max_typos, false);
             assert_same_result(neon_result, scalar_result, "NEON mismatch");
+        }
+
+        scalar_result
+    }
+
+    fn unicode_result_generic(
+        needle: &str,
+        haystack: &str,
+        case_sensitive: bool,
+    ) -> (bool, usize, usize) {
+        let haystack = haystack.as_bytes();
+        let scalar_result =
+            kernel_result_unicode::<PrefilterScalar>(needle, haystack, case_sensitive);
+
+        #[cfg(target_arch = "x86_64")]
+        {
+            use crate::prefilter::backend::{PrefilterAVX, PrefilterAVX512, PrefilterSSE};
+
+            if PrefilterAVX::is_available() {
+                let avx_result =
+                    kernel_result_unicode::<PrefilterAVX>(needle, haystack, case_sensitive);
+                assert_same_result(avx_result, scalar_result, "AVX2 unicode mismatch");
+            }
+
+            if PrefilterSSE::is_available() {
+                let sse_result =
+                    kernel_result_unicode::<PrefilterSSE>(needle, haystack, case_sensitive);
+                assert_same_result(sse_result, scalar_result, "SSE unicode mismatch");
+            }
+
+            if PrefilterAVX512::is_available() {
+                let avx512_result =
+                    kernel_result_unicode::<PrefilterAVX512>(needle, haystack, case_sensitive);
+                assert_same_result(avx512_result, scalar_result, "AVX-512 unicode mismatch");
+            }
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            use crate::prefilter::backend::PrefilterNEON;
+
+            if PrefilterNEON::is_available() {
+                let neon_result =
+                    kernel_result_unicode::<PrefilterNEON>(needle, haystack, case_sensitive);
+                assert_same_result(neon_result, scalar_result, "NEON unicode mismatch");
+            }
         }
 
         scalar_result
@@ -410,9 +507,17 @@ mod tests {
         }
     }
 
+    fn kernel_result_unicode<P: Kernel>(
+        needle: &str,
+        haystack: &[u8],
+        case_sensitive: bool,
+    ) -> Window {
+        P::new(needle, case_sensitive).match_haystack_unicode(haystack)
+    }
+
     #[derive(Debug, Clone)]
     struct PrefilterCase {
-        needle: Vec<u8>,
+        needle: String,
         haystack: Vec<u8>,
         max_typos: u16,
         case_sensitive: bool,
@@ -432,7 +537,7 @@ mod tests {
             let case_sensitive = cursor.bool();
 
             Self {
-                needle: cursor.bytes(needle_len),
+                needle: cursor.string(needle_len),
                 haystack: cursor.bytes(haystack_len),
                 max_typos,
                 case_sensitive,
@@ -483,6 +588,27 @@ mod tests {
 
         fn bytes(&mut self, len: usize) -> Vec<u8> {
             (0..len).map(|_| self.byte()).collect()
+        }
+
+        fn string(&mut self, len: usize) -> String {
+            (0..len).map(|_| self.char()).collect()
+        }
+
+        fn char(&mut self) -> char {
+            let byte = self.next();
+            match byte % 16 {
+                0 => '\0',
+                1 => ' ',
+                2 => '/',
+                3 => '.',
+                4 => ',',
+                5 => '_',
+                6 => '-',
+                7 => ':',
+                8..=10 => (b'a' + (byte % 26)) as char,
+                11..=13 => (b'A' + (byte % 26)) as char,
+                _ => (b'0' + (byte % 10)) as char,
+            }
         }
 
         fn byte(&mut self) -> u8 {
@@ -544,7 +670,7 @@ mod tests {
             case.case_sensitive,
         );
         let oracle = reference_matches_by_deleting_needle_bytes(
-            &case.needle,
+            case.needle.as_bytes(),
             &case.haystack,
             case.max_typos,
             case.case_sensitive,

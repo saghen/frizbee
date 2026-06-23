@@ -52,21 +52,28 @@ pub fn match_list_real_bench(
     name: &str,
     needle: &str,
     haystack: &[&str],
-    include_fzf: bool,
+    fzf_sequential: Duration,
+    fzf_parallel: Duration,
 ) {
     match_list_bench_impl(
         c,
         name,
         needle,
         haystack,
-        BenchmarkInput::SequentialAndParallel { include_fzf },
+        BenchmarkInput::SequentialAndParallel {
+            fzf_sequential,
+            fzf_parallel,
+        },
     );
 }
 
 #[derive(Clone, Copy)]
 enum BenchmarkInput {
     MedianLength,
-    SequentialAndParallel { include_fzf: bool },
+    SequentialAndParallel {
+        fzf_sequential: Duration,
+        fzf_parallel: Duration,
+    },
 }
 
 fn match_list_bench_impl(
@@ -102,31 +109,28 @@ fn match_list_bench_impl(
         );
         b.iter(|| atom.match_list(black_box(haystack.iter()), &mut matcher))
     });
-    if let BenchmarkInput::SequentialAndParallel { include_fzf: true } = input {
+    if let BenchmarkInput::SequentialAndParallel { fzf_sequential, .. } = input {
         group.bench_function(benchmark_id("FZF"), |b| {
-            b.iter(|| {
-                // measured with fzf --filter linux --tiebreak index --bench 10s --threads 1 < benches/match_list/data.txt
-                std::thread::sleep(Duration::from_micros(120610));
-            })
+            b.iter(|| std::thread::sleep(fzf_sequential))
         });
     }
     group.bench_with_input(benchmark_id("Frizbee"), haystack, |b, haystack| {
         b.iter(|| match_list(needle, haystack, Some(0)))
     });
-    // group.bench_with_input(benchmark_id("All Scores"), haystack, |b, haystack| {
-    //     b.iter(|| match_list(needle, haystack, None))
-    // });
-    // group.bench_with_input(benchmark_id("1 Typo"), haystack, |b, haystack| {
-    //     b.iter(|| match_list(needle, haystack, Some(1)))
-    // });
-    // group.bench_with_input(benchmark_id("2 Typos"), haystack, |b, haystack| {
-    //     b.iter(|| match_list(needle, haystack, Some(2)))
-    // });
-    // group.bench_with_input(benchmark_id("3 Typos"), haystack, |b, haystack| {
-    //     b.iter(|| match_list(needle, haystack, Some(3)))
-    // });
+    group.bench_with_input(benchmark_id("All Scores"), haystack, |b, haystack| {
+        b.iter(|| match_list(needle, haystack, None))
+    });
+    group.bench_with_input(benchmark_id("1 Typo"), haystack, |b, haystack| {
+        b.iter(|| match_list(needle, haystack, Some(1)))
+    });
+    group.bench_with_input(benchmark_id("2 Typos"), haystack, |b, haystack| {
+        b.iter(|| match_list(needle, haystack, Some(2)))
+    });
+    group.bench_with_input(benchmark_id("3 Typos"), haystack, |b, haystack| {
+        b.iter(|| match_list(needle, haystack, Some(3)))
+    });
 
-    if let BenchmarkInput::SequentialAndParallel { include_fzf } = input {
+    if let BenchmarkInput::SequentialAndParallel { fzf_parallel, .. } = input {
         group.bench_with_input(
             BenchmarkId::new("Nucleo", "Parallel (x8)"),
             haystack,
@@ -149,39 +153,34 @@ fn match_list_bench_impl(
                 })
             },
         );
-        if include_fzf {
-            group.bench_function(BenchmarkId::new("FZF", "Parallel (x8)"), |b| {
-                b.iter(|| {
-                    // measured with fzf --filter linux --tiebreak index --bench 10s --threads 8 < benches/match_list/data.txt
-                    std::thread::sleep(Duration::from_micros(16170));
-                })
-            });
-        }
+        group.bench_function(BenchmarkId::new("FZF", "Parallel (x8)"), |b| {
+            b.iter(|| std::thread::sleep(fzf_parallel))
+        });
         group.bench_with_input(
             BenchmarkId::new("Frizbee", "Parallel (x8)"),
             haystack,
             |b, haystack| b.iter(|| match_list_parallel(needle, haystack, Some(0))),
         );
-        // group.bench_with_input(
-        //     BenchmarkId::new("All Scores", "Parallel (x8)"),
-        //     haystack,
-        //     |b, haystack| b.iter(|| match_list_parallel(needle, haystack, None)),
-        // );
-        // group.bench_with_input(
-        //     BenchmarkId::new("1 Typo", "Parallel (x8)"),
-        //     haystack,
-        //     |b, haystack| b.iter(|| match_list_parallel(needle, haystack, Some(1))),
-        // );
-        // group.bench_with_input(
-        //     BenchmarkId::new("2 Typos", "Parallel (x8)"),
-        //     haystack,
-        //     |b, haystack| b.iter(|| match_list_parallel(needle, haystack, Some(2))),
-        // );
-        // group.bench_with_input(
-        //     BenchmarkId::new("3 Typos", "Parallel (x8)"),
-        //     haystack,
-        //     |b, haystack| b.iter(|| match_list_parallel(needle, haystack, Some(3))),
-        // );
+        group.bench_with_input(
+            BenchmarkId::new("All Scores", "Parallel (x8)"),
+            haystack,
+            |b, haystack| b.iter(|| match_list_parallel(needle, haystack, None)),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("1 Typo", "Parallel (x8)"),
+            haystack,
+            |b, haystack| b.iter(|| match_list_parallel(needle, haystack, Some(1))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("2 Typos", "Parallel (x8)"),
+            haystack,
+            |b, haystack| b.iter(|| match_list_parallel(needle, haystack, Some(2))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("3 Typos", "Parallel (x8)"),
+            haystack,
+            |b, haystack| b.iter(|| match_list_parallel(needle, haystack, Some(3))),
+        );
     }
 }
 

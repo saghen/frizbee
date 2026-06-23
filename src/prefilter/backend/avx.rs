@@ -193,8 +193,13 @@ impl Backend for PrefilterAVXBackend {
     }
 
     #[inline(always)]
-    unsafe fn zero() -> __m256i {
-        unsafe { _mm256_setzero_si256() }
+    unsafe fn splat(c: u8) -> Self::Chunk {
+        unsafe { _mm256_set1_epi8(c as i8) }
+    }
+
+    #[inline(always)]
+    unsafe fn eq(a: Self::Chunk, b: Self::Chunk) -> Self::Mask {
+        unsafe { _mm256_cmpeq_epi8_mask(a, b) }
     }
 
     #[inline(always)]
@@ -215,28 +220,6 @@ impl Backend for PrefilterAVXBackend {
                 _mm256_cmpeq_epi8(needle.1, chunk),
             );
             _mm256_movemask_epi8(mask) as u32
-        }
-    }
-
-    #[inline(always)]
-    unsafe fn shift_left<const N: usize>(a: __m256i, b: __m256i) -> __m256i {
-        unsafe {
-            match N {
-                0 => a,
-                1 => {
-                    let shifted = _mm256_permute2x128_si256::<0x21>(b, a);
-                    _mm256_alignr_epi8::<15>(a, shifted)
-                }
-                2 => {
-                    let shifted = _mm256_permute2x128_si256::<0x21>(b, a);
-                    _mm256_alignr_epi8::<14>(a, shifted)
-                }
-                3 => {
-                    let shifted = _mm256_permute2x128_si256::<0x21>(b, a);
-                    _mm256_alignr_epi8::<13>(a, shifted)
-                }
-                _ => unreachable!("shift amount must be <= 3"),
-            }
         }
     }
 }

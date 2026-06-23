@@ -1,7 +1,7 @@
 use super::{
     UnicodeChar,
     backend::{Backend, BitMaskOps},
-    case_needle, case_needle_unicode,
+    case_needle,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -13,7 +13,7 @@ pub(crate) struct PathState<M> {
 #[derive(Debug, Clone)]
 pub(crate) struct Prefilter<B: Backend> {
     needle_ascii: Vec<(B::Chunk, B::Chunk)>,
-    needle_unicode: Vec<UnicodeChar<B::Chunk>>,
+    needle_unicode: Vec<UnicodeChar>,
     paths: Vec<PathState<B::Mask>>,
 }
 
@@ -26,10 +26,11 @@ impl<B: Backend> Prefilter<B> {
             .into_iter()
             .map(|c| unsafe { B::broadcast(c) })
             .collect();
-        let needle_unicode = case_needle_unicode(needle, case_sensitive)
-            .into_iter()
-            .map(|c| unsafe { c.broadcast::<B>() })
-            .collect();
+        // let needle_unicode = case_needle_unicode(needle, case_sensitive)
+        //     .into_iter()
+        //     .map(|c| unsafe { c.broadcast::<B>() })
+        //     .collect();
+        let needle_unicode = needle.chars().map(UnicodeChar::new).collect();
 
         Self {
             needle_ascii,
@@ -106,52 +107,70 @@ impl<B: Backend> Prefilter<B> {
         let needle = self.needle_unicode.as_slice();
         let mut needle_iter = needle.iter();
         let mut needle_char = needle_iter.next().unwrap();
-        let mut last_needle_char_byte = needle_char.chars[needle_char.len - 1];
+        let mut last_needle_char_byte = unsafe { B::splat(needle_char.chars[needle_char.len - 1]) };
         let mut start = 0usize;
 
-        let mut prev_chunk = unsafe { B::zero() };
         while start < len {
-            let (chunk, mut chunk_mask) = unsafe { load_window::<B>(haystack, start, len) };
+            let (chunk, mut chunk_mask) =
+                unsafe { load_window::<B>(haystack, start + needle_char.len - 1, len) };
 
             loop {
                 // check the last byte first since it's the most discriminating
                 // since the prefix bytes indentify the script/block, not the char
                 // and nearby chars are likely to be all in the same script/block
-                let mut mask = unsafe { B::occ(chunk, last_needle_char_byte) }.and(chunk_mask);
+                let mut mask = unsafe { B::eq(chunk, last_needle_char_byte) }.and(chunk_mask);
                 if mask.is_zero() {
                     break;
                 }
 
                 // check that the rest of the bytes in the char match
                 if needle_char.len == 2 {
-                    let shifted_chunk = unsafe { B::shift_left::<1>(chunk, prev_chunk) };
-                    let occ =
-                        unsafe { B::occ(shifted_chunk, needle_char.chars[needle_char.len - 2]) };
+                    let occ = unsafe {
+                        B::eq(
+                            load_window_maskless::<B>(haystack, start, len),
+                            B::splat(needle_char.chars[0]),
+                        )
+                    };
                     mask = mask.and(occ);
                     if mask.is_zero() {
                         break;
                     }
                 } else if needle_char.len == 3 {
-                    let shifted_chunk_1 = unsafe { B::shift_left::<1>(chunk, prev_chunk) };
-                    let shifted_chunk_2 = unsafe { B::shift_left::<2>(chunk, prev_chunk) };
-                    let occ_1 =
-                        unsafe { B::occ(shifted_chunk_1, needle_char.chars[needle_char.len - 2]) };
-                    let occ_2 =
-                        unsafe { B::occ(shifted_chunk_2, needle_char.chars[needle_char.len - 3]) };
+                    let occ_1 = unsafe {
+                        B::eq(
+                            load_window_maskless::<B>(haystack, start + 1, len),
+                            B::splat(needle_char.chars[1]),
+                        )
+                    };
+                    let occ_2 = unsafe {
+                        B::eq(
+                            load_window_maskless::<B>(haystack, start, len),
+                            B::splat(needle_char.chars[0]),
+                        )
+                    };
                     mask = mask.and(occ_1).and(occ_2);
                     if mask.is_zero() {
                         break;
                     }
                 } else if needle_char.len == 4 {
-                    let shifted_chunk_1 = unsafe { B::shift_left::<1>(chunk, prev_chunk) };
-                    let shifted_chunk_2 = unsafe { B::shift_left::<2>(chunk, prev_chunk) };
-                    let shifted_chunk_3 = unsafe { B::shift_left::<3>(chunk, prev_chunk) };
-                    let occ_1 =
-                        unsafe { B::occ(shifted_chunk_1, needle_char.chars[needle_char.len - 2]) };
-                    let occ_2 =
-                        unsafe { B::occ(shifted_chunk_2, needle_char.chars[needle_char.len - 3]) };
-                    let occ_3 =
-                        unsafe { B::occ(shifted_chunk_3, needle_char.chars[needle_char.len - 4]) };
+                    let occ_1 = unsafe {
+                        B::eq(
+                            load_window_maskless::<B>(haystack, start + 2, len),
+                            B::splat(needle_char.chars[2]),
+                        )
+                    };
+                    let occ_2 = unsafe {
+                        B::eq(
+                            load_window_maskless::<B>(haystack, start + 1, len),
+                            B::splat(needle_char.chars[1]),
+                        )
+                    };
+                    let occ_3 = unsafe {
+                        B::eq(
+                            load_window_maskless::<B>(haystack, start, len),
+                            B::splat(needle_char.chars[0]),
+                        )
+                    };
                     mask = mask.and(occ_1).and(occ_2).and(occ_3);
                     if mask.is_zero() {
                         break;
@@ -161,34 +180,25 @@ impl<B: Backend> Prefilter<B> {
                 chunk_mask = chunk_mask.clear_through_lowest(mask);
                 if can_skip_chunks {
                     // since we match on the final byte, subtract the byte length of the char
-                    match_start_pos = start + mask.trailing_zeros() + 1 - needle_char.len;
+                    match_start_pos = start + mask.trailing_zeros();
                     can_skip_chunks = false;
                 }
 
                 if let Some(next_needle_char) = needle_iter.next() {
                     needle_char = next_needle_char;
-                    last_needle_char_byte = needle_char.chars[needle_char.len - 1];
-                } else if start + B::LANES > len - needle_char.len {
+                    last_needle_char_byte =
+                        unsafe { B::splat(needle_char.chars[needle_char.len - 1]) };
+                } else {
+                    // TODO: add back scanning if not on last chunk
                     return (
                         true,
                         match_start_pos,
-                        start + B::LANES - mask.leading_zeros(),
+                        start + B::LANES - mask.leading_zeros() + needle_char.len - 1,
                     );
-                } else {
-                    // this still works for multi-byte unicode, since on a false positive, we
-                    // end up including extra suffix which doesn't affect correctness
-                    let last = *needle.last().unwrap();
-                    let last_needle_char_byte = last.chars[last.len - 1];
-                    let end_pos = start
-                        + unsafe {
-                            find_last_char_pos::<B>(last_needle_char_byte, &haystack[start..])
-                        };
-                    return (true, match_start_pos, end_pos);
                 }
             }
 
             start += B::LANES;
-            prev_chunk = chunk;
         }
 
         (false, match_start_pos, len)
@@ -617,6 +627,29 @@ pub(crate) unsafe fn load_window<B: Backend>(
             (B::load(ptr), mask)
         } else {
             (B::load_partial(ptr, remaining, mask), mask)
+        }
+    }
+}
+
+#[inline(always)]
+pub(crate) unsafe fn load_window_maskless<B: Backend>(
+    haystack: &[u8],
+    start: usize,
+    len: usize,
+) -> B::Chunk {
+    unsafe {
+        debug_assert!(B::LANES <= 64);
+        let remaining = len - start;
+        if remaining >= B::LANES {
+            return B::load(haystack.as_ptr().add(start));
+        }
+
+        let ptr = haystack.as_ptr().add(start);
+        if can_overread(ptr, B::LANES) {
+            B::load(ptr)
+        } else {
+            let mask = B::Mask::first_n(remaining);
+            B::load_partial(ptr, remaining, mask)
         }
     }
 }
