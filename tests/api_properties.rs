@@ -99,6 +99,15 @@ impl<'a> ByteCursor<'a> {
 
     fn char(&mut self) -> char {
         let byte = self.next();
+        if byte & 0x0f == 0 {
+            return match (byte >> 4) & 3 {
+                0 => 'é',
+                1 => 'ن',
+                2 => '다',
+                _ => '😀',
+            };
+        }
+
         match byte % 18 {
             0 => 'a',
             1 => ' ',
@@ -296,6 +305,77 @@ fn exact_match_flag_tracks_full_haystack_match() {
     assert_eq!(exact_by_index.get(&1), Some(&false));
     assert_eq!(exact_by_index.get(&2), Some(&true));
     assert_eq!(exact_by_index.get(&4), Some(&false));
+}
+
+#[test]
+fn unicode_matcher_zero_typo_uses_byte_offsets_and_exact_flags() {
+    let haystacks = vec![
+        "xxإنyy".to_string(),
+        "إن".to_string(),
+        "\u{06e5}\u{0606}".to_string(),
+        "nomatch".to_string(),
+        "x".repeat(65),
+    ];
+    let config = Config {
+        max_typos: Some(0),
+        sort: false,
+        ..Config::default()
+    };
+
+    let matches = match_list("إن", &haystacks, &config);
+    let mut matcher = Matcher::new("إن", &config);
+    let matcher_matches = matcher.match_list(&haystacks);
+    assert_match_views_eq("unicode Matcher::match_list", &matcher_matches, &matches);
+    assert_eq!(
+        matches
+            .iter()
+            .map(|match_| (match_.index, match_.exact))
+            .collect::<Vec<_>>(),
+        vec![(0, false), (1, true)]
+    );
+
+    let indices = match_list_indices("إن", &haystacks, &config);
+    let mut matcher = Matcher::new("إن", &config);
+    let matcher_indices = matcher.match_list_indices(&haystacks);
+    assert_eq!(indices_views(&matcher_indices), indices_views(&indices));
+    assert_eq!(indices.len(), 2);
+    assert_eq!((indices[0].index, indices[0].exact), (0, false));
+    assert_eq!(indices[0].indices, vec![5, 4, 3, 2]);
+    assert_eq!((indices[1].index, indices[1].exact), (1, true));
+    assert_eq!(indices[1].indices, vec![3, 2, 1, 0]);
+}
+
+#[test]
+fn unicode_matcher_typo_prefilter_counts_scalar_values() {
+    let haystacks = ["ن", "😀", "x"];
+    let config = Config {
+        max_typos: Some(1),
+        sort: false,
+        ..Config::default()
+    };
+
+    let matches = match_list("إن", &haystacks, &config);
+    assert_eq!(
+        matches
+            .iter()
+            .map(|match_| match_.index)
+            .collect::<Vec<_>>(),
+        vec![0]
+    );
+
+    let many_typo_config = Config {
+        max_typos: Some(2),
+        sort: false,
+        ..Config::default()
+    };
+    let matches = match_list("éन😀", &haystacks, &many_typo_config);
+    assert_eq!(
+        matches
+            .iter()
+            .map(|match_| match_.index)
+            .collect::<Vec<_>>(),
+        vec![1]
+    );
 }
 
 #[test]

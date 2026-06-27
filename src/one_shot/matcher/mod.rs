@@ -395,6 +395,26 @@ mod tests {
             &match_list("fB", &second_haystacks, &second_config)
         );
 
+        let unicode_haystacks = [
+            "é다😀".to_string(),
+            "xxé__다__😀yy".to_string(),
+            "é다".to_string(),
+            "plain ascii".to_string(),
+        ];
+        matcher.set_needle("é다😀");
+        let unicode_config = Config {
+            max_typos: Some(0),
+            sort: false,
+            ..Config::default()
+        };
+        matcher.set_config(unicode_config.clone());
+        let unicode = matcher.match_list(&unicode_haystacks);
+        assert_eq!(
+            &unicode,
+            &match_list("é다😀", &unicode_haystacks, &unicode_config)
+        );
+
+        matcher.set_needle("fB");
         let third_config = Config {
             casing: CaseMatching::Ignore,
             max_typos: Some(1),
