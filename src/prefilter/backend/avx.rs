@@ -223,7 +223,7 @@ impl Backend for PrefilterAVXBackend {
 
     #[inline(always)]
     unsafe fn eq(a: Self::Chunk, b: Self::Chunk) -> Self::Mask {
-        unsafe { _mm256_cmpeq_epi8_mask(a, b) }
+        unsafe { _mm256_movemask_epi8(_mm256_cmpeq_epi8(a, b)) as u32 }
     }
 
     #[inline(always)]

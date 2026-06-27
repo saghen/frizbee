@@ -7,7 +7,7 @@ mod unicode_typos;
 pub(crate) use ascii::find_last_char_pos;
 pub(crate) use load::{can_overread, load_window};
 
-use super::{UnicodeChar, backend::Backend, case_needle};
+use super::{UnicodeChar, backend::Backend, case_needle, case_needle_unicode};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PathState<M> {
@@ -31,7 +31,7 @@ impl<B: Backend> Prefilter<B> {
             .into_iter()
             .map(|(c1, c2)| unsafe { (B::splat(c1), B::splat(c2)) })
             .collect();
-        let needle_unicode = needle.chars().map(UnicodeChar::new).collect();
+        let needle_unicode = case_needle_unicode(needle, case_sensitive);
 
         Self {
             needle_ascii,

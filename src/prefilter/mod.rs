@@ -21,15 +21,26 @@ use backend::Backend;
 #[derive(Debug, Clone, Copy)]
 pub struct UnicodeChar {
     pub chars: [u8; 4],
+    pub flipped_chars: [u8; 4],
     pub len: usize,
 }
 
 impl UnicodeChar {
-    pub fn new(c: char) -> Self {
+    pub fn new(c: char, flipped_c: char) -> Self {
+        assert!(
+            c.len_utf8() == flipped_c.len_utf8(),
+            "Unicode characters must be the same length"
+        );
+
         let mut chars = [0; 4];
         c.encode_utf8(&mut chars);
+
+        let mut flipped_chars = [0; 4];
+        flipped_c.encode_utf8(&mut flipped_chars);
+
         Self {
             chars,
+            flipped_chars,
             len: c.len_utf8(),
         }
     }
@@ -53,46 +64,36 @@ pub(crate) fn case_needle(needle: &[u8], case_sensitive: bool) -> Vec<(u8, u8)> 
         .collect()
 }
 
-// pub(crate) fn case_needle_unicode(needle: &str, case_sensitive: bool) -> Vec<UnicodeChar<u8>> {
-//     needle
-//         .chars()
-//         .map(|c| {
-//             let len = c.len_utf8();
-//             // TODO: for now, this should ignore cases where more than one byte is changed
-//             let opposite_case = (if !case_sensitive && c.is_uppercase() {
-//                 let mut lower = c.to_lowercase();
-//                 let lower_char = lower.next().unwrap_or(c);
-//
-//                 // ignore cases where there's multiple variations or the length doesnt match
-//                 (lower.next().is_none() && lower_char.len_utf8() == len).then_some(lower_char)
-//             } else if !case_sensitive && c.is_lowercase() {
-//                 let mut upper = c.to_uppercase();
-//                 let upper_char = upper.next().unwrap_or(c);
-//
-//                 (upper.next().is_none() && upper_char.len_utf8() == len).then_some(upper_char)
-//             } else {
-//                 None
-//             })
-//             .unwrap_or(c);
-//
-//             // TODO: nicer way to write this?
-//             let mut normal_case_char = [0u8; 4];
-//             let mut opposite_case_char = [0u8; 4];
-//             c.encode_utf8(&mut normal_case_char);
-//             opposite_case.encode_utf8(&mut opposite_case_char);
-//
-//             let mut chars = [(0u8, 0u8); 4];
-//             for i in 0..c.len_utf8() {
-//                 chars[i] = (normal_case_char[i], opposite_case_char[i]);
-//             }
-//
-//             UnicodeChar {
-//                 chars,
-//                 len: c.len_utf8(),
-//             }
-//         })
-//         .collect()
-// }
+/// Returns a vector of pairs of Unicode characters, where the first is the original and the second
+/// is the opposite case. When the case flipping results in multiple characters, the case flipped version
+/// is ignored. This happens in extremely rare cases, with by far the most common case being
+/// the German `ß` -> `SS`.
+pub(crate) fn case_needle_unicode(needle: &str, case_sensitive: bool) -> Vec<UnicodeChar> {
+    needle
+        .chars()
+        .map(|c| {
+            let len = c.len_utf8();
+            let opposite_case = (if !case_sensitive && c.is_uppercase() {
+                let mut lower = c.to_lowercase();
+                let lower_char = lower.next().unwrap_or(c);
+
+                // ignore cases where there's multiple variations
+                (lower.next().is_none() && lower_char.len_utf8() == len).then_some(lower_char)
+            } else if !case_sensitive && c.is_lowercase() {
+                let mut upper = c.to_uppercase();
+                let upper_char = upper.next().unwrap_or(c);
+
+                // ignore cases where there's multiple variations
+                (upper.next().is_none() && upper_char.len_utf8() == len).then_some(upper_char)
+            } else {
+                None
+            })
+            .unwrap_or(c);
+
+            UnicodeChar::new(c, opposite_case)
+        })
+        .collect()
+}
 
 pub(crate) type Window = (bool, usize, usize);
 
@@ -298,9 +299,8 @@ mod tests {
         assert_ne!("ن".as_bytes()[0], wrong_second.as_bytes()[0]);
 
         let false_positive_bytes = format!("{wrong_first}{wrong_second}");
-        assert_eq!(
-            unicode_result_generic("إن", &false_positive_bytes, false).0,
-            false,
+        assert!(
+            !unicode_result_generic("إن", &false_positive_bytes, false).0,
             "last-byte-only match should not pass UTF-8 sequence verification"
         );
 
@@ -340,7 +340,7 @@ mod tests {
             unicode_result_generic_typos("إن", "ن", 1, false),
             (true, 0, "ن".len())
         );
-        assert_eq!(unicode_result_generic_typos("إن", "ن", 0, false).0, false);
+        assert!(!unicode_result_generic_typos("إن", "ن", 0, false).0);
     }
 
     #[test]
@@ -349,10 +349,7 @@ mod tests {
             unicode_result_generic_typos("éन😀", "😀", 2, false),
             (true, 0, "😀".len())
         );
-        assert_eq!(
-            unicode_result_generic_typos("éन😀", "😀", 1, false).0,
-            false
-        );
+        assert!(!unicode_result_generic_typos("éन😀", "😀", 1, false).0);
     }
 
     #[test]
@@ -361,10 +358,7 @@ mod tests {
             unicode_result_generic_typos("😀éनZ", "Z", 3, false),
             (true, 0, "Z".len())
         );
-        assert_eq!(
-            unicode_result_generic_typos("😀éनZ", "Z", 2, false).0,
-            false
-        );
+        assert!(!unicode_result_generic_typos("😀éनZ", "Z", 2, false).0);
     }
 
     #[test]
@@ -376,14 +370,8 @@ mod tests {
         assert_eq!("ن".as_bytes()[1], wrong_second.as_bytes()[1]);
         assert_ne!("ن".as_bytes()[0], wrong_second.as_bytes()[0]);
 
-        assert_eq!(
-            unicode_result_generic_typos("إن", wrong_first, 1, false).0,
-            false
-        );
-        assert_eq!(
-            unicode_result_generic_typos("إن", wrong_second, 1, false).0,
-            false
-        );
+        assert!(!unicode_result_generic_typos("إن", wrong_first, 1, false).0);
+        assert!(!unicode_result_generic_typos("إن", wrong_second, 1, false).0);
     }
 
     #[test]
@@ -753,7 +741,7 @@ mod tests {
         }
 
         fn len(&mut self, max: usize, boundaries: &[usize]) -> usize {
-            if self.next() % 4 == 0 {
+            if self.next().is_multiple_of(4) {
                 boundaries[(self.next() as usize) % boundaries.len()].min(max)
             } else {
                 self.usize() % (max + 1)

@@ -10,39 +10,40 @@ impl<B: Backend> Prefilter<B> {
         start: usize,
         len: usize,
         haystack: &[u8],
-        needle_char: &UnicodeChar,
+        char_len: usize,
+        chars: [u8; 4],
     ) -> B::Mask {
-        debug_assert!(needle_char.len <= 4 && needle_char.len > 0);
-        match needle_char.len {
+        debug_assert!(char_len <= 4 && char_len > 1);
+        match char_len {
             2 => unsafe {
                 B::eq(
                     load_window_maskless::<B>(haystack, start, len),
-                    B::splat(needle_char.chars[0]),
+                    B::splat(chars[0]),
                 )
             },
             3 => unsafe {
                 let occ_1 = B::eq(
                     load_window_maskless::<B>(haystack, start + 1, len),
-                    B::splat(needle_char.chars[1]),
+                    B::splat(chars[1]),
                 );
                 let occ_2 = B::eq(
                     load_window_maskless::<B>(haystack, start, len),
-                    B::splat(needle_char.chars[0]),
+                    B::splat(chars[0]),
                 );
                 occ_1.and(occ_2)
             },
             4 => unsafe {
                 let occ_1 = B::eq(
                     load_window_maskless::<B>(haystack, start + 2, len),
-                    B::splat(needle_char.chars[2]),
+                    B::splat(chars[2]),
                 );
                 let occ_2 = B::eq(
                     load_window_maskless::<B>(haystack, start + 1, len),
-                    B::splat(needle_char.chars[1]),
+                    B::splat(chars[1]),
                 );
                 let occ_3 = B::eq(
                     load_window_maskless::<B>(haystack, start, len),
-                    B::splat(needle_char.chars[0]),
+                    B::splat(chars[0]),
                 );
                 occ_1.and(occ_2).and(occ_3)
             },
@@ -66,9 +67,27 @@ impl<B: Backend> Prefilter<B> {
         let (chunk, chunk_mask) = unsafe { load_window::<B>(haystack, start + char_len - 1, len) };
         let mut mask =
             unsafe { B::eq(chunk, B::splat(needle_char.chars[char_len - 1])) }.and(chunk_mask);
-        if !mask.is_zero() && char_len > 1 {
-            mask = mask
-                .and(unsafe { Self::match_unicode_char_prefix(start, len, haystack, needle_char) });
+        if mask.is_zero() {
+            // check the case flipped version
+            mask = unsafe { B::eq(chunk, B::splat(needle_char.flipped_chars[char_len - 1])) }
+                .and(chunk_mask);
+
+            // check that the rest of the bytes in the flipped case char match
+            if !mask.is_zero() && char_len > 1 {
+                mask = mask.and(unsafe {
+                    Self::match_unicode_char_prefix(
+                        start,
+                        len,
+                        haystack,
+                        char_len,
+                        needle_char.flipped_chars,
+                    )
+                });
+            }
+        } else if char_len > 1 {
+            mask = mask.and(unsafe {
+                Self::match_unicode_char_prefix(start, len, haystack, char_len, needle_char.chars)
+            });
         }
         mask
     }
@@ -84,7 +103,12 @@ impl<B: Backend> Prefilter<B> {
         let mut match_start_pos = 0usize;
         let mut needle_iter = self.needle_unicode.iter();
         let mut needle_char = needle_iter.next().unwrap();
-        let mut last_needle_char_byte = unsafe { B::splat(needle_char.chars[needle_char.len - 1]) };
+        let mut last_needle_char_bytes = unsafe {
+            (
+                B::splat(needle_char.chars[needle_char.len - 1]),
+                B::splat(needle_char.flipped_chars[needle_char.len - 1]),
+            )
+        };
         let mut start = 0usize;
 
         while start + needle_char.len <= len {
@@ -93,17 +117,43 @@ impl<B: Backend> Prefilter<B> {
 
             loop {
                 // check the last byte first since it's the most discriminating
-                // since the prefix bytes indentify the script/block, not the char
+                // since the prefix bytes identify the script/block, not the char
                 // and nearby chars are likely to be all in the same script/block
-                let mut mask = unsafe { B::eq(chunk, last_needle_char_byte) }.and(chunk_mask);
+                let mut mask = unsafe { B::eq(chunk, last_needle_char_bytes.0) }.and(chunk_mask);
                 if mask.is_zero() {
-                    break;
+                    // check the case flipped version
+                    mask = unsafe { B::eq(chunk, last_needle_char_bytes.1) }.and(chunk_mask);
+                    if mask.is_zero() {
+                        break;
+                    }
+
+                    // check that the rest of the bytes in the flipped case char match
+                    if needle_char.len > 1 {
+                        mask = mask.and(unsafe {
+                            Self::match_unicode_char_prefix(
+                                start,
+                                len,
+                                haystack,
+                                needle_char.len,
+                                needle_char.flipped_chars,
+                            )
+                        });
+                        if mask.is_zero() {
+                            break;
+                        }
+                    }
                 }
 
                 // check that the rest of the bytes in the char match
                 if needle_char.len > 1 {
                     mask = mask.and(unsafe {
-                        Self::match_unicode_char_prefix(start, len, haystack, needle_char)
+                        Self::match_unicode_char_prefix(
+                            start,
+                            len,
+                            haystack,
+                            needle_char.len,
+                            needle_char.chars,
+                        )
                     });
                     if mask.is_zero() {
                         break;
@@ -119,8 +169,12 @@ impl<B: Backend> Prefilter<B> {
 
                 if let Some(next_needle_char) = needle_iter.next() {
                     needle_char = next_needle_char;
-                    last_needle_char_byte =
-                        unsafe { B::splat(needle_char.chars[needle_char.len - 1]) };
+                    last_needle_char_bytes = unsafe {
+                        (
+                            B::splat(needle_char.chars[needle_char.len - 1]),
+                            B::splat(needle_char.flipped_chars[needle_char.len - 1]),
+                        )
+                    };
                 } else if start + needle_char.len - 1 + B::LANES >= len {
                     return (
                         true,
@@ -149,15 +203,40 @@ impl<B: Backend> Prefilter<B> {
         debug_assert!(char_len <= 4 && char_len > 0);
         debug_assert!(len >= char_len);
 
-        let last_byte = unsafe { B::splat(needle_char.chars[char_len - 1]) };
+        let last_bytes = unsafe {
+            (
+                B::splat(needle_char.chars[char_len - 1]),
+                B::splat(needle_char.flipped_chars[char_len - 1]),
+            )
+        };
         let mut start = len.saturating_sub(B::LANES + char_len - 1);
         loop {
             let (chunk, chunk_mask) =
                 unsafe { load_window::<B>(haystack, start + char_len - 1, len) };
-            let mut mask = unsafe { B::eq(chunk, last_byte) }.and(chunk_mask);
-            if char_len > 1 {
+
+            // we check both the original and flipped case bytes simultaneously since either
+            // could have matched. this can result in a false positive, but that's fine for
+            // this stage since this just controls bounds, and bounds being too large hurt
+            // performance, not correctness.
+            let mut mask = unsafe { B::eq(chunk, last_bytes.0).and(B::eq(chunk, last_bytes.1)) }
+                .and(chunk_mask);
+
+            if !mask.is_zero() && char_len > 1 {
                 mask = mask.and(unsafe {
-                    Self::match_unicode_char_prefix(start, len, haystack, needle_char)
+                    Self::match_unicode_char_prefix(
+                        start,
+                        len,
+                        haystack,
+                        char_len,
+                        needle_char.chars,
+                    )
+                    .or(Self::match_unicode_char_prefix(
+                        start,
+                        len,
+                        haystack,
+                        char_len,
+                        needle_char.flipped_chars,
+                    ))
                 });
             }
 
