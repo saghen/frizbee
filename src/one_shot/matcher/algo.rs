@@ -41,7 +41,7 @@ where
         let mut matches = vec![];
         self.match_list_into_impl(haystacks, 0, &mut matches);
 
-        if self.config.sort {
+        if !self.needle.is_empty() && self.config.sort {
             radix_sort(&mut matches);
         }
 
