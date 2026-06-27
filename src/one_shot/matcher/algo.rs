@@ -21,7 +21,7 @@ where
 {
     #[inline(always)]
     pub fn new_impl(needle: &str, config: &Config) -> Self {
-        let case_sensitive = config.casing.respects_case_for(needle.as_bytes());
+        let case_sensitive = config.casing.respects_case_for(needle);
         let matcher = Self {
             needle: needle.to_string(),
             config: config.clone(),

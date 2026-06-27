@@ -186,10 +186,10 @@ pub enum CaseMatching {
 
 impl CaseMatching {
     #[inline(always)]
-    pub(crate) fn respects_case_for(self, needle: &[u8]) -> bool {
+    pub(crate) fn respects_case_for(self, needle: &str) -> bool {
         match self {
             CaseMatching::Ignore => false,
-            CaseMatching::Smart => needle.iter().any(u8::is_ascii_uppercase),
+            CaseMatching::Smart => needle.chars().any(char::is_uppercase),
             CaseMatching::Respect => true,
         }
     }
