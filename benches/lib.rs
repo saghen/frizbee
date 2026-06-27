@@ -50,7 +50,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
         match_list_real_bench(
             c,
-            &dataset.name,
+            dataset.name,
             dataset.needle,
             &haystack,
             dataset.fff_sequential,
