@@ -306,6 +306,17 @@ mod tests {
     }
 
     #[test]
+    fn unicode_prefilter_back_scans_final_char() {
+        let haystack = format!("xxإن{}نzz", "x".repeat(32));
+        let expected_end = haystack.rfind('ن').unwrap() + 'ن'.len_utf8();
+
+        assert_eq!(
+            unicode_result_generic("إن", &haystack, false),
+            (true, 2, expected_end)
+        );
+    }
+
+    #[test]
     fn unicode_prefilter_respects_case_setting() {
         assert_eq!(unicode_result_generic("É", "é", false), (true, 0, 2));
         assert_eq!(unicode_result_generic("É", "é", true).0, false);

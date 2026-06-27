@@ -92,6 +92,51 @@ impl<B: Backend> Prefilter<B> {
     }
 
     #[inline(always)]
+    pub unsafe fn match_haystack_needle_unicode_char(
+        start: usize,
+        len: usize,
+        haystack: &[u8],
+        needle_char: &UnicodeChar,
+    ) -> B::Mask {
+        debug_assert!(needle_char.len <= 4 && needle_char.len > 0);
+        match needle_char.len {
+            2 => unsafe {
+                B::eq(
+                    load_window_maskless::<B>(haystack, start, len),
+                    B::splat(needle_char.chars[0]),
+                )
+            },
+            3 => unsafe {
+                let occ_1 = B::eq(
+                    load_window_maskless::<B>(haystack, start + 1, len),
+                    B::splat(needle_char.chars[1]),
+                );
+                let occ_2 = B::eq(
+                    load_window_maskless::<B>(haystack, start, len),
+                    B::splat(needle_char.chars[0]),
+                );
+                occ_1.and(occ_2)
+            },
+            4 => unsafe {
+                let occ_1 = B::eq(
+                    load_window_maskless::<B>(haystack, start + 2, len),
+                    B::splat(needle_char.chars[2]),
+                );
+                let occ_2 = B::eq(
+                    load_window_maskless::<B>(haystack, start + 1, len),
+                    B::splat(needle_char.chars[1]),
+                );
+                let occ_3 = B::eq(
+                    load_window_maskless::<B>(haystack, start, len),
+                    B::splat(needle_char.chars[0]),
+                );
+                occ_1.and(occ_2).and(occ_3)
+            },
+            _ => unreachable!(),
+        }
+    }
+
+    #[inline(always)]
     pub unsafe fn match_haystack_unicode(&self, haystack: &[u8]) -> (bool, usize, usize) {
         let len = haystack.len();
         if len == 0 {
@@ -100,13 +145,12 @@ impl<B: Backend> Prefilter<B> {
 
         let mut can_skip_chunks = true;
         let mut match_start_pos = 0usize;
-        let needle = self.needle_unicode.as_slice();
-        let mut needle_iter = needle.iter();
+        let mut needle_iter = self.needle_unicode.iter();
         let mut needle_char = needle_iter.next().unwrap();
         let mut last_needle_char_byte = unsafe { B::splat(needle_char.chars[needle_char.len - 1]) };
         let mut start = 0usize;
 
-        while start < len {
+        while start + needle_char.len <= len {
             let (chunk, mut chunk_mask) =
                 unsafe { load_window::<B>(haystack, start + needle_char.len - 1, len) };
 
@@ -120,54 +164,10 @@ impl<B: Backend> Prefilter<B> {
                 }
 
                 // check that the rest of the bytes in the char match
-                if needle_char.len == 2 {
-                    let occ = unsafe {
-                        B::eq(
-                            load_window_maskless::<B>(haystack, start, len),
-                            B::splat(needle_char.chars[0]),
-                        )
-                    };
-                    mask = mask.and(occ);
-                    if mask.is_zero() {
-                        break;
-                    }
-                } else if needle_char.len == 3 {
-                    let occ_1 = unsafe {
-                        B::eq(
-                            load_window_maskless::<B>(haystack, start + 1, len),
-                            B::splat(needle_char.chars[1]),
-                        )
-                    };
-                    let occ_2 = unsafe {
-                        B::eq(
-                            load_window_maskless::<B>(haystack, start, len),
-                            B::splat(needle_char.chars[0]),
-                        )
-                    };
-                    mask = mask.and(occ_1).and(occ_2);
-                    if mask.is_zero() {
-                        break;
-                    }
-                } else if needle_char.len == 4 {
-                    let occ_1 = unsafe {
-                        B::eq(
-                            load_window_maskless::<B>(haystack, start + 2, len),
-                            B::splat(needle_char.chars[2]),
-                        )
-                    };
-                    let occ_2 = unsafe {
-                        B::eq(
-                            load_window_maskless::<B>(haystack, start + 1, len),
-                            B::splat(needle_char.chars[1]),
-                        )
-                    };
-                    let occ_3 = unsafe {
-                        B::eq(
-                            load_window_maskless::<B>(haystack, start, len),
-                            B::splat(needle_char.chars[0]),
-                        )
-                    };
-                    mask = mask.and(occ_1).and(occ_2).and(occ_3);
+                if needle_char.len > 1 {
+                    mask = mask.and(unsafe {
+                        Self::match_haystack_needle_unicode_char(start, len, haystack, needle_char)
+                    });
                     if mask.is_zero() {
                         break;
                     }
@@ -184,13 +184,18 @@ impl<B: Backend> Prefilter<B> {
                     needle_char = next_needle_char;
                     last_needle_char_byte =
                         unsafe { B::splat(needle_char.chars[needle_char.len - 1]) };
-                } else {
-                    // TODO: add back scanning if not on last chunk
+                } else if start + needle_char.len - 1 + B::LANES >= len {
                     return (
                         true,
                         match_start_pos,
                         start + B::LANES - mask.leading_zeros() + needle_char.len - 1,
                     );
+                } else {
+                    let end_pos = start
+                        + unsafe {
+                            Self::find_last_unicode_char_pos(needle_char, &haystack[start..])
+                        };
+                    return (true, match_start_pos, end_pos);
                 }
             }
 
@@ -198,6 +203,38 @@ impl<B: Backend> Prefilter<B> {
         }
 
         (false, match_start_pos, len)
+    }
+
+    #[inline(always)]
+    unsafe fn find_last_unicode_char_pos(needle_char: &UnicodeChar, haystack: &[u8]) -> usize {
+        let len = haystack.len();
+        let char_len = needle_char.len;
+        debug_assert!(char_len <= 4 && char_len > 0);
+        debug_assert!(len >= char_len);
+
+        let last_byte = unsafe { B::splat(needle_char.chars[char_len - 1]) };
+        let mut start = len.saturating_sub(B::LANES + char_len - 1);
+        loop {
+            let (chunk, chunk_mask) =
+                unsafe { load_window::<B>(haystack, start + char_len - 1, len) };
+            let mut mask = unsafe { B::eq(chunk, last_byte) }.and(chunk_mask);
+            if char_len > 1 {
+                mask = mask.and(unsafe {
+                    Self::match_haystack_needle_unicode_char(start, len, haystack, needle_char)
+                });
+            }
+
+            if !mask.is_zero() {
+                return start + B::LANES - mask.leading_zeros() + char_len - 1;
+            }
+
+            if start == 0 {
+                break;
+            }
+            start = start.saturating_sub(B::LANES);
+        }
+
+        len
     }
 
     #[inline(always)]
