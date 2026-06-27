@@ -4,14 +4,13 @@
 //!
 //! The ASCII prefilter proves that an ordered alignment exists after deleting
 //! at most `max_typos` needle bytes. The Unicode typo paths use UTF-8 scalar
-//! values as the typo unit, while still returning byte windows. Substitution is
-//! relaxed to deletion here: any alignment with a mismatch is also accepted by
-//! deleting that needle unit. This can still produce score-level false
-//! positives, but it cannot reject a haystack that Smith-Waterman could accept.
+//! values as the typo unit, while still returning byte windows. This can still
+//! produce score-level false positives, but it cannot reject a haystack that
+//! Smith-Waterman could accept.
 //!
-//! Matcher chooses the concrete prefilter backend via runtime feature detection.
+//! Matcher chooses the prefilter backend via runtime feature detection.
 //! Matching assumes that needle.len() > 0, but backends may be constructed for
-//! empty needles so `Matcher` can still select a concrete backend up front.
+//! empty needles so `Matcher` can still select a backend up front.
 
 pub(crate) mod algo;
 pub(crate) mod backend;
