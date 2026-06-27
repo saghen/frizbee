@@ -1,4 +1,4 @@
-//! Frizbee is a SIMD typo-resistant fuzzy string matcher written in Rust. The core of the algorithm uses Smith-Waterman with affine gaps, similar to FZF. In the included benchmark, with typo resistance disabled, it outperforms [nucleo](https://github.com/helix-editor/nucleo) by ~4x and [fzf](https://github.com/junegunn/fzf) by ~5x and supports multithreading, see [benchmarks](./BENCHMARKS.md). It matches against bytes directly, ignoring unicode.
+//! Frizbee is a SIMD typo-resistant fuzzy string matcher written in Rust. The core of the algorithm uses Smith-Waterman with affine gaps, similar to FZF. In the included benchmark, with typo resistance disabled, it outperforms [nucleo](https://github.com/helix-editor/nucleo) by ~4x and [fzf](https://github.com/junegunn/fzf) by \~5x and supports multithreading, see [benchmarks](./BENCHMARKS.md). When matching against unicode, it outperforms nucleo and fzf by \~15x.
 //!
 //! Used by [blink.cmp](https://github.com/saghen/blink.cmp), [skim](https://github.com/skim-rs/skim), and [fff](https://github.com/dmtrKovalenko/fff). Special thank you to [stefanboca](https://github.com/stefanboca) and [ii14](https://github.com/ii14)!
 //!
@@ -175,12 +175,12 @@ impl Default for Config {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CaseMatching {
-    /// Ignore ASCII case while matching.
+    /// Ignore case while matching.
     #[default]
     Ignore,
-    /// Ignore ASCII case unless the needle contains uppercase ASCII
+    /// Ignore case unless the needle contains uppercase
     Smart,
-    /// Require matching bytes to have the same ASCII case
+    /// Require matching bytes to have the same case
     Respect,
 }
 
