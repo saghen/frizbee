@@ -104,15 +104,18 @@ impl_mask!(u64);
 pub(crate) trait Backend: Sized + Debug + Clone + 'static {
     const LANES: usize;
 
-    type Chunk: Copy;
-    type Needle: Copy + Debug;
+    type Chunk: Copy + Debug;
     type Mask: Mask;
 
     fn is_available() -> bool;
 
     /// # Safety
     /// The backend's target features must be enabled.
-    unsafe fn broadcast(c1: u8, c2: u8) -> Self::Needle;
+    unsafe fn splat(c: u8) -> Self::Chunk;
+
+    /// # Safety
+    /// The backend's target features must be enabled.
+    unsafe fn eq(a: Self::Chunk, b: Self::Chunk) -> Self::Mask;
 
     /// # Safety
     /// `ptr` must point to at least `LANES` readable bytes, and the backend's
@@ -129,7 +132,7 @@ pub(crate) trait Backend: Sized + Debug + Clone + 'static {
 
     /// # Safety
     /// The backend's target features must be enabled.
-    unsafe fn occ(chunk: Self::Chunk, needle: Self::Needle) -> Self::Mask;
+    unsafe fn occ(chunk: Self::Chunk, needle: (Self::Chunk, Self::Chunk)) -> Self::Mask;
 
     /// # Safety
     /// The backend's target features must be enabled and `hit` must be nonzero.

@@ -9,7 +9,6 @@ impl Backend for PrefilterAVX512Backend {
     const LANES: usize = 64;
 
     type Chunk = __m512i;
-    type Needle = (__m512i, __m512i);
     type Mask = u64;
 
     fn is_available() -> bool {
@@ -20,8 +19,13 @@ impl Backend for PrefilterAVX512Backend {
     }
 
     #[inline(always)]
-    unsafe fn broadcast(c1: u8, c2: u8) -> Self::Needle {
-        unsafe { (_mm512_set1_epi8(c1 as i8), _mm512_set1_epi8(c2 as i8)) }
+    unsafe fn splat(c: u8) -> Self::Chunk {
+        unsafe { _mm512_set1_epi8(c as i8) }
+    }
+
+    #[inline(always)]
+    unsafe fn eq(a: Self::Chunk, b: Self::Chunk) -> Self::Mask {
+        unsafe { _mm512_cmpeq_epi8_mask(a, b) }
     }
 
     #[inline(always)]
@@ -37,7 +41,7 @@ impl Backend for PrefilterAVX512Backend {
     }
 
     #[inline(always)]
-    unsafe fn occ(chunk: Self::Chunk, needle: Self::Needle) -> Self::Mask {
+    unsafe fn occ(chunk: Self::Chunk, needle: (Self::Chunk, Self::Chunk)) -> Self::Mask {
         unsafe { _mm512_cmpeq_epi8_mask(needle.0, chunk) | _mm512_cmpeq_epi8_mask(needle.1, chunk) }
     }
 

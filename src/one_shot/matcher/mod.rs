@@ -47,11 +47,17 @@ impl Matcher {
     }
 
     pub fn set_config(&mut self, config: Config) {
+        if self.config == config {
+            return;
+        }
         self.config = config;
         self.backend = Self::get_backend(&self.needle, &self.config);
     }
 
     pub fn set_needle(&mut self, needle: &str) {
+        if self.needle == needle {
+            return;
+        }
         self.needle = needle.to_string();
         self.backend = Self::get_backend(&self.needle, &self.config);
     }

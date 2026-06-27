@@ -19,17 +19,23 @@ pub struct PrefilterAVX {
 
 impl Kernel for PrefilterAVX {
     #[inline(always)]
-    fn new(needle: &[u8], case_sensitive: bool) -> Self {
-        let needle_cases = case_needle(needle, case_sensitive);
+    fn new(needle: &str, case_sensitive: bool) -> Self {
+        let needle_cases = case_needle(needle.as_bytes(), case_sensitive);
         let needle_len = needle_cases.len();
         let mut needle_simd = needle_cases
             .iter()
-            .map(|&(c1, c2)| unsafe { (_mm256_set1_epi8(c1 as i8), _mm256_set1_epi8(c2 as i8)) })
+            .map(|&(c1, c2)| unsafe {
+                (
+                    PrefilterAVXBackend::splat(c1),
+                    PrefilterAVXBackend::splat(c2),
+                )
+            })
             .collect::<Vec<_>>();
 
-        needle_simd.push(unsafe { (_mm256_setzero_si256(), _mm256_setzero_si256()) });
+        needle_simd.push(unsafe { (PrefilterAVXBackend::splat(0), PrefilterAVXBackend::splat(0)) });
         if needle_simd.len() % 2 != 0 {
-            needle_simd.push(unsafe { (_mm256_setzero_si256(), _mm256_setzero_si256()) });
+            needle_simd
+                .push(unsafe { (PrefilterAVXBackend::splat(0), PrefilterAVXBackend::splat(0)) });
         }
 
         Self {
@@ -159,8 +165,18 @@ impl Kernel for PrefilterAVX {
     }
 
     #[inline(always)]
+    fn match_haystack_unicode(&self, haystack: &[u8]) -> Window {
+        unsafe { self.inner.match_haystack_unicode(haystack) }
+    }
+
+    #[inline(always)]
     fn match_haystack_1_typo(&self, haystack: &[u8]) -> Window {
         unsafe { self.inner.match_haystack_1_typo(haystack) }
+    }
+
+    #[inline(always)]
+    fn match_haystack_unicode_1_typo(&self, haystack: &[u8]) -> Window {
+        unsafe { self.inner.match_haystack_unicode_1_typo(haystack) }
     }
 
     #[inline(always)]
@@ -169,8 +185,21 @@ impl Kernel for PrefilterAVX {
     }
 
     #[inline(always)]
+    fn match_haystack_unicode_2_typos(&self, haystack: &[u8]) -> Window {
+        unsafe { self.inner.match_haystack_unicode_2_typos(haystack) }
+    }
+
+    #[inline(always)]
     fn match_haystack_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
         unsafe { self.inner.match_haystack_many_typos(haystack, max_typos) }
+    }
+
+    #[inline(always)]
+    fn match_haystack_unicode_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
+        unsafe {
+            self.inner
+                .match_haystack_unicode_many_typos(haystack, max_typos)
+        }
     }
 }
 
@@ -181,7 +210,6 @@ impl Backend for PrefilterAVXBackend {
     const LANES: usize = 32;
 
     type Chunk = __m256i;
-    type Needle = (__m256i, __m256i);
     type Mask = u32;
 
     fn is_available() -> bool {
@@ -189,8 +217,13 @@ impl Backend for PrefilterAVXBackend {
     }
 
     #[inline(always)]
-    unsafe fn broadcast(c1: u8, c2: u8) -> Self::Needle {
-        unsafe { (_mm256_set1_epi8(c1 as i8), _mm256_set1_epi8(c2 as i8)) }
+    unsafe fn splat(c: u8) -> Self::Chunk {
+        unsafe { _mm256_set1_epi8(c as i8) }
+    }
+
+    #[inline(always)]
+    unsafe fn eq(a: Self::Chunk, b: Self::Chunk) -> Self::Mask {
+        unsafe { _mm256_cmpeq_epi8_mask(a, b) }
     }
 
     #[inline(always)]
@@ -199,7 +232,7 @@ impl Backend for PrefilterAVXBackend {
     }
 
     #[inline(always)]
-    unsafe fn occ(chunk: Self::Chunk, needle: Self::Needle) -> Self::Mask {
+    unsafe fn occ(chunk: Self::Chunk, needle: (Self::Chunk, Self::Chunk)) -> Self::Mask {
         unsafe {
             let mask = _mm256_or_si256(
                 _mm256_cmpeq_epi8(needle.0, chunk),

@@ -43,9 +43,6 @@ use std::cmp::Ordering;
 use serde::{Deserialize, Serialize};
 
 mod r#const;
-#[cfg(any(test, feature = "fuzzing"))]
-#[doc(hidden)]
-pub mod fuzz_support;
 mod k_merge;
 mod one_shot;
 mod prefilter;
@@ -147,7 +144,7 @@ impl PartialEq for MatchIndices {
 }
 impl Eq for MatchIndices {}
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Config {
     /// The maximum number of characters missing from the needle, before an item in the
@@ -198,7 +195,7 @@ impl CaseMatching {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Scoring {
     /// Score for a matching character between needle and haystack

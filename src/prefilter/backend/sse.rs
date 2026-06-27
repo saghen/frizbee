@@ -9,7 +9,6 @@ impl Backend for PrefilterSSEBackend {
     const LANES: usize = 16;
 
     type Chunk = __m128i;
-    type Needle = (__m128i, __m128i);
     type Mask = u16;
 
     fn is_available() -> bool {
@@ -17,8 +16,13 @@ impl Backend for PrefilterSSEBackend {
     }
 
     #[inline(always)]
-    unsafe fn broadcast(c1: u8, c2: u8) -> Self::Needle {
-        unsafe { (_mm_set1_epi8(c1 as i8), _mm_set1_epi8(c2 as i8)) }
+    unsafe fn splat(c: u8) -> __m128i {
+        unsafe { _mm_set1_epi8(c as i8) }
+    }
+
+    #[inline(always)]
+    unsafe fn eq(a: Self::Chunk, b: Self::Chunk) -> Self::Mask {
+        unsafe { _mm_movemask_epi8(_mm_cmpeq_epi8(a, b)) as u16 }
     }
 
     #[inline(always)]
@@ -27,7 +31,7 @@ impl Backend for PrefilterSSEBackend {
     }
 
     #[inline(always)]
-    unsafe fn occ(chunk: Self::Chunk, needle: Self::Needle) -> Self::Mask {
+    unsafe fn occ(chunk: Self::Chunk, needle: (Self::Chunk, Self::Chunk)) -> Self::Mask {
         unsafe {
             let mask = _mm_or_si128(
                 _mm_cmpeq_epi8(needle.0, chunk),

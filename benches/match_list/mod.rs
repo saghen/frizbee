@@ -1,4 +1,5 @@
 use criterion::BenchmarkId;
+use frizbee::{Config, Matcher};
 use std::{
     hint::black_box,
     sync::Arc,
@@ -39,16 +40,49 @@ pub fn match_list_generated_bench(
             .map(|x| x.as_str())
             .collect::<Vec<_>>();
 
-        match_list_bench(c, name, needle, haystack, false);
+        match_list_bench(c, name, needle, haystack);
     }
 }
 
-pub fn match_list_bench(
+pub fn match_list_bench(c: &mut criterion::Criterion, name: &str, needle: &str, haystack: &[&str]) {
+    match_list_bench_impl(c, name, needle, haystack, BenchmarkInput::MedianLength);
+}
+
+pub fn match_list_real_bench(
     c: &mut criterion::Criterion,
     name: &str,
     needle: &str,
     haystack: &[&str],
-    is_chromium: bool,
+    fzf_sequential: Duration,
+    fzf_parallel: Duration,
+) {
+    match_list_bench_impl(
+        c,
+        name,
+        needle,
+        haystack,
+        BenchmarkInput::SequentialAndParallel {
+            fzf_sequential,
+            fzf_parallel,
+        },
+    );
+}
+
+#[derive(Clone, Copy)]
+enum BenchmarkInput {
+    MedianLength,
+    SequentialAndParallel {
+        fzf_sequential: Duration,
+        fzf_parallel: Duration,
+    },
+}
+
+fn match_list_bench_impl(
+    c: &mut criterion::Criterion,
+    name: &str,
+    needle: &str,
+    haystack: &[&str],
+    input: BenchmarkInput,
 ) {
     let mut group = c.benchmark_group(name);
 
@@ -56,10 +90,9 @@ pub fn match_list_bench(
 
     let median_length = size / haystack.len();
     let benchmark_id = |name: &str| -> BenchmarkId {
-        if is_chromium {
-            BenchmarkId::new(name, "Sequential")
-        } else {
-            BenchmarkId::new(name, median_length)
+        match input {
+            BenchmarkInput::MedianLength => BenchmarkId::new(name, median_length),
+            BenchmarkInput::SequentialAndParallel { .. } => BenchmarkId::new(name, "Sequential"),
         }
     };
 
@@ -77,31 +110,57 @@ pub fn match_list_bench(
         );
         b.iter(|| atom.match_list(black_box(haystack.iter()), &mut matcher))
     });
-    if is_chromium {
+    if let BenchmarkInput::SequentialAndParallel { fzf_sequential, .. } = input {
         group.bench_function(benchmark_id("FZF"), |b| {
-            b.iter(|| {
-                // measured with fzf --filter linux --tiebreak index --bench 10s --threads 1 < benches/match_list/data.txt
-                std::thread::sleep(Duration::from_micros(120610));
-            })
+            b.iter(|| std::thread::sleep(fzf_sequential))
         });
     }
     group.bench_with_input(benchmark_id("Frizbee"), haystack, |b, haystack| {
-        b.iter(|| match_list(needle, haystack, Some(0)))
+        let mut matcher = Matcher::new(needle, &Config::default());
+        b.iter(|| matcher.match_list(black_box(haystack)))
     });
     group.bench_with_input(benchmark_id("All Scores"), haystack, |b, haystack| {
-        b.iter(|| match_list(needle, haystack, None))
+        let mut matcher = Matcher::new(
+            needle,
+            &Config {
+                max_typos: None,
+                ..Default::default()
+            },
+        );
+        b.iter(|| matcher.match_list(black_box(haystack)))
     });
     group.bench_with_input(benchmark_id("1 Typo"), haystack, |b, haystack| {
-        b.iter(|| match_list(needle, haystack, Some(1)))
+        let mut matcher = Matcher::new(
+            needle,
+            &Config {
+                max_typos: Some(1),
+                ..Default::default()
+            },
+        );
+        b.iter(|| matcher.match_list(black_box(haystack)))
     });
     group.bench_with_input(benchmark_id("2 Typos"), haystack, |b, haystack| {
-        b.iter(|| match_list(needle, haystack, Some(2)))
+        let mut matcher = Matcher::new(
+            needle,
+            &Config {
+                max_typos: Some(2),
+                ..Default::default()
+            },
+        );
+        b.iter(|| matcher.match_list(black_box(haystack)))
     });
     group.bench_with_input(benchmark_id("3 Typos"), haystack, |b, haystack| {
-        b.iter(|| match_list(needle, haystack, Some(3)))
+        let mut matcher = Matcher::new(
+            needle,
+            &Config {
+                max_typos: Some(3),
+                ..Default::default()
+            },
+        );
+        b.iter(|| matcher.match_list(black_box(haystack)))
     });
 
-    if is_chromium {
+    if let BenchmarkInput::SequentialAndParallel { fzf_parallel, .. } = input {
         group.bench_with_input(
             BenchmarkId::new("Nucleo", "Parallel (x8)"),
             haystack,
@@ -125,10 +184,7 @@ pub fn match_list_bench(
             },
         );
         group.bench_function(BenchmarkId::new("FZF", "Parallel (x8)"), |b| {
-            b.iter(|| {
-                // measured with fzf --filter linux --tiebreak index --bench 10s --threads 8 < benches/match_list/data.txt
-                std::thread::sleep(Duration::from_micros(16170));
-            })
+            b.iter(|| std::thread::sleep(fzf_parallel))
         });
         group.bench_with_input(
             BenchmarkId::new("Frizbee", "Parallel (x8)"),
@@ -158,17 +214,6 @@ pub fn match_list_bench(
     }
 }
 
-fn match_list(needle: &str, haystack: &[&str], max_typos: Option<u16>) -> Vec<frizbee::Match> {
-    frizbee::match_list(
-        black_box(needle),
-        black_box(haystack),
-        black_box(&frizbee::Config {
-            max_typos,
-            ..Default::default()
-        }),
-    )
-}
-
 fn match_list_parallel(
     needle: &str,
     haystack: &[&str],
@@ -177,7 +222,7 @@ fn match_list_parallel(
     frizbee::match_list_parallel(
         black_box(needle),
         black_box(haystack),
-        black_box(&frizbee::Config {
+        black_box(&Config {
             max_typos,
             ..Default::default()
         }),
@@ -212,7 +257,7 @@ fn nucleo_reparse(nucleo: &mut Nucleo<String>, needle: &str) {
 
 fn tick_nucleo_until_done(nucleo: &mut Nucleo<String>) -> u32 {
     loop {
-        let status = nucleo.tick(10);
+        let status = nucleo.tick(1000);
         if !status.running {
             return nucleo.snapshot().matched_item_count();
         }
