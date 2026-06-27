@@ -61,8 +61,8 @@ where
             return;
         }
 
-        let min_haystack_len = self.min_haystack_len();
         let needs_unicode = !self.needle.is_ascii();
+        let min_haystack_len = self.min_haystack_len();
         match (self.config.max_typos, needs_unicode) {
             (None, _) => self.match_list_unfiltered_into(haystacks, haystack_index_offset, matches),
             (Some(0), false) => self.match_list_prefiltered_into::<0, false, H>(
@@ -79,21 +79,42 @@ where
                 0,
                 matches,
             ),
-            (Some(1), _) => self.match_list_prefiltered_into::<1, false, H>(
+            (Some(1), false) => self.match_list_prefiltered_into::<1, false, H>(
                 haystacks,
                 haystack_index_offset,
                 min_haystack_len,
                 1,
                 matches,
             ),
-            (Some(2), _) => self.match_list_prefiltered_into::<2, false, H>(
+            (Some(1), true) => self.match_list_prefiltered_into::<1, true, H>(
+                haystacks,
+                haystack_index_offset,
+                min_haystack_len,
+                1,
+                matches,
+            ),
+            (Some(2), false) => self.match_list_prefiltered_into::<2, false, H>(
                 haystacks,
                 haystack_index_offset,
                 min_haystack_len,
                 2,
                 matches,
             ),
-            (Some(max_typos), _) => self.match_list_prefiltered_into::<MANY_TYPOS, false, H>(
+            (Some(2), true) => self.match_list_prefiltered_into::<2, true, H>(
+                haystacks,
+                haystack_index_offset,
+                min_haystack_len,
+                2,
+                matches,
+            ),
+            (Some(max_typos), false) => self.match_list_prefiltered_into::<MANY_TYPOS, false, H>(
+                haystacks,
+                haystack_index_offset,
+                min_haystack_len,
+                max_typos,
+                matches,
+            ),
+            (Some(max_typos), true) => self.match_list_prefiltered_into::<MANY_TYPOS, true, H>(
                 haystacks,
                 haystack_index_offset,
                 min_haystack_len,
@@ -110,8 +131,8 @@ where
             return Matcher::empty_match_list_indices(haystacks);
         }
 
-        let min_haystack_len = self.min_haystack_len();
         let needs_unicode = !self.needle.is_ascii();
+        let min_haystack_len = self.min_haystack_len();
         let mut matches = match (self.config.max_typos, needs_unicode) {
             (None, _) => self.match_list_indices_unfiltered(haystacks),
             (Some(0), false) => {
@@ -120,13 +141,25 @@ where
             (Some(0), true) => {
                 self.match_list_indices_prefiltered::<0, true, H>(haystacks, min_haystack_len, 0)
             }
-            (Some(1), _) => {
+            (Some(1), false) => {
                 self.match_list_indices_prefiltered::<1, false, H>(haystacks, min_haystack_len, 1)
             }
-            (Some(2), _) => {
+            (Some(1), true) => {
+                self.match_list_indices_prefiltered::<1, true, H>(haystacks, min_haystack_len, 1)
+            }
+            (Some(2), false) => {
                 self.match_list_indices_prefiltered::<2, false, H>(haystacks, min_haystack_len, 2)
             }
-            (Some(max_typos), _) => self.match_list_indices_prefiltered::<MANY_TYPOS, false, H>(
+            (Some(2), true) => {
+                self.match_list_indices_prefiltered::<2, true, H>(haystacks, min_haystack_len, 2)
+            }
+            (Some(max_typos), false) => self
+                .match_list_indices_prefiltered::<MANY_TYPOS, false, H>(
+                    haystacks,
+                    min_haystack_len,
+                    max_typos,
+                ),
+            (Some(max_typos), true) => self.match_list_indices_prefiltered::<MANY_TYPOS, true, H>(
                 haystacks,
                 min_haystack_len,
                 max_typos,
@@ -194,8 +227,13 @@ where
         match TYPOS {
             0 if UNICODE => self.prefilter.match_haystack_unicode(haystack),
             0 => self.prefilter.match_haystack(haystack),
+            1 if UNICODE => self.prefilter.match_haystack_unicode_1_typo(haystack),
             1 => self.prefilter.match_haystack_1_typo(haystack),
+            2 if UNICODE => self.prefilter.match_haystack_unicode_2_typos(haystack),
             2 => self.prefilter.match_haystack_2_typos(haystack),
+            MANY_TYPOS if UNICODE => self
+                .prefilter
+                .match_haystack_unicode_many_typos(haystack, max_typos),
             MANY_TYPOS => self
                 .prefilter
                 .match_haystack_many_typos(haystack, max_typos),
@@ -312,7 +350,7 @@ where
     fn min_haystack_len(&self) -> usize {
         self.config
             .max_typos
-            .map(|max| self.needle.len().saturating_sub(max as usize))
+            .map(|max| self.needle.chars().count().saturating_sub(max as usize))
             .unwrap_or(0)
     }
 

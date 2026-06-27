@@ -175,13 +175,31 @@ impl Kernel for PrefilterAVX {
     }
 
     #[inline(always)]
+    fn match_haystack_unicode_1_typo(&self, haystack: &[u8]) -> Window {
+        unsafe { self.inner.match_haystack_unicode_1_typo(haystack) }
+    }
+
+    #[inline(always)]
     fn match_haystack_2_typos(&self, haystack: &[u8]) -> Window {
         unsafe { self.inner.match_haystack_2_typos(haystack) }
     }
 
     #[inline(always)]
+    fn match_haystack_unicode_2_typos(&self, haystack: &[u8]) -> Window {
+        unsafe { self.inner.match_haystack_unicode_2_typos(haystack) }
+    }
+
+    #[inline(always)]
     fn match_haystack_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
         unsafe { self.inner.match_haystack_many_typos(haystack, max_typos) }
+    }
+
+    #[inline(always)]
+    fn match_haystack_unicode_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
+        unsafe {
+            self.inner
+                .match_haystack_unicode_many_typos(haystack, max_typos)
+        }
     }
 }
 

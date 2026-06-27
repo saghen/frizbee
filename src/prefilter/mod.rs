@@ -2,11 +2,12 @@
 //! a small percentage of the haystack will match the needle. Automatically used by the Matcher
 //! and match_list APIs.
 //!
-//! The prefilter proves that an ordered alignment exists after deleting at
-//! most `max_typos` needle bytes. Substitution is relaxed to deletion here:
-//! any alignment with a mismatched byte is also accepted by deleting that
-//! needle byte. This can still produce score-level false positives, but it
-//! cannot reject a haystack that Smith-Waterman could accept.
+//! The ASCII prefilter proves that an ordered alignment exists after deleting
+//! at most `max_typos` needle bytes. The Unicode typo paths use UTF-8 scalar
+//! values as the typo unit, while still returning byte windows. Substitution is
+//! relaxed to deletion here: any alignment with a mismatch is also accepted by
+//! deleting that needle unit. This can still produce score-level false
+//! positives, but it cannot reject a haystack that Smith-Waterman could accept.
 //!
 //! Matcher chooses the concrete prefilter backend via runtime feature detection.
 //! Matching assumes that needle.len() > 0, but backends may be constructed for
@@ -104,8 +105,11 @@ pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
     fn match_haystack(&self, haystack: &[u8]) -> Window;
     fn match_haystack_unicode(&self, haystack: &[u8]) -> Window;
     fn match_haystack_1_typo(&self, haystack: &[u8]) -> Window;
+    fn match_haystack_unicode_1_typo(&self, haystack: &[u8]) -> Window;
     fn match_haystack_2_typos(&self, haystack: &[u8]) -> Window;
+    fn match_haystack_unicode_2_typos(&self, haystack: &[u8]) -> Window;
     fn match_haystack_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window;
+    fn match_haystack_unicode_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window;
 }
 
 impl<B: Backend> Kernel for Prefilter<B> {
@@ -135,13 +139,28 @@ impl<B: Backend> Kernel for Prefilter<B> {
     }
 
     #[inline(always)]
+    fn match_haystack_unicode_1_typo(&self, haystack: &[u8]) -> Window {
+        unsafe { self.match_haystack_unicode_1_typo(haystack) }
+    }
+
+    #[inline(always)]
     fn match_haystack_2_typos(&self, haystack: &[u8]) -> Window {
         unsafe { self.match_haystack_2_typos(haystack) }
     }
 
     #[inline(always)]
+    fn match_haystack_unicode_2_typos(&self, haystack: &[u8]) -> Window {
+        unsafe { self.match_haystack_unicode_2_typos(haystack) }
+    }
+
+    #[inline(always)]
     fn match_haystack_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
         unsafe { self.match_haystack_many_typos(haystack, max_typos) }
+    }
+
+    #[inline(always)]
+    fn match_haystack_unicode_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
+        unsafe { self.match_haystack_unicode_many_typos(haystack, max_typos) }
     }
 }
 
@@ -317,6 +336,69 @@ mod tests {
     }
 
     #[test]
+    fn unicode_prefilter_1_typo_deletes_one_scalar_value() {
+        assert_eq!(
+            unicode_result_generic_typos("إن", "ن", 1, false),
+            (true, 0, "ن".len())
+        );
+        assert_eq!(unicode_result_generic_typos("إن", "ن", 0, false).0, false);
+    }
+
+    #[test]
+    fn unicode_prefilter_2_typos_deletes_two_scalar_values() {
+        assert_eq!(
+            unicode_result_generic_typos("éन😀", "😀", 2, false),
+            (true, 0, "😀".len())
+        );
+        assert_eq!(
+            unicode_result_generic_typos("éन😀", "😀", 1, false).0,
+            false
+        );
+    }
+
+    #[test]
+    fn unicode_prefilter_many_typos_deletes_many_scalar_values() {
+        assert_eq!(
+            unicode_result_generic_typos("😀éनZ", "Z", 3, false),
+            (true, 0, "Z".len())
+        );
+        assert_eq!(
+            unicode_result_generic_typos("😀éनZ", "Z", 2, false).0,
+            false
+        );
+    }
+
+    #[test]
+    fn unicode_typo_prefilter_rejects_wrong_utf8_prefixes() {
+        let wrong_first = "\u{06e5}";
+        let wrong_second = "\u{0606}";
+        assert_eq!("إ".as_bytes()[1], wrong_first.as_bytes()[1]);
+        assert_ne!("إ".as_bytes()[0], wrong_first.as_bytes()[0]);
+        assert_eq!("ن".as_bytes()[1], wrong_second.as_bytes()[1]);
+        assert_ne!("ن".as_bytes()[0], wrong_second.as_bytes()[0]);
+
+        assert_eq!(
+            unicode_result_generic_typos("إن", wrong_first, 1, false).0,
+            false
+        );
+        assert_eq!(
+            unicode_result_generic_typos("إن", wrong_second, 1, false).0,
+            false
+        );
+    }
+
+    #[test]
+    fn unicode_typo_prefilter_back_scans_suffix_chars() {
+        let haystack = format!("xxé__😀{}다zz", "x".repeat(32));
+        let expected_end = haystack.rfind('다').unwrap() + '다'.len_utf8();
+
+        assert_eq!(
+            unicode_result_generic_typos("é다😀", &haystack, 1, false),
+            (true, 2, expected_end)
+        );
+    }
+
+    #[test]
     fn unicode_prefilter_respects_case_setting() {
         assert_eq!(unicode_result_generic("É", "é", false), (true, 0, 2));
         assert_eq!(unicode_result_generic("É", "é", true).0, false);
@@ -421,6 +503,25 @@ mod tests {
         }
     }
 
+    #[test]
+    fn randomized_unicode_backend_parity_and_oracle() {
+        if cfg!(miri) {
+            for input in miri_inputs() {
+                let case = UnicodePrefilterCase::from_bytes(input);
+                assert_unicode_case_matches_oracle(&case);
+            }
+            return;
+        }
+
+        check!()
+            .with_iterations(test_iterations(128))
+            .with_max_len(test_bound(1024, 256))
+            .for_each(|input: &[u8]| {
+                let case = UnicodePrefilterCase::from_bytes(input);
+                assert_unicode_case_matches_oracle(&case);
+            });
+    }
+
     fn result_generic(needle: &str, haystack: &str, max_typos: u16) -> (bool, usize, usize) {
         let haystack = haystack.as_bytes();
         let scalar_result = kernel_result::<PrefilterScalar>(needle, haystack, max_typos, false);
@@ -462,29 +563,50 @@ mod tests {
         haystack: &str,
         case_sensitive: bool,
     ) -> (bool, usize, usize) {
+        unicode_result_generic_typos(needle, haystack, 0, case_sensitive)
+    }
+
+    fn unicode_result_generic_typos(
+        needle: &str,
+        haystack: &str,
+        max_typos: u16,
+        case_sensitive: bool,
+    ) -> (bool, usize, usize) {
         let haystack = haystack.as_bytes();
         let scalar_result =
-            kernel_result_unicode::<PrefilterScalar>(needle, haystack, case_sensitive);
+            kernel_result_unicode::<PrefilterScalar>(needle, haystack, max_typos, case_sensitive);
 
         #[cfg(target_arch = "x86_64")]
         {
             use crate::prefilter::backend::{PrefilterAVX, PrefilterAVX512, PrefilterSSE};
 
             if PrefilterAVX::is_available() {
-                let avx_result =
-                    kernel_result_unicode::<PrefilterAVX>(needle, haystack, case_sensitive);
+                let avx_result = kernel_result_unicode::<PrefilterAVX>(
+                    needle,
+                    haystack,
+                    max_typos,
+                    case_sensitive,
+                );
                 assert_same_result(avx_result, scalar_result, "AVX2 unicode mismatch");
             }
 
             if PrefilterSSE::is_available() {
-                let sse_result =
-                    kernel_result_unicode::<PrefilterSSE>(needle, haystack, case_sensitive);
+                let sse_result = kernel_result_unicode::<PrefilterSSE>(
+                    needle,
+                    haystack,
+                    max_typos,
+                    case_sensitive,
+                );
                 assert_same_result(sse_result, scalar_result, "SSE unicode mismatch");
             }
 
             if PrefilterAVX512::is_available() {
-                let avx512_result =
-                    kernel_result_unicode::<PrefilterAVX512>(needle, haystack, case_sensitive);
+                let avx512_result = kernel_result_unicode::<PrefilterAVX512>(
+                    needle,
+                    haystack,
+                    max_typos,
+                    case_sensitive,
+                );
                 assert_same_result(avx512_result, scalar_result, "AVX-512 unicode mismatch");
             }
         }
@@ -494,8 +616,12 @@ mod tests {
             use crate::prefilter::backend::PrefilterNEON;
 
             if PrefilterNEON::is_available() {
-                let neon_result =
-                    kernel_result_unicode::<PrefilterNEON>(needle, haystack, case_sensitive);
+                let neon_result = kernel_result_unicode::<PrefilterNEON>(
+                    needle,
+                    haystack,
+                    max_typos,
+                    case_sensitive,
+                );
                 assert_same_result(neon_result, scalar_result, "NEON unicode mismatch");
             }
         }
@@ -521,9 +647,16 @@ mod tests {
     fn kernel_result_unicode<P: Kernel>(
         needle: &str,
         haystack: &[u8],
+        max_typos: u16,
         case_sensitive: bool,
     ) -> Window {
-        P::new(needle, case_sensitive).match_haystack_unicode(haystack)
+        let mut prefilter = P::new(needle, case_sensitive);
+        match max_typos {
+            0 => prefilter.match_haystack_unicode(haystack),
+            1 => prefilter.match_haystack_unicode_1_typo(haystack),
+            2 => prefilter.match_haystack_unicode_2_typos(haystack),
+            _ => prefilter.match_haystack_unicode_many_typos(haystack, max_typos),
+        }
     }
 
     #[derive(Debug, Clone)]
@@ -552,6 +685,37 @@ mod tests {
                 haystack: cursor.bytes(haystack_len),
                 max_typos,
                 case_sensitive,
+            }
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    struct UnicodePrefilterCase {
+        needle: String,
+        haystack: String,
+        max_typos: u16,
+    }
+
+    impl UnicodePrefilterCase {
+        fn from_bytes(input: &[u8]) -> Self {
+            let mut cursor = ByteCursor::new(input);
+            let needle_len = cursor
+                .len(test_bound(48, 16), &[1, 2, 3, 7, 8, 15, 16, 31, 32])
+                .max(1);
+            let haystack_len = cursor.len(
+                test_bound(192, 48),
+                &[0, 1, 2, 3, 7, 8, 15, 16, 31, 32, 63, 64],
+            );
+            let max_typos = (cursor.next() as u16 % 5) + 1;
+            let mut needle = cursor.unicode_string(needle_len);
+            if needle.is_ascii() {
+                needle.push('é');
+            }
+
+            Self {
+                needle,
+                haystack: cursor.unicode_string(haystack_len),
+                max_typos,
             }
         }
     }
@@ -605,6 +769,10 @@ mod tests {
             (0..len).map(|_| self.char()).collect()
         }
 
+        fn unicode_string(&mut self, len: usize) -> String {
+            (0..len).map(|_| self.unicode_char()).collect()
+        }
+
         fn char(&mut self) -> char {
             let byte = self.next();
             match byte % 16 {
@@ -618,6 +786,23 @@ mod tests {
                 7 => ':',
                 8..=10 => (b'a' + (byte % 26)) as char,
                 11..=13 => (b'A' + (byte % 26)) as char,
+                _ => (b'0' + (byte % 10)) as char,
+            }
+        }
+
+        fn unicode_char(&mut self) -> char {
+            let byte = self.next();
+            match byte % 12 {
+                0 => 'é',
+                1 => 'ن',
+                2 => '다',
+                3 => '😀',
+                4 => 'न',
+                5 => ' ',
+                6 => '_',
+                7 => '/',
+                8..=9 => (b'a' + (byte % 26)) as char,
+                10 => (b'A' + (byte % 26)) as char,
                 _ => (b'0' + (byte % 10)) as char,
             }
         }
@@ -747,6 +932,31 @@ mod tests {
         }
     }
 
+    fn assert_unicode_case_matches_oracle(case: &UnicodePrefilterCase) {
+        let result =
+            unicode_result_generic_typos(&case.needle, &case.haystack, case.max_typos, true);
+        let oracle = reference_matches_by_deleting_needle_chars(
+            &case.needle,
+            &case.haystack,
+            case.max_typos,
+        );
+        assert_eq!(
+            result.0, oracle,
+            "unicode scalar/oracle mismatch for {case:?}"
+        );
+        if result.0 {
+            assert!(
+                result.1 <= result.2 && result.2 <= case.haystack.len(),
+                "unicode result returned invalid window {result:?} for {case:?}"
+            );
+            assert!(
+                case.haystack.is_char_boundary(result.1)
+                    && case.haystack.is_char_boundary(result.2),
+                "unicode result returned non-boundary window {result:?} for {case:?}"
+            );
+        }
+    }
+
     fn reference_matches_by_deleting_needle_bytes(
         needle: &[u8],
         haystack: &[u8],
@@ -785,6 +995,39 @@ mod tests {
 
     fn bytes_match(needle: u8, haystack: u8, case_sensitive: bool) -> bool {
         needle == haystack || (!case_sensitive && needle.eq_ignore_ascii_case(&haystack))
+    }
+
+    fn reference_matches_by_deleting_needle_chars(
+        needle: &str,
+        haystack: &str,
+        max_typos: u16,
+    ) -> bool {
+        let needle_chars = needle.chars().collect::<Vec<_>>();
+        if max_typos as usize >= needle_chars.len() {
+            return true;
+        }
+
+        let haystack_chars = haystack.chars().collect::<Vec<_>>();
+        longest_common_subsequence_chars(&needle_chars, &haystack_chars) + max_typos as usize
+            >= needle_chars.len()
+    }
+
+    fn longest_common_subsequence_chars(needle: &[char], haystack: &[char]) -> usize {
+        let mut previous = vec![0usize; haystack.len() + 1];
+        let mut current = vec![0usize; haystack.len() + 1];
+        for &needle_char in needle {
+            current[0] = 0;
+            for (idx, &haystack_char) in haystack.iter().enumerate() {
+                current[idx + 1] = if needle_char == haystack_char {
+                    previous[idx] + 1
+                } else {
+                    previous[idx + 1].max(current[idx])
+                };
+            }
+            std::mem::swap(&mut previous, &mut current);
+        }
+
+        previous[haystack.len()]
     }
 
     fn assert_valid_window(
