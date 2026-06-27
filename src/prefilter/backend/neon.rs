@@ -18,8 +18,13 @@ impl Backend for PrefilterNEONBackend {
     }
 
     #[inline(always)]
-    unsafe fn broadcast(c: (u8, u8)) -> (Self::Chunk, Self::Chunk) {
-        unsafe { (vdupq_n_u8(c.0), vdupq_n_u8(c.1)) }
+    unsafe fn splat(c: u8) -> Self::Chunk {
+        unsafe { vdupq_n_u8(c) }
+    }
+
+    #[inline(always)]
+    unsafe fn eq(a: Self::Chunk, b: Self::Chunk) -> Self::Mask {
+        unsafe { movemask_u8(vceqq_u8(a, b)) }
     }
 
     #[inline(always)]

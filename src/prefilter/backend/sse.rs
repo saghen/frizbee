@@ -26,11 +26,6 @@ impl Backend for PrefilterSSEBackend {
     }
 
     #[inline(always)]
-    unsafe fn broadcast(c: (u8, u8)) -> (Self::Chunk, Self::Chunk) {
-        unsafe { (_mm_set1_epi8(c.0 as i8), _mm_set1_epi8(c.1 as i8)) }
-    }
-
-    #[inline(always)]
     unsafe fn load(ptr: *const u8) -> Self::Chunk {
         unsafe { _mm_loadu_si128(ptr as *const __m128i) }
     }

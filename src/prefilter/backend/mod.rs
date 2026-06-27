@@ -118,10 +118,6 @@ pub(crate) trait Backend: Sized + Debug + Clone + 'static {
     unsafe fn eq(a: Self::Chunk, b: Self::Chunk) -> Self::Mask;
 
     /// # Safety
-    /// The backend's target features must be enabled.
-    unsafe fn broadcast(c: (u8, u8)) -> (Self::Chunk, Self::Chunk);
-
-    /// # Safety
     /// `ptr` must point to at least `LANES` readable bytes, and the backend's
     /// target features must be enabled.
     unsafe fn load(ptr: *const u8) -> Self::Chunk;

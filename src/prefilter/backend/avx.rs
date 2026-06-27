@@ -24,12 +24,18 @@ impl Kernel for PrefilterAVX {
         let needle_len = needle_cases.len();
         let mut needle_simd = needle_cases
             .iter()
-            .map(|&(c1, c2)| unsafe { (_mm256_set1_epi8(c1 as i8), _mm256_set1_epi8(c2 as i8)) })
+            .map(|&(c1, c2)| unsafe {
+                (
+                    PrefilterAVXBackend::splat(c1),
+                    PrefilterAVXBackend::splat(c2),
+                )
+            })
             .collect::<Vec<_>>();
 
-        needle_simd.push(unsafe { (_mm256_setzero_si256(), _mm256_setzero_si256()) });
+        needle_simd.push(unsafe { (PrefilterAVXBackend::splat(0), PrefilterAVXBackend::splat(0)) });
         if needle_simd.len() % 2 != 0 {
-            needle_simd.push(unsafe { (_mm256_setzero_si256(), _mm256_setzero_si256()) });
+            needle_simd
+                .push(unsafe { (PrefilterAVXBackend::splat(0), PrefilterAVXBackend::splat(0)) });
         }
 
         Self {
@@ -200,11 +206,6 @@ impl Backend for PrefilterAVXBackend {
     #[inline(always)]
     unsafe fn eq(a: Self::Chunk, b: Self::Chunk) -> Self::Mask {
         unsafe { _mm256_cmpeq_epi8_mask(a, b) }
-    }
-
-    #[inline(always)]
-    unsafe fn broadcast(c: (u8, u8)) -> (Self::Chunk, Self::Chunk) {
-        unsafe { (_mm256_set1_epi8(c.0 as i8), _mm256_set1_epi8(c.1 as i8)) }
     }
 
     #[inline(always)]

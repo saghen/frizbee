@@ -24,12 +24,8 @@ impl<B: Backend> Prefilter<B> {
     pub unsafe fn new(needle: &str, case_sensitive: bool) -> Self {
         let needle_ascii = case_needle(needle.as_bytes(), case_sensitive)
             .into_iter()
-            .map(|c| unsafe { B::broadcast(c) })
+            .map(|(c1, c2)| unsafe { (B::splat(c1), B::splat(c2)) })
             .collect();
-        // let needle_unicode = case_needle_unicode(needle, case_sensitive)
-        //     .into_iter()
-        //     .map(|c| unsafe { c.broadcast::<B>() })
-        //     .collect();
         let needle_unicode = needle.chars().map(UnicodeChar::new).collect();
 
         Self {

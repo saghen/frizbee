@@ -30,11 +30,6 @@ impl Backend for PrefilterScalarBackend {
     }
 
     #[inline(always)]
-    unsafe fn broadcast(c: (u8, u8)) -> (Self::Chunk, Self::Chunk) {
-        ([c.0; 16], [c.1; 16])
-    }
-
-    #[inline(always)]
     unsafe fn load(ptr: *const u8) -> Self::Chunk {
         unsafe {
             let mut chunk = [0u8; 16];

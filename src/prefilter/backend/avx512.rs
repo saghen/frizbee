@@ -29,11 +29,6 @@ impl Backend for PrefilterAVX512Backend {
     }
 
     #[inline(always)]
-    unsafe fn broadcast(c: (u8, u8)) -> (Self::Chunk, Self::Chunk) {
-        unsafe { (_mm512_set1_epi8(c.0 as i8), _mm512_set1_epi8(c.1 as i8)) }
-    }
-
-    #[inline(always)]
     unsafe fn load(ptr: *const u8) -> Self::Chunk {
         unsafe { _mm512_loadu_si512(ptr as *const __m512i) }
     }
