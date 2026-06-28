@@ -26,7 +26,7 @@ where
             needle: needle.to_string(),
             config: config.clone(),
             prefilter: P::new(needle, case_sensitive),
-            smith_waterman: S::new(needle.as_bytes(), &config.scoring, case_sensitive),
+            smith_waterman: S::new(needle, &config.scoring, case_sensitive),
         };
         matcher.guard_against_score_overflow();
         matcher
@@ -64,7 +64,16 @@ where
         let needs_unicode = !self.needle.is_ascii();
         let min_haystack_len = self.min_haystack_len();
         match (self.config.max_typos, needs_unicode) {
-            (None, _) => self.match_list_unfiltered_into(haystacks, haystack_index_offset, matches),
+            (None, false) => self.match_list_unfiltered_into::<false, H>(
+                haystacks,
+                haystack_index_offset,
+                matches,
+            ),
+            (None, true) => self.match_list_unfiltered_into::<true, H>(
+                haystacks,
+                haystack_index_offset,
+                matches,
+            ),
             (Some(0), false) => self.match_list_prefiltered_into::<0, false, H>(
                 haystacks,
                 haystack_index_offset,
@@ -134,7 +143,8 @@ where
         let needs_unicode = !self.needle.is_ascii();
         let min_haystack_len = self.min_haystack_len();
         let mut matches = match (self.config.max_typos, needs_unicode) {
-            (None, _) => self.match_list_indices_unfiltered(haystacks),
+            (None, false) => self.match_list_indices_unfiltered::<false, H>(haystacks),
+            (None, true) => self.match_list_indices_unfiltered::<true, H>(haystacks),
             (Some(0), false) => {
                 self.match_list_indices_prefiltered::<0, false, H>(haystacks, min_haystack_len, 0)
             }
@@ -174,7 +184,7 @@ where
     }
 
     #[inline(always)]
-    fn match_list_unfiltered_into<H: AsRef<str>>(
+    fn match_list_unfiltered_into<const UNICODE: bool, H: AsRef<str>>(
         &mut self,
         haystacks: &[H],
         haystack_index_offset: u32,
@@ -182,7 +192,12 @@ where
     ) {
         let mut index = haystack_index_offset;
         for haystack_str in haystacks {
-            matches.push(self.smith_waterman_one(haystack_str.as_ref().as_bytes(), index, 0, true));
+            matches.push(self.smith_waterman_one::<UNICODE>(
+                haystack_str.as_ref().as_bytes(),
+                index,
+                0,
+                true,
+            ));
             index += 1;
         }
     }
@@ -206,9 +221,9 @@ where
                 if matched {
                     let trimmed = &haystack[start_pos..end_pos];
                     let include_exact = start_pos == 0 && end_pos == original_len;
-                    matches.push(self.smith_waterman_one(
+                    matches.push(self.smith_waterman_one::<UNICODE>(
                         trimmed,
-                        index as u32,
+                        index,
                         start_pos,
                         include_exact,
                     ));
@@ -242,7 +257,7 @@ where
     }
 
     #[inline(always)]
-    fn match_list_indices_unfiltered<H: AsRef<str>>(
+    fn match_list_indices_unfiltered<const UNICODE: bool, H: AsRef<str>>(
         &mut self,
         haystacks: &[H],
     ) -> Vec<MatchIndices> {
@@ -250,7 +265,7 @@ where
         for (index, haystack_str) in haystacks.iter().enumerate() {
             let haystack = haystack_str.as_ref().as_bytes();
             if let Some(match_) =
-                self.smith_waterman_indices_one(haystack, 0, index as u32, true, None)
+                self.smith_waterman_indices_one::<UNICODE>(haystack, 0, index as u32, true, None)
             {
                 matches.push(match_);
             }
@@ -275,7 +290,7 @@ where
                 if matched {
                     let trimmed = &haystack[start_pos..end_pos];
                     let include_exact = start_pos == 0 && end_pos == original_len;
-                    if let Some(match_) = self.smith_waterman_indices_one(
+                    if let Some(match_) = self.smith_waterman_indices_one::<UNICODE>(
                         trimmed,
                         start_pos,
                         index as u32,
@@ -291,14 +306,18 @@ where
     }
 
     #[inline(always)]
-    fn smith_waterman_one(
+    fn smith_waterman_one<const UNICODE: bool>(
         &mut self,
         haystack: &[u8],
         index: u32,
         haystack_start_pos: usize,
         include_exact: bool,
     ) -> Match {
-        let mut score = self.smith_waterman.score_haystack(haystack);
+        let mut score = if UNICODE {
+            self.smith_waterman.score_haystack_unicode(haystack)
+        } else {
+            self.smith_waterman.score_haystack(haystack)
+        };
 
         let exact = include_exact && self.needle.as_bytes() == haystack;
         if exact {
@@ -321,7 +340,7 @@ where
     }
 
     #[inline(always)]
-    fn smith_waterman_indices_one(
+    fn smith_waterman_indices_one<const UNICODE: bool>(
         &mut self,
         haystack: &[u8],
         skipped_chars: usize,
@@ -329,9 +348,16 @@ where
         include_exact: bool,
         max_typos: Option<u16>,
     ) -> Option<MatchIndices> {
-        let (mut score, indices) =
+        let (mut score, indices) = if UNICODE {
+            self.smith_waterman.score_haystack_unicode_indices(
+                haystack,
+                skipped_chars,
+                max_typos,
+            )?
+        } else {
             self.smith_waterman
-                .match_haystack_indices(haystack, skipped_chars, max_typos)?;
+                .score_haystack_indices(haystack, skipped_chars, max_typos)?
+        };
 
         let exact = include_exact && self.needle.as_bytes() == haystack;
         if exact {

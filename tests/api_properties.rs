@@ -346,6 +346,35 @@ fn unicode_matcher_zero_typo_uses_byte_offsets_and_exact_flags() {
 }
 
 #[test]
+fn unicode_matcher_indices_cover_gaps_and_chunk_boundaries() {
+    let config = Config {
+        max_typos: None,
+        sort: false,
+        ..Config::default()
+    };
+
+    let gap_haystacks = ["é😀x"];
+    let gap_matches = match_list("éx", &gap_haystacks, &config);
+    let gap_indices = match_list_indices("éx", &gap_haystacks, &config);
+    assert_eq!(gap_indices.len(), 1);
+    assert_eq!(gap_indices[0].indices, vec![6, 1, 0]);
+    assert_eq!(
+        (gap_indices[0].score, gap_indices[0].exact),
+        (gap_matches[0].score, gap_matches[0].exact)
+    );
+
+    let boundary_haystacks = ["_______😀x"];
+    let boundary_matches = match_list("😀x", &boundary_haystacks, &config);
+    let boundary_indices = match_list_indices("😀x", &boundary_haystacks, &config);
+    assert_eq!(boundary_indices.len(), 1);
+    assert_eq!(boundary_indices[0].indices, vec![11, 10, 9, 8, 7]);
+    assert_eq!(
+        (boundary_indices[0].score, boundary_indices[0].exact),
+        (boundary_matches[0].score, boundary_matches[0].exact)
+    );
+}
+
+#[test]
 fn unicode_matcher_typo_prefilter_counts_scalar_values() {
     let haystacks = ["ن", "😀", "x"];
     let config = Config {

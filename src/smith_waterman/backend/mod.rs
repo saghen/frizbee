@@ -83,6 +83,28 @@ pub trait Backend: Sized + core::fmt::Debug + Clone + 'static {
         gap_open_penalty: Self::Score,
         gap_extend_penalty: Self::Score,
     ) -> Self::Score;
+
+    /// Propagate Unicode-aware horizontal gaps across a score row.
+    ///
+    /// UTF-8 body bytes are transport lanes: they can carry scores and pending
+    /// gap-open state without charging a gap step. Scalar-end lanes charge the
+    /// affine gap cost. The return value includes the row scores and the
+    /// pending gap-open state needed by the next haystack chunk.
+    ///
+    /// # Safety
+    /// The backend's required target features must be enabled at the call site.
+    unsafe fn propagate_horizontal_unicode_gaps(
+        row: Self::Score,
+        adjacent_row: Self::Score,
+        pending_gap_open_mask: Self::Score,
+        adjacent_pending_gap_open_mask: Self::Score,
+        continuation_gap_extend_penalty: Self::Score,
+        adjacent_continuation_gap_extend_penalty: Self::Score,
+        scalar_end_mask: Self::Score,
+        adjacent_scalar_end_mask: Self::Score,
+        gap_open_penalty: Self::Score,
+        gap_extend_penalty: Self::Score,
+    ) -> (Self::Score, Self::Score);
 }
 
 /// A byte-wide vector with `LANES` meaningful bytes
@@ -158,6 +180,12 @@ pub trait MaskVec: Copy + core::fmt::Debug {
     /// # Safety
     /// The backend's target features must be enabled at the call site.
     unsafe fn not(self) -> Self;
+
+    /// Whether every lane is false.
+    ///
+    /// # Safety
+    /// The backend's target features must be enabled at the call site.
+    unsafe fn is_zero(self) -> bool;
 
     /// Shift right by 1 lane, filling lane 0 with the highest meaningful lane
     /// of `prev`.
@@ -346,6 +374,135 @@ pub(crate) unsafe fn propagate_64_lane<B: Backend>(
     }
 }
 
+#[inline(always)]
+unsafe fn unicode_gap_step<B: Backend, const SHIFT: i32>(
+    row: &mut B::Score,
+    pending_gap_open_mask: &mut B::Score,
+    adjacent_row: B::Score,
+    adjacent_pending_gap_open_mask: B::Score,
+    continuation_gap_extend_penalty: B::Score,
+    scalar_end_mask: B::Score,
+    total_gap_extend_penalty: B::Score,
+    gap_open_penalty: B::Score,
+) {
+    unsafe {
+        let shifted_row = row.shift_right_padded::<SHIFT>(adjacent_row);
+        let shifted_pending_gap_open_mask =
+            pending_gap_open_mask.shift_right_padded::<SHIFT>(adjacent_pending_gap_open_mask);
+
+        let scalar_gap_extend_penalty =
+            total_gap_extend_penalty.subs(continuation_gap_extend_penalty);
+        let pending_gap_open_crossed_scalar_end =
+            shifted_pending_gap_open_mask.and(scalar_end_mask);
+        let gap_penalty = scalar_gap_extend_penalty
+            .add(gap_open_penalty.and(pending_gap_open_crossed_scalar_end));
+        let candidate_row = shifted_row.subs(gap_penalty);
+
+        *row = row.max(candidate_row);
+
+        // THINKING.md intentionally keeps pending state with OR-like mask
+        // propagation, even when a transported body-lane score is not the
+        // winning score for that lane.
+        let candidate_pending_gap_open_mask = shifted_pending_gap_open_mask.subs(scalar_end_mask);
+        *pending_gap_open_mask = pending_gap_open_mask.max(candidate_pending_gap_open_mask);
+    }
+}
+
+#[inline(always)]
+unsafe fn prepare_next_unicode_gap_step<B: Backend, const SHIFT: i32>(
+    continuation_gap_extend_penalty: &mut B::Score,
+    adjacent_continuation_gap_extend_penalty: &mut B::Score,
+    scalar_end_mask: &mut B::Score,
+    adjacent_scalar_end_mask: &mut B::Score,
+    total_gap_extend_penalty: &mut B::Score,
+) {
+    unsafe {
+        let zero = B::Score::zero();
+
+        let shifted_continuation_gap_extend_penalty = continuation_gap_extend_penalty
+            .shift_right_padded::<SHIFT>(*adjacent_continuation_gap_extend_penalty);
+        *continuation_gap_extend_penalty =
+            continuation_gap_extend_penalty.add(shifted_continuation_gap_extend_penalty);
+        *adjacent_continuation_gap_extend_penalty = adjacent_continuation_gap_extend_penalty
+            .add(adjacent_continuation_gap_extend_penalty.shift_right_padded::<SHIFT>(zero));
+
+        let shifted_scalar_end_mask =
+            scalar_end_mask.shift_right_padded::<SHIFT>(*adjacent_scalar_end_mask);
+        *scalar_end_mask = scalar_end_mask.max(shifted_scalar_end_mask);
+        *adjacent_scalar_end_mask = adjacent_scalar_end_mask
+            .max(adjacent_scalar_end_mask.shift_right_padded::<SHIFT>(zero));
+
+        *total_gap_extend_penalty = total_gap_extend_penalty.add(*total_gap_extend_penalty);
+    }
+}
+
+macro_rules! unicode_propagator {
+    ($name:ident, [$($prepare_shift:literal),*], $final_shift:literal) => {
+        #[inline(always)]
+        pub(crate) unsafe fn $name<B: Backend>(
+            row: B::Score,
+            adjacent_row: B::Score,
+            pending_gap_open_mask: B::Score,
+            adjacent_pending_gap_open_mask: B::Score,
+            continuation_gap_extend_penalty: B::Score,
+            adjacent_continuation_gap_extend_penalty: B::Score,
+            scalar_end_mask: B::Score,
+            adjacent_scalar_end_mask: B::Score,
+            gap_open_penalty: B::Score,
+            gap_extend_penalty: B::Score,
+        ) -> (B::Score, B::Score) {
+            unsafe {
+                let mut row = row;
+                let mut pending_gap_open_mask = pending_gap_open_mask;
+                let mut continuation_gap_extend_penalty = continuation_gap_extend_penalty;
+                let mut adjacent_continuation_gap_extend_penalty =
+                    adjacent_continuation_gap_extend_penalty;
+                let mut scalar_end_mask = scalar_end_mask;
+                let mut adjacent_scalar_end_mask = adjacent_scalar_end_mask;
+                let mut total_gap_extend_penalty = gap_extend_penalty;
+
+                $(
+                    unicode_gap_step::<B, $prepare_shift>(
+                        &mut row,
+                        &mut pending_gap_open_mask,
+                        adjacent_row,
+                        adjacent_pending_gap_open_mask,
+                        continuation_gap_extend_penalty,
+                        scalar_end_mask,
+                        total_gap_extend_penalty,
+                        gap_open_penalty,
+                    );
+                    prepare_next_unicode_gap_step::<B, $prepare_shift>(
+                        &mut continuation_gap_extend_penalty,
+                        &mut adjacent_continuation_gap_extend_penalty,
+                        &mut scalar_end_mask,
+                        &mut adjacent_scalar_end_mask,
+                        &mut total_gap_extend_penalty,
+                    );
+                )*
+
+                unicode_gap_step::<B, $final_shift>(
+                    &mut row,
+                    &mut pending_gap_open_mask,
+                    adjacent_row,
+                    adjacent_pending_gap_open_mask,
+                    continuation_gap_extend_penalty,
+                    scalar_end_mask,
+                    total_gap_extend_penalty,
+                    gap_open_penalty,
+                );
+
+                (row, pending_gap_open_mask)
+            }
+        }
+    };
+}
+
+unicode_propagator!(propagate_unicode_8_lane, [1, 2], 4);
+unicode_propagator!(propagate_unicode_16_lane, [1, 2, 4], 8);
+unicode_propagator!(propagate_unicode_32_lane, [1, 2, 4, 8], 16);
+unicode_propagator!(propagate_unicode_64_lane, [1, 2, 4, 8, 16], 32);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -476,6 +633,11 @@ mod tests {
                 *lane = !self.0[idx];
             }
             Self(out)
+        }
+
+        #[inline(always)]
+        unsafe fn is_zero(self) -> bool {
+            self.0.iter().all(|&v| v == 0)
         }
 
         #[inline(always)]
@@ -696,7 +858,14 @@ mod tests {
     }
 
     macro_rules! test_scalar_backend {
-        ($backend:ty, $lanes:literal, $lane_bytes:literal, $score:ty, $propagate:ident) => {
+        (
+            $backend:ty,
+            $lanes:literal,
+            $lane_bytes:literal,
+            $score:ty,
+            $propagate:ident,
+            $propagate_unicode:ident
+        ) => {
             impl Backend for $backend {
                 const LANES: usize = $lanes;
                 const LANE_BYTES: usize = $lane_bytes;
@@ -742,6 +911,35 @@ mod tests {
                         )
                     }
                 }
+
+                #[inline(always)]
+                unsafe fn propagate_horizontal_unicode_gaps(
+                    row: Self::Score,
+                    adjacent_row: Self::Score,
+                    pending_gap_open_mask: Self::Score,
+                    adjacent_pending_gap_open_mask: Self::Score,
+                    continuation_gap_extend_penalty: Self::Score,
+                    adjacent_continuation_gap_extend_penalty: Self::Score,
+                    scalar_end_mask: Self::Score,
+                    adjacent_scalar_end_mask: Self::Score,
+                    gap_open_penalty: Self::Score,
+                    gap_extend_penalty: Self::Score,
+                ) -> (Self::Score, Self::Score) {
+                    unsafe {
+                        super::$propagate_unicode::<Self>(
+                            row,
+                            adjacent_row,
+                            pending_gap_open_mask,
+                            adjacent_pending_gap_open_mask,
+                            continuation_gap_extend_penalty,
+                            adjacent_continuation_gap_extend_penalty,
+                            scalar_end_mask,
+                            adjacent_scalar_end_mask,
+                            gap_open_penalty,
+                            gap_extend_penalty,
+                        )
+                    }
+                }
             }
         };
     }
@@ -751,28 +949,32 @@ mod tests {
         16,
         2,
         TestScalarScoreU16<16>,
-        propagate_16_lane
+        propagate_16_lane,
+        propagate_unicode_16_lane
     );
     test_scalar_backend!(
         TestScalar32,
         32,
         2,
         TestScalarScoreU16<32>,
-        propagate_32_lane
+        propagate_32_lane,
+        propagate_unicode_32_lane
     );
     test_scalar_backend!(
         TestScalar32U8,
         32,
         1,
         TestScalarScoreU8<32>,
-        propagate_32_lane
+        propagate_32_lane,
+        propagate_unicode_32_lane
     );
     test_scalar_backend!(
         TestScalar64U8,
         64,
         1,
         TestScalarScoreU8<64>,
-        propagate_64_lane
+        propagate_64_lane,
+        propagate_unicode_64_lane
     );
 
     // ----- BytesVec property tests ---------------------------------------
@@ -1106,14 +1308,14 @@ mod tests {
     }
 
     fn score_with<B: Backend>(needle: &str, haystack: &str) -> u16 {
-        let mut matcher = SmithWaterman::<B>::new(needle.as_bytes(), &Scoring::default(), false);
-        matcher.match_haystack(haystack.as_bytes(), None).unwrap()
+        let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), false);
+        matcher.score_haystack(haystack.as_bytes())
     }
 
     fn indices_with<B: Backend>(needle: &str, haystack: &str) -> Option<Vec<usize>> {
-        let mut matcher = SmithWaterman::<B>::new(needle.as_bytes(), &Scoring::default(), false);
+        let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), false);
         matcher
-            .match_haystack_indices(haystack.as_bytes(), 0, None)
+            .score_haystack_indices(haystack.as_bytes(), 0, None)
             .map(|(_, indices)| indices)
     }
 
@@ -1214,24 +1416,24 @@ mod tests {
         }
     }
 
-    fn score_bytes_with<B: Backend>(needle: &[u8], haystack: &[u8], case_sensitive: bool) -> u16 {
+    fn score_bytes_with<B: Backend>(needle: &str, haystack: &[u8], case_sensitive: bool) -> u16 {
         let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), case_sensitive);
         matcher.score_haystack(haystack)
     }
 
     fn indices_bytes_with<B: Backend>(
-        needle: &[u8],
+        needle: &str,
         haystack: &[u8],
         max_typos: Option<u16>,
         case_sensitive: bool,
     ) -> Option<(u16, Vec<usize>)> {
         let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), case_sensitive);
-        matcher.match_haystack_indices(haystack, 0, max_typos)
+        matcher.score_haystack_indices(haystack, 0, max_typos)
     }
 
     fn assert_backend<B: Backend>(
         label: &str,
-        needle: &[u8],
+        needle: &str,
         haystack: &[u8],
         max_typos: Option<u16>,
         case_sensitive: bool,
@@ -1260,7 +1462,7 @@ mod tests {
 
     fn assert_backend_matches_reference<B: Backend, R: Backend>(
         label: &str,
-        needle: &[u8],
+        needle: &str,
         haystack: &[u8],
         max_typos: Option<u16>,
         case_sensitive: bool,
@@ -1283,7 +1485,7 @@ mod tests {
         }
     }
 
-    fn assert_indices_valid(label: &str, needle: &[u8], haystack: &[u8], indices: &[usize]) {
+    fn assert_indices_valid(label: &str, needle: &str, haystack: &[u8], indices: &[usize]) {
         assert!(
             indices.windows(2).all(|window| window[0] > window[1]),
             "{} indices are not in reverse order: {:?}",
@@ -1310,7 +1512,7 @@ mod tests {
 
     #[derive(Debug, Clone)]
     struct BackendCase {
-        needle: Vec<u8>,
+        needle: String,
         haystack: Vec<u8>,
         max_typos: Option<u16>,
         case_sensitive: bool,
@@ -1333,7 +1535,7 @@ mod tests {
             let case_sensitive = cursor.bool();
 
             Self {
-                needle: cursor.bytes(needle_len),
+                needle: String::from_utf8_lossy(&cursor.bytes(needle_len)).to_string(),
                 haystack: cursor.bytes(haystack_len),
                 max_typos,
                 case_sensitive,

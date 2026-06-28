@@ -6,6 +6,7 @@ impl<B: Backend> SmithWaterman<B> {
     #[inline(always)]
     pub fn iter_alignment_path(
         &self,
+        needle_len: usize,
         skipped_chars: usize,
         score: u16,
         max_typos: Option<u16>,
@@ -13,7 +14,7 @@ impl<B: Backend> SmithWaterman<B> {
         AlignmentPathIter::new::<B>(
             &self.score_matrix,
             &self.match_masks,
-            self.needle.len(),
+            needle_len,
             self.haystack_chunks,
             skipped_chars,
             score,
@@ -24,15 +25,7 @@ impl<B: Backend> SmithWaterman<B> {
     #[cfg(test)]
     #[inline(always)]
     pub fn has_alignment_path(&self, score: u16, max_typos: u16) -> bool {
-        let iter = AlignmentPathIter::new::<B>(
-            &self.score_matrix,
-            &self.match_masks,
-            self.needle.len(),
-            self.haystack_chunks,
-            0,
-            score,
-            Some(max_typos),
-        );
+        let iter = self.iter_alignment_path(self.needle.len(), 0, score, Some(max_typos));
         for pos in iter {
             if pos.is_none() {
                 return false;

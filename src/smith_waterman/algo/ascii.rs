@@ -1,107 +1,13 @@
-use crate::smith_waterman::Kernel;
-use crate::{Scoring, prefilter::case_needle, smith_waterman::greedy::match_greedy};
+use super::MAX_HAYSTACK_LEN;
+use crate::smith_waterman::{
+    SmithWaterman,
+    backend::{Backend, BytesVec, MaskVec, ScoreVec},
+    greedy::match_greedy,
+};
 
-use super::SmithWaterman;
-use super::alignment_iter::Alignment;
-use super::backend::{Backend, BytesVec, MaskVec, ScoreVec};
-use super::matrix::Matrix;
-
-const MAX_HAYSTACK_LEN: usize = 512;
-
-impl<B: Backend> Kernel for SmithWaterman<B> {
-    fn new(needle: &[u8], scoring: &Scoring, case_sensitive: bool) -> Self {
-        let needle_simd = case_needle(needle, case_sensitive)
-            .iter()
-            .map(|(c1, c2)| unsafe { (B::Bytes::splat(*c1), B::Bytes::splat(*c2)) })
-            .collect();
-        Self {
-            needle: String::from_utf8_lossy(needle).to_string(),
-            needle_simd,
-            case_sensitive,
-            scoring: scoring.clone(),
-            score_matrix: Matrix::new(needle.len(), MAX_HAYSTACK_LEN),
-            match_masks: Matrix::new(needle.len(), MAX_HAYSTACK_LEN),
-            haystack_chunks: 0,
-        }
-    }
-
-    fn is_available() -> bool {
-        B::is_available()
-    }
-
-    #[cfg(test)]
+impl<B: Backend> SmithWaterman<B> {
     #[inline(always)]
-    fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {
-        if haystack.len() > MAX_HAYSTACK_LEN {
-            return match_greedy(
-                self.needle.as_bytes(),
-                haystack,
-                &self.scoring,
-                self.case_sensitive,
-            )
-            .map(|(score, _)| score);
-        }
-
-        let score = self.score_haystack(haystack);
-        match max_typos {
-            Some(max_typos) if !self.has_alignment_path(score, max_typos) => None,
-            _ => Some(score),
-        }
-    }
-
-    #[inline(always)]
-    fn match_haystack_indices(
-        &mut self,
-        haystack: &[u8],
-        haystack_start_pos: usize,
-        max_typos: Option<u16>,
-    ) -> Option<(u16, Vec<usize>)> {
-        if haystack.len() > MAX_HAYSTACK_LEN {
-            return match_greedy(
-                self.needle.as_bytes(),
-                haystack,
-                &self.scoring,
-                self.case_sensitive,
-            )
-            .map(|(score, mut indices)| {
-                indices.reverse();
-                (score, indices)
-            });
-        }
-
-        let score = self.score_haystack(haystack);
-        if score == 0 {
-            if let Some(max_typos) = max_typos
-                && self.needle.len() > max_typos as usize
-            {
-                return None;
-            }
-            return Some((score, Vec::new()));
-        }
-
-        let mut indices = Vec::with_capacity(self.needle.len());
-        let mut prev_haystack_idx = usize::MAX;
-        for pos in self.iter_alignment_path(haystack_start_pos, score, max_typos) {
-            match pos {
-                Some(Alignment::Match((_, haystack_idx))) => {
-                    if prev_haystack_idx != haystack_idx {
-                        indices.push(haystack_idx);
-                        prev_haystack_idx = haystack_idx;
-                    }
-                }
-                Some(_) => {}
-                // TODO: it's possible for us to lose alignment due to score == 0
-                // but to stay consistent with results of `match_list`, we simply
-                // don't return the full list of indices
-                None => break,
-            }
-        }
-
-        Some((score, indices))
-    }
-
-    #[inline(always)]
-    fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
+    pub(crate) fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(
                 self.needle.as_bytes(),
@@ -119,7 +25,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
 
         // Matrix stride is fixed at construction. Row 0 and column 0 are
         // always zero (never written by the inner loop), so no re-zeroing is
-        // needed between calls.
+        // needed between calls
         let score_matrix = &mut self.score_matrix;
         let match_masks = &mut self.match_masks;
 
@@ -141,7 +47,6 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             let mut prev_chunk_is_lower_mask = B::Mask::zero();
             let mut max_scores = B::Score::zero();
 
-            // TODO: try doing N needle chars per haystack chunk for better cache locality
             for (col_idx, haystack_chunk) in (0..(haystack_chunks - 1)).map(|col_idx| {
                 let haystack_chunk =
                     B::Bytes::load_partial(haystack.as_ptr(), col_idx * B::LANES, haystack.len());
@@ -200,7 +105,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
                         B::widen_mask(exact_case_match_mask.or(flipped_case_match_mask));
                     let exact_case_match_mask = B::widen_mask(exact_case_match_mask);
 
-                    // Diagonal — typical match/mismatch, advancing one cell.
+                    // Diagonal - typical match/mismatch, advancing one cell
                     let diag_scores = {
                         let diag = prev_row_scores
                             .shift_right_padded::<1>(score_matrix.get(row_idx - 1, col_idx - 1));
@@ -212,13 +117,13 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
                         diag.add(exact_case_match_mask.and(matching_case_bonus))
                     };
 
-                    // Up — skipping a char in the needle.
+                    // Up - skipping a char in the needle
                     let up_scores = {
                         let after_extend = prev_row_scores.subs(gap_extend_penalty);
                         after_extend.subs(up_gap_mask.and(gap_open_penalty))
                     };
 
-                    // Max of diagonal, up, and left (after gap extension).
+                    // Max of diagonal, up, and left (after gap extension)
                     row_scores = B::propagate_horizontal_gaps(
                         diag_scores.max(up_scores),
                         score_matrix.get(row_idx, col_idx - 1),
@@ -241,32 +146,5 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
 
             max_scores.horizontal_max()
         }
-    }
-
-    #[cfg(feature = "match_end_col")]
-    fn match_end_col(&self, haystack: &[u8]) -> u16 {
-        if haystack.len() > MAX_HAYSTACK_LEN {
-            return match_greedy(
-                self.needle.as_bytes(),
-                haystack,
-                &self.scoring,
-                self.case_sensitive,
-            )
-            .and_then(|(_, indices)| indices.last().copied())
-            .unwrap_or(0) as u16;
-        }
-
-        let mut match_end_col: u16 = 0;
-        let mut max_score = 0;
-        for col_idx in 1..(haystack.len().div_ceil(B::LANES) + 1) {
-            let chunk_scores = self.score_matrix.get(self.needle.len(), col_idx);
-            let chunk_max_score = unsafe { chunk_scores.horizontal_max() };
-            if chunk_max_score > max_score {
-                max_score = chunk_max_score;
-                let lane = unsafe { chunk_scores.find_lane(chunk_max_score) };
-                match_end_col = ((col_idx - 1) * B::LANES + lane) as u16;
-            }
-        }
-        match_end_col
     }
 }

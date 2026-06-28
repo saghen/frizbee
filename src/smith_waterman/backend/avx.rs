@@ -50,6 +50,35 @@ impl Backend for BackendAVX {
             )
         }
     }
+
+    #[inline(always)]
+    unsafe fn propagate_horizontal_unicode_gaps(
+        row: Self::Score,
+        adjacent_row: Self::Score,
+        pending_gap_open_mask: Self::Score,
+        adjacent_pending_gap_open_mask: Self::Score,
+        continuation_gap_extend_penalty: Self::Score,
+        adjacent_continuation_gap_extend_penalty: Self::Score,
+        scalar_end_mask: Self::Score,
+        adjacent_scalar_end_mask: Self::Score,
+        gap_open_penalty: Self::Score,
+        gap_extend_penalty: Self::Score,
+    ) -> (Self::Score, Self::Score) {
+        unsafe {
+            super::propagate_unicode_16_lane::<BackendAVX>(
+                row,
+                adjacent_row,
+                pending_gap_open_mask,
+                adjacent_pending_gap_open_mask,
+                continuation_gap_extend_penalty,
+                adjacent_continuation_gap_extend_penalty,
+                scalar_end_mask,
+                adjacent_scalar_end_mask,
+                gap_open_penalty,
+                gap_extend_penalty,
+            )
+        }
+    }
 }
 
 /// Safe page-bounded read of 0..8 bytes into the low 64 bits of an __m128i.
@@ -193,6 +222,10 @@ impl MaskVec for AvxBytes {
     #[inline(always)]
     unsafe fn not(self) -> Self {
         unsafe { Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1))) }
+    }
+    #[inline(always)]
+    unsafe fn is_zero(self) -> bool {
+        unsafe { _mm_movemask_epi8(self.0) == 0 }
     }
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
@@ -351,6 +384,35 @@ impl Backend for BackendAVXU8 {
             )
         }
     }
+
+    #[inline(always)]
+    unsafe fn propagate_horizontal_unicode_gaps(
+        row: Self::Score,
+        adjacent_row: Self::Score,
+        pending_gap_open_mask: Self::Score,
+        adjacent_pending_gap_open_mask: Self::Score,
+        continuation_gap_extend_penalty: Self::Score,
+        adjacent_continuation_gap_extend_penalty: Self::Score,
+        scalar_end_mask: Self::Score,
+        adjacent_scalar_end_mask: Self::Score,
+        gap_open_penalty: Self::Score,
+        gap_extend_penalty: Self::Score,
+    ) -> (Self::Score, Self::Score) {
+        unsafe {
+            super::propagate_unicode_32_lane::<BackendAVXU8>(
+                row,
+                adjacent_row,
+                pending_gap_open_mask,
+                adjacent_pending_gap_open_mask,
+                continuation_gap_extend_penalty,
+                adjacent_continuation_gap_extend_penalty,
+                scalar_end_mask,
+                adjacent_scalar_end_mask,
+                gap_open_penalty,
+                gap_extend_penalty,
+            )
+        }
+    }
 }
 
 impl BytesVec for AvxU8Bytes {
@@ -428,6 +490,10 @@ impl MaskVec for AvxU8Bytes {
     #[inline(always)]
     unsafe fn not(self) -> Self {
         unsafe { Self(_mm256_xor_si256(self.0, _mm256_set1_epi32(-1))) }
+    }
+    #[inline(always)]
+    unsafe fn is_zero(self) -> bool {
+        unsafe { _mm256_movemask_epi8(self.0) == 0 }
     }
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
