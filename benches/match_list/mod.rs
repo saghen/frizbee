@@ -256,10 +256,10 @@ fn nucleo_reparse(nucleo: &mut Nucleo<String>, needle: &str) {
 }
 
 fn tick_nucleo_until_done(nucleo: &mut Nucleo<String>) -> u32 {
-    loop {
-        let status = nucleo.tick(1000);
-        if !status.running {
-            return nucleo.snapshot().matched_item_count();
-        }
-    }
+    let status = nucleo.tick(1000);
+    assert!(
+        !status.running,
+        "Nucleo returned a snapshot without finishing"
+    );
+    nucleo.snapshot().matched_item_count()
 }
