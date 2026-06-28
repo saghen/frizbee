@@ -9,11 +9,6 @@ repository = "https://github.com/saghen/frizbee"
 [profile.release]
 lto = true
 
-[profile.fuzz]
-inherits = "release"
-codegen-units = 1
-debug = true
-
 [dev-dependencies]
 bolero = "0.13"
 criterion = "0.8"
@@ -29,30 +24,6 @@ harness = false
 name = "sort"
 harness = false
 
-[[test]]
-name = "fuzz_api_equivalence"
-path = "fuzz/targets/api_equivalence.rs"
-harness = false
-required-features = ["fuzzing"]
-
-[[test]]
-name = "fuzz_long_inputs"
-path = "fuzz/targets/long_inputs.rs"
-harness = false
-required-features = ["fuzzing"]
-
-[[test]]
-name = "fuzz_prefilter"
-path = "fuzz/targets/prefilter.rs"
-harness = false
-required-features = ["fuzzing"]
-
-[[test]]
-name = "fuzz_smith_waterman"
-path = "fuzz/targets/smith_waterman.rs"
-harness = false
-required-features = ["fuzzing"]
-
 [lib]
 bench = false
 
@@ -63,4 +34,3 @@ serde = { version = "1.0", features = ["derive"], optional = true }
 serde = ["dep:serde"]
 match_end_col = []
 safe_read = []
-fuzzing = []
