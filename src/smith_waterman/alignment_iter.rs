@@ -16,8 +16,7 @@ pub enum Alignment {
 /// The iterator is non-generic over `Backend`: the backend's lane count and
 /// element width (1 or 2 bytes) are resolved at construction so the body
 /// monomorphizes once instead of per backend. The element-width branch in
-/// `get_score` / `get_is_match` is a single field load + compare; in practice
-/// LLVM hoists it across consecutive accesses.
+/// `get_score` / `get_is_match` is a single field load + compare
 pub struct AlignmentPathIter<'a> {
     score_matrix: &'a [u8],
     match_masks: &'a [u8],

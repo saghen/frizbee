@@ -48,7 +48,7 @@
 //!
 //! Frizbee previously used inter-sequence parallelism (one needle, $LANES haystacks) but this performed about the same as sequential layout due to requiring interleaving the haystacks and bucketing based on haystack length, while performing worse in parallel due to the required bucketing.
 
-use crate::Scoring;
+use crate::{Scoring, prefilter::UnicodeChar};
 use backend::Backend;
 #[cfg(target_arch = "x86_64")]
 use backend::{BackendAVX, BackendAVX512, BackendAVX512U8, BackendAVXU8, BackendSSE, BackendSSEU8};
@@ -105,10 +105,12 @@ pub(crate) fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
 pub(crate) struct SmithWaterman<B: Backend> {
     needle: String,
     needle_simd: Vec<(B::Bytes, B::Bytes)>,
+    needle_unicode: Vec<UnicodeChar>,
     case_sensitive: bool,
     scoring: Scoring,
     score_matrix: Matrix<B>,
     match_masks: Matrix<B>,
+    unicode_pending_gap_open_masks: Vec<B::Score>,
     /// Number of LANES-wide chunks (incl. the leading zero column) actually
     /// consumed by the most recent `score_haystack` call. The matrix stride is
     /// always sized for `MAX_HAYSTACK_LEN` for zero-free reuse.
@@ -116,17 +118,22 @@ pub(crate) struct SmithWaterman<B: Backend> {
 }
 
 pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
-    fn new(needle: &[u8], scoring: &Scoring, case_sensitive: bool) -> Self;
+    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self;
     fn is_available() -> bool;
-    #[cfg(test)]
-    fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16>;
-    fn match_haystack_indices(
+    fn score_haystack_indices(
+        &mut self,
+        haystack: &[u8],
+        skipped_chars: usize,
+        max_typos: Option<u16>,
+    ) -> Option<(u16, Vec<usize>)>;
+    fn score_haystack_unicode_indices(
         &mut self,
         haystack: &[u8],
         skipped_chars: usize,
         max_typos: Option<u16>,
     ) -> Option<(u16, Vec<usize>)>;
     fn score_haystack(&mut self, haystack: &[u8]) -> u16;
+    fn score_haystack_unicode(&mut self, haystack: &[u8]) -> u16;
     #[cfg(feature = "match_end_col")]
     fn match_end_col(&self, haystack: &[u8]) -> u16;
 }
@@ -140,10 +147,13 @@ mod tests {
     const CHAR_SCORE: u16 = MATCH_SCORE + MATCHING_CASE_BONUS;
 
     fn get_score(needle: &str, haystack: &str) -> u16 {
-        let mut matcher =
-            SmithWaterman::<BackendScalar8>::new(needle.as_bytes(), &Scoring::default(), false);
-        let score = matcher.match_haystack(haystack.as_bytes(), Some(0));
-        score.unwrap()
+        let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
+        matcher.score_haystack(haystack.as_bytes())
+    }
+
+    fn get_unicode_score(needle: &str, haystack: &str) -> u16 {
+        let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
+        matcher.score_haystack_unicode(haystack.as_bytes())
     }
 
     fn get_score_typos(needle: &str, haystack: &str, max_typos: u16) -> Option<u16> {
@@ -156,21 +166,28 @@ mod tests {
         max_typos: u16,
         case_sensitive: bool,
     ) -> Option<u16> {
-        let mut matcher = SmithWaterman::<BackendScalar8>::new(
-            needle.as_bytes(),
-            &Scoring::default(),
-            case_sensitive,
-        );
+        let mut matcher =
+            SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), case_sensitive);
 
-        matcher.match_haystack(haystack.as_bytes(), Some(max_typos))
+        let score = matcher.score_haystack(haystack.as_bytes());
+        matcher
+            .has_alignment_path(score, max_typos)
+            .then_some(score)
     }
 
     fn get_indices(needle: &str, haystack: &str) -> Option<Vec<usize>> {
-        let mut matcher =
-            SmithWaterman::<BackendScalar8>::new(needle.as_bytes(), &Scoring::default(), false);
+        let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
 
         matcher
-            .match_haystack_indices(haystack.as_bytes(), 0, None)
+            .score_haystack_indices(haystack.as_bytes(), 0, None)
+            .map(|(_, indices)| indices)
+    }
+
+    fn get_unicode_indices(needle: &str, haystack: &str) -> Option<Vec<usize>> {
+        let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
+
+        matcher
+            .score_haystack_unicode_indices(haystack.as_bytes(), 0, None)
             .map(|(_, indices)| indices)
     }
 
@@ -191,6 +208,33 @@ mod tests {
     fn test_score_exact_match() {
         assert_eq!(get_score("a", "a"), CHAR_SCORE + PREFIX_BONUS);
         assert_eq!(get_score("abc", "abc"), 3 * CHAR_SCORE + PREFIX_BONUS);
+    }
+
+    #[test]
+    fn unicode_score_counts_multibyte_scalars_once() {
+        assert_eq!(get_unicode_score("é", "é"), CHAR_SCORE + PREFIX_BONUS);
+        assert_eq!(get_unicode_score("😀", "😀"), CHAR_SCORE + PREFIX_BONUS);
+        assert_eq!(get_unicode_score("éx", "éx"), 2 * CHAR_SCORE + PREFIX_BONUS);
+    }
+
+    #[test]
+    fn unicode_gap_propagation_counts_skipped_scalars_once() {
+        assert_eq!(
+            get_unicode_score("éx", "ébx"),
+            get_unicode_score("éx", "é😀x")
+        );
+        assert_eq!(
+            get_unicode_score("ab", "aéb"),
+            2 * CHAR_SCORE + PREFIX_BONUS - GAP_OPEN_PENALTY
+        );
+    }
+
+    #[test]
+    fn unicode_gap_propagation_handles_adjacent_scalar_end_then_body() {
+        assert_eq!(
+            get_unicode_score("ab", "aé😀b"),
+            2 * CHAR_SCORE + PREFIX_BONUS - GAP_OPEN_PENALTY - GAP_EXTEND_PENALTY
+        );
     }
 
     #[test]
@@ -305,9 +349,8 @@ mod tests {
 
     #[cfg(feature = "match_end_col")]
     fn get_end_col(needle: &str, haystack: &str) -> u16 {
-        let mut matcher =
-            SmithWaterman::<BackendScalar8>::new(needle.as_bytes(), &Scoring::default(), false);
-        matcher.match_haystack(haystack.as_bytes(), None);
+        let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
+        matcher.score_haystack(haystack.as_bytes());
         matcher.match_end_col(haystack.as_bytes())
     }
 
@@ -367,6 +410,41 @@ mod tests {
         assert_eq!(get_indices("c", "abc"), Some(vec![2]));
         assert_eq!(get_indices("ac", "________________abc"), Some(vec![18, 16]));
         assert_eq!(get_indices("foo", "Uf"), Some(vec![1]));
+    }
+
+    #[test]
+    fn unicode_indices_expand_multibyte_scalars() {
+        assert_eq!(get_unicode_indices("é", "é"), Some(vec![1, 0]));
+        assert_eq!(get_unicode_indices("😀", "😀"), Some(vec![3, 2, 1, 0]));
+        assert_eq!(get_unicode_indices("aé", "aé"), Some(vec![2, 1, 0]));
+    }
+
+    #[test]
+    fn unicode_indices_use_original_byte_offsets() {
+        let mut matcher = SmithWaterman::<BackendScalar8>::new("é", &Scoring::default(), false);
+
+        assert_eq!(
+            matcher
+                .score_haystack_unicode_indices("é".as_bytes(), 3, None)
+                .map(|(_, indices)| indices),
+            Some(vec![4, 3])
+        );
+    }
+
+    #[test]
+    fn unicode_indices_trace_through_multibyte_haystack_gaps() {
+        assert_eq!(get_unicode_indices("ab", "aéb"), Some(vec![3, 0]));
+        assert_eq!(get_unicode_indices("ab", "aé😀b"), Some(vec![7, 0]));
+        assert_eq!(get_unicode_indices("éx", "é😀x"), Some(vec![6, 1, 0]));
+    }
+
+    #[test]
+    fn unicode_indices_handle_repeated_scalars_and_chunk_boundaries() {
+        assert_eq!(get_unicode_indices("éé", "ééé"), Some(vec![3, 2, 1, 0]));
+        assert_eq!(
+            get_unicode_indices("😀x", "_______😀x"),
+            Some(vec![11, 10, 9, 8, 7])
+        );
     }
 
     #[test]

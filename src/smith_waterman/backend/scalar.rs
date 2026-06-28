@@ -56,6 +56,35 @@ impl Backend for BackendScalar8 {
             )
         }
     }
+
+    #[inline(always)]
+    unsafe fn propagate_horizontal_unicode_gaps(
+        row: Self::Score,
+        adjacent_row: Self::Score,
+        pending_gap_open_mask: Self::Score,
+        adjacent_pending_gap_open_mask: Self::Score,
+        continuation_gap_extend_penalty: Self::Score,
+        adjacent_continuation_gap_extend_penalty: Self::Score,
+        scalar_end_mask: Self::Score,
+        adjacent_scalar_end_mask: Self::Score,
+        gap_open_penalty: Self::Score,
+        gap_extend_penalty: Self::Score,
+    ) -> (Self::Score, Self::Score) {
+        unsafe {
+            super::propagate_unicode_8_lane::<BackendScalar8>(
+                row,
+                adjacent_row,
+                pending_gap_open_mask,
+                adjacent_pending_gap_open_mask,
+                continuation_gap_extend_penalty,
+                adjacent_continuation_gap_extend_penalty,
+                scalar_end_mask,
+                adjacent_scalar_end_mask,
+                gap_open_penalty,
+                gap_extend_penalty,
+            )
+        }
+    }
 }
 
 impl BytesVec for Scalar8Bytes {
@@ -141,6 +170,10 @@ impl MaskVec for Scalar8Bytes {
             o[i] = !self.0[i];
         }
         Self(o)
+    }
+    #[inline(always)]
+    unsafe fn is_zero(self) -> bool {
+        self.0.iter().all(|&v| v == 0)
     }
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
@@ -301,6 +334,35 @@ impl Backend for BackendScalar16U8 {
             )
         }
     }
+
+    #[inline(always)]
+    unsafe fn propagate_horizontal_unicode_gaps(
+        row: Self::Score,
+        adjacent_row: Self::Score,
+        pending_gap_open_mask: Self::Score,
+        adjacent_pending_gap_open_mask: Self::Score,
+        continuation_gap_extend_penalty: Self::Score,
+        adjacent_continuation_gap_extend_penalty: Self::Score,
+        scalar_end_mask: Self::Score,
+        adjacent_scalar_end_mask: Self::Score,
+        gap_open_penalty: Self::Score,
+        gap_extend_penalty: Self::Score,
+    ) -> (Self::Score, Self::Score) {
+        unsafe {
+            super::propagate_unicode_16_lane::<BackendScalar16U8>(
+                row,
+                adjacent_row,
+                pending_gap_open_mask,
+                adjacent_pending_gap_open_mask,
+                continuation_gap_extend_penalty,
+                adjacent_continuation_gap_extend_penalty,
+                scalar_end_mask,
+                adjacent_scalar_end_mask,
+                gap_open_penalty,
+                gap_extend_penalty,
+            )
+        }
+    }
 }
 
 impl BytesVec for Scalar16U8Bytes {
@@ -386,6 +448,10 @@ impl MaskVec for Scalar16U8Bytes {
             o[i] = !self.0[i];
         }
         Self(o)
+    }
+    #[inline(always)]
+    unsafe fn is_zero(self) -> bool {
+        self.0.iter().all(|&v| v == 0)
     }
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
