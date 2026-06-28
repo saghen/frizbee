@@ -278,7 +278,10 @@ mod tests {
     use crate::Scoring;
     use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
     use crate::smith_waterman::{Kernel, SmithWaterman, score_fits_in_u8};
-    use bolero::check;
+    use proptest::prelude::*;
+    use proptest::test_runner::{Config as ProptestConfig, TestCaseError, TestRunner};
+    use std::any::Any;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
 
     #[derive(Debug, Clone, Copy)]
     struct TestScalarBytes<const LANES: usize>([u8; LANES]);
@@ -1384,6 +1387,35 @@ mod tests {
         if cfg!(miri) { default.min(4) } else { default }
     }
 
+    fn run_generated_inputs<F>(iterations: usize, max_len: usize, check_input: F)
+    where
+        F: Fn(&[u8]),
+    {
+        let strategy = prop::collection::vec(any::<u8>(), 0..=max_len);
+        let mut runner = TestRunner::new(ProptestConfig {
+            cases: test_iterations(iterations) as u32,
+            ..ProptestConfig::default()
+        });
+
+        runner
+            .run(&strategy, |input| {
+                catch_unwind(AssertUnwindSafe(|| check_input(&input)))
+                    .map_err(|payload| TestCaseError::fail(panic_payload_to_string(payload)))?;
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
+        if let Some(message) = payload.downcast_ref::<String>() {
+            message.clone()
+        } else if let Some(message) = payload.downcast_ref::<&'static str>() {
+            (*message).to_owned()
+        } else {
+            "property assertion panicked".to_owned()
+        }
+    }
+
     #[test]
     fn randomized_cross_backend_parity() {
         if cfg!(miri) {
@@ -1394,13 +1426,10 @@ mod tests {
             return;
         }
 
-        check!()
-            .with_iterations(test_iterations(192))
-            .with_max_len(test_bound(2048, 384))
-            .for_each(|input: &[u8]| {
-                let case = BackendCase::from_bytes(input);
-                assert_backend_case(&case);
-            });
+        run_generated_inputs(192, test_bound(2048, 384), |input| {
+            let case = BackendCase::from_bytes(input);
+            assert_backend_case(&case);
+        });
     }
 
     fn miri_inputs() -> &'static [&'static [u8]] {

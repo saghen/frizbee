@@ -1,11 +1,13 @@
+use std::any::Any;
 use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use bolero::check;
 use frizbee::{
     CaseMatching, Config, Match, MatchIndices, Matcher, Scoring, match_list, match_list_indices,
     match_list_parallel,
 };
+use proptest::prelude::*;
+use proptest::test_runner::{Config as ProptestConfig, TestCaseError, TestRunner};
 
 #[derive(Debug, Clone)]
 struct ApiCase {
@@ -128,15 +130,41 @@ fn test_iterations(default: usize) -> usize {
     if cfg!(miri) { default.min(4) } else { default }
 }
 
+fn run_generated_inputs<F>(iterations: usize, max_len: usize, check_input: F)
+where
+    F: Fn(&[u8]),
+{
+    let strategy = prop::collection::vec(any::<u8>(), 0..=max_len);
+    let mut runner = TestRunner::new(ProptestConfig {
+        cases: test_iterations(iterations) as u32,
+        ..ProptestConfig::default()
+    });
+
+    runner
+        .run(&strategy, |input| {
+            catch_unwind(AssertUnwindSafe(|| check_input(&input)))
+                .map_err(|payload| TestCaseError::fail(panic_payload_to_string(payload)))?;
+            Ok(())
+        })
+        .unwrap();
+}
+
+fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
+    if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else if let Some(message) = payload.downcast_ref::<&'static str>() {
+        (*message).to_owned()
+    } else {
+        "property assertion panicked".to_owned()
+    }
+}
+
 #[test]
 fn generated_public_api_properties() {
-    check!()
-        .with_iterations(test_iterations(192))
-        .with_max_len(if cfg!(miri) { 384 } else { 4096 })
-        .for_each(|input: &[u8]| {
-            let case = ApiCase::from_bytes(input);
-            assert_public_api_case(&case);
-        });
+    run_generated_inputs(192, if cfg!(miri) { 384 } else { 4096 }, |input| {
+        let case = ApiCase::from_bytes(input);
+        assert_public_api_case(&case);
+    });
 }
 
 fn assert_public_api_case(case: &ApiCase) {

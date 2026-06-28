@@ -167,7 +167,10 @@ impl<B: Backend> Kernel for Prefilter<B> {
 #[cfg(test)]
 mod tests {
     use super::{Kernel, Window, backend::PrefilterScalar};
-    use bolero::check;
+    use proptest::prelude::*;
+    use proptest::test_runner::{Config as ProptestConfig, TestCaseError, TestRunner};
+    use std::any::Any;
+    use std::panic::{AssertUnwindSafe, catch_unwind};
 
     fn result(needle: &str, haystack: &str, max_typos: u16) -> (bool, usize, usize) {
         result_generic(needle, haystack, max_typos)
@@ -500,13 +503,10 @@ mod tests {
             return;
         }
 
-        check!()
-            .with_iterations(test_iterations(128))
-            .with_max_len(test_bound(1024, 256))
-            .for_each(|input: &[u8]| {
-                let case = UnicodePrefilterCase::from_bytes(input);
-                assert_unicode_case_matches_oracle(&case);
-            });
+        run_generated_inputs(128, test_bound(1024, 256), |input| {
+            let case = UnicodePrefilterCase::from_bytes(input);
+            assert_unicode_case_matches_oracle(&case);
+        });
     }
 
     fn result_generic(needle: &str, haystack: &str, max_typos: u16) -> (bool, usize, usize) {
@@ -822,6 +822,35 @@ mod tests {
         if cfg!(miri) { default.min(4) } else { default }
     }
 
+    fn run_generated_inputs<F>(iterations: usize, max_len: usize, check_input: F)
+    where
+        F: Fn(&[u8]),
+    {
+        let strategy = prop::collection::vec(any::<u8>(), 0..=max_len);
+        let mut runner = TestRunner::new(ProptestConfig {
+            cases: test_iterations(iterations) as u32,
+            ..ProptestConfig::default()
+        });
+
+        runner
+            .run(&strategy, |input| {
+                catch_unwind(AssertUnwindSafe(|| check_input(&input)))
+                    .map_err(|payload| TestCaseError::fail(panic_payload_to_string(payload)))?;
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
+        if let Some(message) = payload.downcast_ref::<String>() {
+            message.clone()
+        } else if let Some(message) = payload.downcast_ref::<&'static str>() {
+            (*message).to_owned()
+        } else {
+            "property assertion panicked".to_owned()
+        }
+    }
+
     #[test]
     fn randomized_backend_parity_and_oracle() {
         if cfg!(miri) {
@@ -832,13 +861,10 @@ mod tests {
             return;
         }
 
-        check!()
-            .with_iterations(test_iterations(256))
-            .with_max_len(test_bound(2048, 384))
-            .for_each(|input: &[u8]| {
-                let case = PrefilterCase::from_bytes(input);
-                assert_case_matches_oracle(&case);
-            });
+        run_generated_inputs(256, test_bound(2048, 384), |input| {
+            let case = PrefilterCase::from_bytes(input);
+            assert_case_matches_oracle(&case);
+        });
     }
 
     fn miri_inputs() -> &'static [&'static [u8]] {
