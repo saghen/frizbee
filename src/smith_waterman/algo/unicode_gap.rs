@@ -11,15 +11,17 @@
 //! C = lead or continuation byte
 //! E = end of utf-8 codepoint
 //!
+//! ```text
 //!       f  C  C  C  E   C   C   E
 //!    0  0  0  0  0  0   0   0   0
 //! \u 0  0  0  0  0  16  11  10  9
 //! \u 0  0  0  0  0  11  10  9   25
+//! ```
 //!
 //! We can solve the issue by keeping track of the continuation bytes as we apply the
 //! gap propagation.
 //!
-//! ---
+//! ```text
 //! input:
 //! E   C   C   E   E   C   E   <- codepoint types
 //! 16  0   0   0   0   0   0   <- score = match scores
@@ -99,6 +101,7 @@
 //!
 //! E   C   C   E   E   C   E
 //! 16  16  16  11  10  10  9
+//! ```
 
 use crate::smith_waterman::backend::{Backend, ScoreVec};
 
