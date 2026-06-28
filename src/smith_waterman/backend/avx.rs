@@ -1,6 +1,7 @@
 use std::arch::x86_64::*;
 
 use crate::prefilter::algo::can_overread;
+use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
 
 use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
@@ -40,7 +41,7 @@ impl Backend for BackendAVX {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_16_lane::<BackendAVX>(
+            ascii_gap::propagate_16_lane::<BackendAVX>(
                 row,
                 adjacent_row,
                 match_mask,
@@ -65,7 +66,7 @@ impl Backend for BackendAVX {
         gap_extend_penalty: Self::Score,
     ) -> (Self::Score, Self::Score) {
         unsafe {
-            super::propagate_unicode_16_lane::<BackendAVX>(
+            unicode_gap::propagate_unicode_16_lane::<BackendAVX>(
                 row,
                 adjacent_row,
                 pending_gap_open_mask,
@@ -374,7 +375,7 @@ impl Backend for BackendAVXU8 {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_32_lane::<BackendAVXU8>(
+            ascii_gap::propagate_32_lane::<BackendAVXU8>(
                 row,
                 adjacent_row,
                 match_mask,
@@ -399,7 +400,7 @@ impl Backend for BackendAVXU8 {
         gap_extend_penalty: Self::Score,
     ) -> (Self::Score, Self::Score) {
         unsafe {
-            super::propagate_unicode_32_lane::<BackendAVXU8>(
+            unicode_gap::propagate_unicode_32_lane::<BackendAVXU8>(
                 row,
                 adjacent_row,
                 pending_gap_open_mask,

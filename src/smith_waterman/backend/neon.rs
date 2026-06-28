@@ -1,4 +1,5 @@
 use crate::prefilter::algo::can_overread;
+use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
 use std::arch::aarch64::*;
 
 use super::{Backend, BytesVec, MaskVec, ScoreVec};
@@ -39,7 +40,7 @@ impl Backend for BackendNEON {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_8_lane::<BackendNEON>(
+            ascii_gap::propagate_8_lane::<BackendNEON>(
                 row,
                 adjacent_row,
                 match_mask,
@@ -64,7 +65,7 @@ impl Backend for BackendNEON {
         gap_extend_penalty: Self::Score,
     ) -> (Self::Score, Self::Score) {
         unsafe {
-            super::propagate_unicode_8_lane::<BackendNEON>(
+            unicode_gap::propagate_unicode_8_lane::<BackendNEON>(
                 row,
                 adjacent_row,
                 pending_gap_open_mask,
@@ -347,7 +348,7 @@ impl Backend for BackendNEONU8 {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_16_lane::<BackendNEONU8>(
+            ascii_gap::propagate_16_lane::<BackendNEONU8>(
                 row,
                 adjacent_row,
                 match_mask,
@@ -372,7 +373,7 @@ impl Backend for BackendNEONU8 {
         gap_extend_penalty: Self::Score,
     ) -> (Self::Score, Self::Score) {
         unsafe {
-            super::propagate_unicode_16_lane::<BackendNEONU8>(
+            unicode_gap::propagate_unicode_16_lane::<BackendNEONU8>(
                 row,
                 adjacent_row,
                 pending_gap_open_mask,

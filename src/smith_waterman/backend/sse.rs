@@ -1,6 +1,7 @@
 use std::arch::x86_64::*;
 
 use crate::prefilter::algo::can_overread;
+use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
 
 use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
@@ -43,7 +44,7 @@ impl Backend for BackendSSE {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_8_lane::<BackendSSE>(
+            ascii_gap::propagate_8_lane::<BackendSSE>(
                 row,
                 adjacent_row,
                 match_mask,
@@ -68,7 +69,7 @@ impl Backend for BackendSSE {
         gap_extend_penalty: Self::Score,
     ) -> (Self::Score, Self::Score) {
         unsafe {
-            super::propagate_unicode_8_lane::<BackendSSE>(
+            unicode_gap::propagate_unicode_8_lane::<BackendSSE>(
                 row,
                 adjacent_row,
                 pending_gap_open_mask,
@@ -359,7 +360,7 @@ impl Backend for BackendSSEU8 {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_16_lane::<BackendSSEU8>(
+            ascii_gap::propagate_16_lane::<BackendSSEU8>(
                 row,
                 adjacent_row,
                 match_mask,
@@ -384,7 +385,7 @@ impl Backend for BackendSSEU8 {
         gap_extend_penalty: Self::Score,
     ) -> (Self::Score, Self::Score) {
         unsafe {
-            super::propagate_unicode_16_lane::<BackendSSEU8>(
+            unicode_gap::propagate_unicode_16_lane::<BackendSSEU8>(
                 row,
                 adjacent_row,
                 pending_gap_open_mask,

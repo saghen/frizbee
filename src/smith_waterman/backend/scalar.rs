@@ -1,6 +1,8 @@
 //! Scalar backend used when no SIMD instruction set is available, and for
 //! cross-backend property tests.
 
+use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
+
 use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
 // ---------------------------------------------------------------------------
@@ -46,7 +48,7 @@ impl Backend for BackendScalar8 {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_8_lane::<BackendScalar8>(
+            ascii_gap::propagate_8_lane::<BackendScalar8>(
                 row,
                 adjacent_row,
                 match_mask,
@@ -71,7 +73,7 @@ impl Backend for BackendScalar8 {
         gap_extend_penalty: Self::Score,
     ) -> (Self::Score, Self::Score) {
         unsafe {
-            super::propagate_unicode_8_lane::<BackendScalar8>(
+            unicode_gap::propagate_unicode_8_lane::<BackendScalar8>(
                 row,
                 adjacent_row,
                 pending_gap_open_mask,
@@ -324,7 +326,7 @@ impl Backend for BackendScalar16U8 {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_16_lane::<BackendScalar16U8>(
+            ascii_gap::propagate_16_lane::<BackendScalar16U8>(
                 row,
                 adjacent_row,
                 match_mask,
@@ -349,7 +351,7 @@ impl Backend for BackendScalar16U8 {
         gap_extend_penalty: Self::Score,
     ) -> (Self::Score, Self::Score) {
         unsafe {
-            super::propagate_unicode_16_lane::<BackendScalar16U8>(
+            unicode_gap::propagate_unicode_16_lane::<BackendScalar16U8>(
                 row,
                 adjacent_row,
                 pending_gap_open_mask,

@@ -272,241 +272,11 @@ pub trait ScoreVec: Copy + core::fmt::Debug {
     fn to_lanes(self) -> Vec<u16>;
 }
 
-// ---------------------------------------------------------------------------
-// Gap propagation helpers shared by all backends.
-//
-// Each backend's Backend::propagate_horizontal_gaps calls one of these
-// generic-over-B functions, selected by lane count. The macro hides the
-// fully-qualified `<<B as Backend>::Score as ScoreVec>::*` boilerplate.
-// ---------------------------------------------------------------------------
-
-macro_rules! gap_step {
-    ($B:ty, $shift:literal, $row:ident, $adj:ident, $mm:ident, $amm:ident, $gop:ident, $gex:ident) => {
-        let shifted_row =
-            <<$B as Backend>::Score as ScoreVec>::shift_right_padded::<$shift>($row, $adj);
-        let shifted_match_mask =
-            <<$B as Backend>::Score as ScoreVec>::shift_right_padded::<$shift>($mm, $amm);
-        let gap_penalty = <<$B as Backend>::Score as ScoreVec>::add(
-            $gex,
-            <<$B as Backend>::Score as ScoreVec>::and($gop, shifted_match_mask),
-        );
-        let decayed = <<$B as Backend>::Score as ScoreVec>::subs(shifted_row, gap_penalty);
-        let $row = <<$B as Backend>::Score as ScoreVec>::max($row, decayed);
-        let $gex = <<$B as Backend>::Score as ScoreVec>::add($gex, $gex);
-    };
-}
-
-#[inline(always)]
-pub(crate) unsafe fn propagate_8_lane<B: Backend>(
-    row: B::Score,
-    adj: B::Score,
-    mm: B::Score,
-    amm: B::Score,
-    gop: B::Score,
-    gex: B::Score,
-) -> B::Score {
-    unsafe {
-        gap_step!(B, 1, row, adj, mm, amm, gop, gex);
-        gap_step!(B, 2, row, adj, mm, amm, gop, gex);
-        gap_step!(B, 4, row, adj, mm, amm, gop, gex);
-        let _ = gex;
-        row
-    }
-}
-
-#[inline(always)]
-pub(crate) unsafe fn propagate_16_lane<B: Backend>(
-    row: B::Score,
-    adj: B::Score,
-    mm: B::Score,
-    amm: B::Score,
-    gop: B::Score,
-    gex: B::Score,
-) -> B::Score {
-    unsafe {
-        gap_step!(B, 1, row, adj, mm, amm, gop, gex);
-        gap_step!(B, 2, row, adj, mm, amm, gop, gex);
-        gap_step!(B, 4, row, adj, mm, amm, gop, gex);
-        gap_step!(B, 8, row, adj, mm, amm, gop, gex);
-        let _ = gex;
-        row
-    }
-}
-
-#[inline(always)]
-pub(crate) unsafe fn propagate_32_lane<B: Backend>(
-    row: B::Score,
-    adj: B::Score,
-    mm: B::Score,
-    amm: B::Score,
-    gop: B::Score,
-    gex: B::Score,
-) -> B::Score {
-    unsafe {
-        gap_step!(B, 1, row, adj, mm, amm, gop, gex);
-        gap_step!(B, 2, row, adj, mm, amm, gop, gex);
-        gap_step!(B, 4, row, adj, mm, amm, gop, gex);
-        gap_step!(B, 8, row, adj, mm, amm, gop, gex);
-        gap_step!(B, 16, row, adj, mm, amm, gop, gex);
-        let _ = gex;
-        row
-    }
-}
-
-#[inline(always)]
-pub(crate) unsafe fn propagate_64_lane<B: Backend>(
-    row: B::Score,
-    adj: B::Score,
-    mm: B::Score,
-    amm: B::Score,
-    gop: B::Score,
-    gex: B::Score,
-) -> B::Score {
-    unsafe {
-        gap_step!(B, 1, row, adj, mm, amm, gop, gex);
-        gap_step!(B, 2, row, adj, mm, amm, gop, gex);
-        gap_step!(B, 4, row, adj, mm, amm, gop, gex);
-        gap_step!(B, 8, row, adj, mm, amm, gop, gex);
-        gap_step!(B, 16, row, adj, mm, amm, gop, gex);
-        gap_step!(B, 32, row, adj, mm, amm, gop, gex);
-        let _ = gex;
-        row
-    }
-}
-
-#[inline(always)]
-unsafe fn unicode_gap_step<B: Backend, const SHIFT: i32>(
-    row: &mut B::Score,
-    pending_gap_open_mask: &mut B::Score,
-    adjacent_row: B::Score,
-    adjacent_pending_gap_open_mask: B::Score,
-    continuation_gap_extend_penalty: B::Score,
-    scalar_end_mask: B::Score,
-    total_gap_extend_penalty: B::Score,
-    gap_open_penalty: B::Score,
-) {
-    unsafe {
-        let shifted_row = row.shift_right_padded::<SHIFT>(adjacent_row);
-        let shifted_pending_gap_open_mask =
-            pending_gap_open_mask.shift_right_padded::<SHIFT>(adjacent_pending_gap_open_mask);
-
-        let scalar_gap_extend_penalty =
-            total_gap_extend_penalty.subs(continuation_gap_extend_penalty);
-        let pending_gap_open_crossed_scalar_end =
-            shifted_pending_gap_open_mask.and(scalar_end_mask);
-        let gap_penalty = scalar_gap_extend_penalty
-            .add(gap_open_penalty.and(pending_gap_open_crossed_scalar_end));
-        let candidate_row = shifted_row.subs(gap_penalty);
-
-        *row = row.max(candidate_row);
-
-        // THINKING.md intentionally keeps pending state with OR-like mask
-        // propagation, even when a transported body-lane score is not the
-        // winning score for that lane.
-        let candidate_pending_gap_open_mask = shifted_pending_gap_open_mask.subs(scalar_end_mask);
-        *pending_gap_open_mask = pending_gap_open_mask.max(candidate_pending_gap_open_mask);
-    }
-}
-
-#[inline(always)]
-unsafe fn prepare_next_unicode_gap_step<B: Backend, const SHIFT: i32>(
-    continuation_gap_extend_penalty: &mut B::Score,
-    adjacent_continuation_gap_extend_penalty: &mut B::Score,
-    scalar_end_mask: &mut B::Score,
-    adjacent_scalar_end_mask: &mut B::Score,
-    total_gap_extend_penalty: &mut B::Score,
-) {
-    unsafe {
-        let zero = B::Score::zero();
-
-        let shifted_continuation_gap_extend_penalty = continuation_gap_extend_penalty
-            .shift_right_padded::<SHIFT>(*adjacent_continuation_gap_extend_penalty);
-        *continuation_gap_extend_penalty =
-            continuation_gap_extend_penalty.add(shifted_continuation_gap_extend_penalty);
-        *adjacent_continuation_gap_extend_penalty = adjacent_continuation_gap_extend_penalty
-            .add(adjacent_continuation_gap_extend_penalty.shift_right_padded::<SHIFT>(zero));
-
-        let shifted_scalar_end_mask =
-            scalar_end_mask.shift_right_padded::<SHIFT>(*adjacent_scalar_end_mask);
-        *scalar_end_mask = scalar_end_mask.max(shifted_scalar_end_mask);
-        *adjacent_scalar_end_mask = adjacent_scalar_end_mask
-            .max(adjacent_scalar_end_mask.shift_right_padded::<SHIFT>(zero));
-
-        *total_gap_extend_penalty = total_gap_extend_penalty.add(*total_gap_extend_penalty);
-    }
-}
-
-macro_rules! unicode_propagator {
-    ($name:ident, [$($prepare_shift:literal),*], $final_shift:literal) => {
-        #[inline(always)]
-        pub(crate) unsafe fn $name<B: Backend>(
-            row: B::Score,
-            adjacent_row: B::Score,
-            pending_gap_open_mask: B::Score,
-            adjacent_pending_gap_open_mask: B::Score,
-            continuation_gap_extend_penalty: B::Score,
-            adjacent_continuation_gap_extend_penalty: B::Score,
-            scalar_end_mask: B::Score,
-            adjacent_scalar_end_mask: B::Score,
-            gap_open_penalty: B::Score,
-            gap_extend_penalty: B::Score,
-        ) -> (B::Score, B::Score) {
-            unsafe {
-                let mut row = row;
-                let mut pending_gap_open_mask = pending_gap_open_mask;
-                let mut continuation_gap_extend_penalty = continuation_gap_extend_penalty;
-                let mut adjacent_continuation_gap_extend_penalty =
-                    adjacent_continuation_gap_extend_penalty;
-                let mut scalar_end_mask = scalar_end_mask;
-                let mut adjacent_scalar_end_mask = adjacent_scalar_end_mask;
-                let mut total_gap_extend_penalty = gap_extend_penalty;
-
-                $(
-                    unicode_gap_step::<B, $prepare_shift>(
-                        &mut row,
-                        &mut pending_gap_open_mask,
-                        adjacent_row,
-                        adjacent_pending_gap_open_mask,
-                        continuation_gap_extend_penalty,
-                        scalar_end_mask,
-                        total_gap_extend_penalty,
-                        gap_open_penalty,
-                    );
-                    prepare_next_unicode_gap_step::<B, $prepare_shift>(
-                        &mut continuation_gap_extend_penalty,
-                        &mut adjacent_continuation_gap_extend_penalty,
-                        &mut scalar_end_mask,
-                        &mut adjacent_scalar_end_mask,
-                        &mut total_gap_extend_penalty,
-                    );
-                )*
-
-                unicode_gap_step::<B, $final_shift>(
-                    &mut row,
-                    &mut pending_gap_open_mask,
-                    adjacent_row,
-                    adjacent_pending_gap_open_mask,
-                    continuation_gap_extend_penalty,
-                    scalar_end_mask,
-                    total_gap_extend_penalty,
-                    gap_open_penalty,
-                );
-
-                (row, pending_gap_open_mask)
-            }
-        }
-    };
-}
-
-unicode_propagator!(propagate_unicode_8_lane, [1, 2], 4);
-unicode_propagator!(propagate_unicode_16_lane, [1, 2, 4], 8);
-unicode_propagator!(propagate_unicode_32_lane, [1, 2, 4, 8], 16);
-unicode_propagator!(propagate_unicode_64_lane, [1, 2, 4, 8, 16], 32);
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Scoring;
+    use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
     use crate::smith_waterman::{Kernel, SmithWaterman, score_fits_in_u8};
     use bolero::check;
 
@@ -901,7 +671,7 @@ mod tests {
                     gap_extend_penalty: Self::Score,
                 ) -> Self::Score {
                     unsafe {
-                        super::$propagate::<Self>(
+                        ascii_gap::$propagate::<Self>(
                             row,
                             adjacent_row,
                             match_mask,
@@ -926,7 +696,7 @@ mod tests {
                     gap_extend_penalty: Self::Score,
                 ) -> (Self::Score, Self::Score) {
                     unsafe {
-                        super::$propagate_unicode::<Self>(
+                        unicode_gap::$propagate_unicode::<Self>(
                             row,
                             adjacent_row,
                             pending_gap_open_mask,

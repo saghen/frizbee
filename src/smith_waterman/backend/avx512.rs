@@ -1,5 +1,7 @@
 use std::arch::x86_64::*;
 
+use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
+
 use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
 /// 32-lane u16 scoring (512-bit __m512i), 32-lane u8 input (low half of __m512i).
@@ -59,7 +61,7 @@ impl Backend for BackendAVX512 {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_32_lane::<BackendAVX512>(
+            ascii_gap::propagate_32_lane::<BackendAVX512>(
                 row,
                 adjacent_row,
                 match_mask,
@@ -84,7 +86,7 @@ impl Backend for BackendAVX512 {
         gap_extend_penalty: Self::Score,
     ) -> (Self::Score, Self::Score) {
         unsafe {
-            super::propagate_unicode_32_lane::<BackendAVX512>(
+            unicode_gap::propagate_unicode_32_lane::<BackendAVX512>(
                 row,
                 adjacent_row,
                 pending_gap_open_mask,
@@ -129,7 +131,7 @@ impl Backend for BackendAVX512U8 {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            super::propagate_64_lane::<BackendAVX512U8>(
+            ascii_gap::propagate_64_lane::<BackendAVX512U8>(
                 row,
                 adjacent_row,
                 match_mask,
@@ -154,7 +156,7 @@ impl Backend for BackendAVX512U8 {
         gap_extend_penalty: Self::Score,
     ) -> (Self::Score, Self::Score) {
         unsafe {
-            super::propagate_unicode_64_lane::<BackendAVX512U8>(
+            unicode_gap::propagate_unicode_64_lane::<BackendAVX512U8>(
                 row,
                 adjacent_row,
                 pending_gap_open_mask,

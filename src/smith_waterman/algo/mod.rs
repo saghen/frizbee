@@ -11,7 +11,9 @@ use super::backend::{Backend, BytesVec, ScoreVec};
 use super::matrix::Matrix;
 
 mod ascii;
+pub(crate) mod ascii_gap;
 mod unicode;
+pub(crate) mod unicode_gap;
 
 pub(crate) const MAX_HAYSTACK_LEN: usize = 512;
 
