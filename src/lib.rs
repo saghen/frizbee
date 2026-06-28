@@ -150,9 +150,12 @@ pub struct Config {
     /// The maximum number of characters missing from the needle, before an item in the
     /// haystack is filtered out
     pub max_typos: Option<u16>,
-    /// Controls how ASCII case is handled while matching.
+    /// Controls how case sensitivity/insensitivity is handled while matching.
     #[cfg_attr(feature = "serde", serde(default))]
     pub casing: CaseMatching,
+    /// Controls how unicode is handled while matching.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub unicode: UnicodeMatching,
     /// Sort the results by score (descending)
     pub sort: bool,
     /// Controls the scoring used by the smith waterman algorithm. You may tweak these but pay
@@ -166,6 +169,7 @@ impl Default for Config {
         Config {
             max_typos: Some(0),
             casing: CaseMatching::Ignore,
+            unicode: UnicodeMatching::Smart,
             sort: true,
             scoring: Scoring::default(),
         }
@@ -191,6 +195,30 @@ impl CaseMatching {
             CaseMatching::Ignore => false,
             CaseMatching::Smart => needle.chars().any(char::is_uppercase),
             CaseMatching::Respect => true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum UnicodeMatching {
+    /// Always match against bytes directly
+    Ignore,
+    /// Ignore unicode unless the needle contains a multi-byte unicode char
+    #[default]
+    Smart,
+    /// Always use expensive unicode Smith Waterman for correctness across
+    /// multi-byte unicode chars in the haystack
+    Respect,
+}
+
+impl UnicodeMatching {
+    #[inline(always)]
+    pub(crate) fn respects_unicode_for(self, needle: &str) -> bool {
+        match self {
+            UnicodeMatching::Ignore => false,
+            UnicodeMatching::Smart => !needle.is_ascii(),
+            UnicodeMatching::Respect => true,
         }
     }
 }

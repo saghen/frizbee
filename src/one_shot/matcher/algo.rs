@@ -61,7 +61,10 @@ where
             return;
         }
 
-        let needs_unicode = !self.needle.is_ascii();
+        let needs_unicode = self
+            .config
+            .unicode
+            .respects_unicode_for(self.needle.as_str());
         let min_haystack_len = self.min_haystack_len();
         match (self.config.max_typos, needs_unicode) {
             (None, false) => self.match_list_unfiltered_into::<false, H>(
@@ -140,7 +143,10 @@ where
             return Matcher::empty_match_list_indices(haystacks);
         }
 
-        let needs_unicode = !self.needle.is_ascii();
+        let needs_unicode = self
+            .config
+            .unicode
+            .respects_unicode_for(self.needle.as_str());
         let min_haystack_len = self.min_haystack_len();
         let mut matches = match (self.config.max_typos, needs_unicode) {
             (None, false) => self.match_list_indices_unfiltered::<false, H>(haystacks),
