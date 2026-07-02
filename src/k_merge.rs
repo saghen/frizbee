@@ -5,7 +5,7 @@ use crate::Match;
 /// Uses a binary heap of cursors (one per run) to repeatedly emit the next
 /// globally best match in O(n log k) time, where `n` is the total number of
 /// matches and `k` is the number of runs.
-pub fn k_merge(runs: Vec<Vec<Match>>) -> Vec<Match> {
+pub fn k_merge_matches(runs: Vec<Vec<Match>>) -> Vec<Match> {
     let total_matches = runs.iter().map(Vec::len).sum();
 
     let mut merged = Vec::with_capacity(total_matches);
@@ -110,7 +110,7 @@ mod tests {
             vec![mtch(100, 0), mtch(90, 2), mtch(80, 5)],
         ];
 
-        let merged = k_merge(runs);
+        let merged = k_merge_matches(runs);
 
         assert_eq!(
             merged,
@@ -136,7 +136,7 @@ mod tests {
             vec![mtch(95, 1), mtch(80, 3)],
         ];
 
-        let merged = k_merge(runs);
+        let merged = k_merge_matches(runs);
 
         assert_eq!(
             merged,
@@ -158,7 +158,7 @@ mod tests {
             .rev()
             .collect::<Vec<_>>();
 
-        let merged = k_merge(runs);
+        let merged = k_merge_matches(runs);
 
         assert_eq!(
             merged,

@@ -1,5 +1,5 @@
 use criterion::BenchmarkId;
-use frizbee::{Config, Matcher, radix_sort};
+use frizbee::{Config, Matcher, radix_sort_matches};
 use std::{
     hint::black_box,
     sync::Arc,
@@ -125,7 +125,7 @@ fn match_list_bench_impl(
             let mut matches = matcher
                 .match_iter(black_box(haystack).iter())
                 .collect::<Vec<_>>();
-            radix_sort(&mut matches);
+            radix_sort_matches(&mut matches);
             matches
         })
     });

@@ -1,5 +1,5 @@
 use crate::smith_waterman::score_fits_in_u8;
-use crate::sort::radix_sort;
+use crate::sort::radix_sort_matches;
 use crate::{Config, Match, MatchIndices};
 
 mod algo;
@@ -92,7 +92,7 @@ impl Matcher {
         let mut matches = vec![];
         self.match_list_into(haystacks, 0, &mut matches);
         if !self.needle.is_empty() && self.config.sort {
-            radix_sort(&mut matches);
+            radix_sort_matches(&mut matches);
         }
         matches
     }

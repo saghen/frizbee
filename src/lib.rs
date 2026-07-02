@@ -49,9 +49,9 @@ mod prefilter;
 mod smith_waterman;
 mod sort;
 
-pub use k_merge::k_merge;
-pub use sort::radix_sort;
+pub use k_merge::k_merge_matches;
 pub use one_shot::{Matcher, match_list, match_list_indices, match_list_parallel};
+pub use sort::radix_sort_matches;
 
 /// Iterator extension for fuzzy matching
 ///

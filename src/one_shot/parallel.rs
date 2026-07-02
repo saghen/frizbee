@@ -2,8 +2,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 use super::Matcher;
-use crate::k_merge::k_merge;
-use crate::sort::radix_sort;
+use crate::k_merge::k_merge_matches;
+use crate::sort::radix_sort_matches;
 use crate::{Config, Match, match_list};
 
 pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
@@ -69,7 +69,7 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
 
                     // Each thread sorts so that we can perform k-way merge
                     if config.sort {
-                        radix_sort(&mut local_matches);
+                        radix_sort_matches(&mut local_matches);
                     }
 
                     local_matches
@@ -78,7 +78,7 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
             .collect();
 
         if config.sort {
-            k_merge(
+            k_merge_matches(
                 handles
                     .into_iter()
                     .map(|h| h.join().unwrap())
