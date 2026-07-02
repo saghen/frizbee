@@ -61,6 +61,7 @@ pub(crate) unsafe fn propagate_16_lane<B: Backend>(
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 #[inline(always)]
 pub(crate) unsafe fn propagate_32_lane<B: Backend>(
     row: B::Score,
@@ -81,6 +82,7 @@ pub(crate) unsafe fn propagate_32_lane<B: Backend>(
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 #[inline(always)]
 pub(crate) unsafe fn propagate_64_lane<B: Backend>(
     row: B::Score,

@@ -4,6 +4,7 @@ mod load;
 mod unicode;
 mod unicode_typos;
 
+#[cfg(target_arch = "x86_64")]
 pub(crate) use ascii::find_last_char_pos;
 pub(crate) use load::{can_overread, load_window};
 

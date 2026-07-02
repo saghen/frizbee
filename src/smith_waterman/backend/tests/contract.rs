@@ -214,10 +214,12 @@ fn check_score_shift_right_padded<B: Backend>() {
     }
 }
 
+#[cfg(target_arch = "x86_64")]
 pub(super) fn check_score_shift_right_padded_16<B: Backend>() {
     check_score_shift_right_padded_at::<B, 16>();
 }
 
+#[cfg(target_arch = "x86_64")]
 pub(super) fn check_score_shift_right_padded_32<B: Backend>() {
     check_score_shift_right_padded_at::<B, 32>();
 }

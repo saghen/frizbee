@@ -455,6 +455,7 @@ scalar_backend!(
 );
 
 // Test only backends used to assert correctness in the SIMD backends
+#[cfg(target_arch = "x86_64")]
 #[cfg(test)]
 scalar_backend!(
     TestScalar16,
@@ -464,6 +465,7 @@ scalar_backend!(
     propagate_16_lane,
     propagate_unicode_16_lane
 );
+#[cfg(target_arch = "x86_64")]
 #[cfg(test)]
 scalar_backend!(
     TestScalar32,
@@ -473,6 +475,7 @@ scalar_backend!(
     propagate_32_lane,
     propagate_unicode_32_lane
 );
+#[cfg(target_arch = "x86_64")]
 #[cfg(test)]
 scalar_backend!(
     TestScalar32U8,
@@ -482,6 +485,7 @@ scalar_backend!(
     propagate_32_lane,
     propagate_unicode_32_lane
 );
+#[cfg(target_arch = "x86_64")]
 #[cfg(test)]
 scalar_backend!(
     TestScalar64U8,

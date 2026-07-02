@@ -228,5 +228,7 @@ macro_rules! unicode_propagator {
 
 unicode_propagator!(propagate_unicode_8_lane, [1, 2], 4);
 unicode_propagator!(propagate_unicode_16_lane, [1, 2, 4], 8);
+#[cfg(target_arch = "x86_64")]
 unicode_propagator!(propagate_unicode_32_lane, [1, 2, 4, 8], 16);
+#[cfg(target_arch = "x86_64")]
 unicode_propagator!(propagate_unicode_64_lane, [1, 2, 4, 8, 16], 32);
