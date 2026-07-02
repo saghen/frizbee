@@ -1,5 +1,5 @@
 use criterion::BenchmarkId;
-use frizbee::{Config, Matcher};
+use frizbee::{Config, Matcher, radix_sort};
 use std::{
     hint::black_box,
     sync::Arc,
@@ -118,6 +118,16 @@ fn match_list_bench_impl(
     group.bench_with_input(benchmark_id("Frizbee"), haystack, |b, haystack| {
         let mut matcher = Matcher::new(needle, &Config::default());
         b.iter(|| matcher.match_list(black_box(haystack)))
+    });
+    group.bench_with_input(benchmark_id("Frizbee Iter"), haystack, |b, haystack| {
+        let mut matcher = Matcher::new(needle, &Config::default());
+        b.iter(|| {
+            let mut matches = matcher
+                .match_iter(black_box(haystack).iter())
+                .collect::<Vec<_>>();
+            radix_sort(&mut matches);
+            matches
+        })
     });
     group.bench_with_input(benchmark_id("All Scores"), haystack, |b, haystack| {
         let mut matcher = Matcher::new(

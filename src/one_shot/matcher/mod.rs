@@ -4,8 +4,10 @@ use crate::{Config, Match, MatchIndices};
 
 mod algo;
 mod backend;
+mod iter;
 use algo::{MANY_TYPOS, NO_PREFILTER, Specialized};
 use backend::*;
+pub use iter::{FuzzyMatch, FuzzyMatchExt, FuzzyMatchIndices};
 
 #[derive(Debug, Clone)]
 pub struct Matcher {
@@ -95,6 +97,38 @@ impl Matcher {
         matches
     }
 
+    pub fn match_iter<S: AsRef<str>>(
+        &mut self,
+        haystacks: impl IntoIterator<Item = S>,
+    ) -> impl Iterator<Item = Match> {
+        let empty_needle = self.needle.is_empty();
+        let needs_unicode = self.config.unicode.respects_unicode_for(&self.needle);
+        haystacks
+            .into_iter()
+            .enumerate()
+            .filter_map(move |(index, haystack)| {
+                let index = u32::try_from(index)
+                    .expect("too many items in haystack, will overflow the u32 index");
+                self.match_one(haystack, index, empty_needle, needs_unicode)
+            })
+    }
+
+    pub fn match_iter_indices<S: AsRef<str>>(
+        &mut self,
+        haystacks: impl IntoIterator<Item = S>,
+    ) -> impl Iterator<Item = MatchIndices> {
+        let empty_needle = self.needle.is_empty();
+        let needs_unicode = self.config.unicode.respects_unicode_for(&self.needle);
+        haystacks
+            .into_iter()
+            .enumerate()
+            .filter_map(move |(index, haystack)| {
+                let index = u32::try_from(index)
+                    .expect("too many items in haystack, will overflow the u32 index");
+                self.match_one_indices(haystack, index, empty_needle, needs_unicode)
+            })
+    }
+
     pub fn match_list_indices<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<MatchIndices> {
         Self::guard_against_haystack_overflow(haystacks.len(), 0);
         if self.needle.is_empty() {
@@ -104,9 +138,6 @@ impl Matcher {
         let needs_unicode = self.config.unicode.respects_unicode_for(&self.needle);
         let mut matches = dispatch!(&mut self.backend, matcher => {
             dispatch_typos!(self.config.max_typos, needs_unicode, |TYPOS, UNICODE| {
-                // SAFETY: the backend was only constructed after its
-                // `is_available()` check passed (see `get_backend`), so its
-                // target features are available here.
                 unsafe { matcher.match_list_indices::<TYPOS, UNICODE, S>(haystacks) }
             })
         });
@@ -140,6 +171,45 @@ impl Matcher {
                         matches,
                     )
                 }
+            })
+        })
+    }
+
+    /// Matches a single haystack, returning its [`Match`] if it passes.
+    /// `empty_needle` and `needs_unicode` are precomputed by the caller so they
+    /// aren't recomputed per item in the hot loop.
+    pub(super) fn match_one<S: AsRef<str>>(
+        &mut self,
+        haystack: S,
+        index: u32,
+        empty_needle: bool,
+        needs_unicode: bool,
+    ) -> Option<Match> {
+        if empty_needle {
+            return Some(Match::from_index(index as usize));
+        }
+        dispatch!(&mut self.backend, matcher => {
+            dispatch_typos!(self.config.max_typos, needs_unicode, |TYPOS, UNICODE| {
+                unsafe { matcher.match_one::<TYPOS, UNICODE, S>(haystack, index) }
+            })
+        })
+    }
+
+    /// Matches a single haystack, returning its [`MatchIndices`] if it passes.
+    /// See [`Matcher::match_one`].
+    pub(super) fn match_one_indices<S: AsRef<str>>(
+        &mut self,
+        haystack: S,
+        index: u32,
+        empty_needle: bool,
+        needs_unicode: bool,
+    ) -> Option<MatchIndices> {
+        if empty_needle {
+            return Some(MatchIndices::from_index(index as usize));
+        }
+        dispatch!(&mut self.backend, matcher => {
+            dispatch_typos!(self.config.max_typos, needs_unicode, |TYPOS, UNICODE| {
+                unsafe { matcher.match_one_indices::<TYPOS, UNICODE, S>(haystack, index) }
             })
         })
     }
@@ -337,6 +407,88 @@ mod tests {
             matches.iter().map(|m| m.index).collect::<Vec<_>>(),
             vec![2, 3]
         );
+    }
+
+    #[test]
+    fn match_iter_matches_match_list() {
+        let haystacks = [
+            "deadbeef",
+            "deadbf",
+            "deadbeefg",
+            "deadbe",
+            "no-match",
+            "DeAdBe",
+            "é다😀dead__be",
+        ];
+        for needle in ["deadbe", "é다😀"] {
+            for max_typos in [None, Some(0), Some(1), Some(2), Some(3)] {
+                let config = Config {
+                    max_typos,
+                    sort: false,
+                    ..Config::default()
+                };
+                let mut matcher = Matcher::new(needle, &config);
+                let from_iter = matcher.match_iter(haystacks.iter()).collect::<Vec<_>>();
+                let from_list = matcher.match_list(&haystacks);
+                assert_eq!(
+                    from_iter, from_list,
+                    "needle: {needle:?}, max_typos: {max_typos:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn match_iter_empty_needle_yields_all() {
+        let mut matcher = Matcher::new("", &Config::default());
+        let matches = matcher
+            .match_iter(["foo", "bar"].iter())
+            .collect::<Vec<_>>();
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].index, 0);
+        assert_eq!(matches[1].index, 1);
+    }
+
+    #[test]
+    fn match_iter_indices_matches_match_list_indices() {
+        let haystacks = [
+            "deadbeef",
+            "deadbf",
+            "deadbeefg",
+            "deadbe",
+            "no-match",
+            "DeAdBe",
+            "é다😀dead__be",
+        ];
+        for needle in ["deadbe", "é다😀"] {
+            for max_typos in [None, Some(0), Some(1), Some(2), Some(3)] {
+                let config = Config {
+                    max_typos,
+                    sort: false,
+                    ..Config::default()
+                };
+                let mut matcher = Matcher::new(needle, &config);
+                let from_iter = matcher
+                    .match_iter_indices(haystacks.iter())
+                    .collect::<Vec<_>>();
+                let from_list = matcher.match_list_indices(&haystacks);
+                assert_eq!(
+                    from_iter, from_list,
+                    "needle: {needle:?}, max_typos: {max_typos:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn match_iter_indices_empty_needle_yields_all() {
+        let mut matcher = Matcher::new("", &Config::default());
+        let matches = matcher
+            .match_iter_indices(["foo", "bar"].iter())
+            .collect::<Vec<_>>();
+        assert_eq!(matches.len(), 2);
+        assert_eq!(matches[0].index, 0);
+        assert_eq!(matches[1].index, 1);
     }
 
     #[test]

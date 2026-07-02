@@ -47,11 +47,26 @@ mod k_merge;
 mod one_shot;
 mod prefilter;
 mod smith_waterman;
-pub mod sort;
+mod sort;
 
 pub use k_merge::k_merge;
-pub use one_shot::{Matcher, match_list, match_list_indices, match_list_parallel};
 pub use sort::radix_sort;
+pub use one_shot::{Matcher, match_list, match_list_indices, match_list_parallel};
+
+/// Iterator extension for fuzzy matching
+///
+/// ```
+/// use frizbee::{Config, iter::FuzzyMatchExt};
+///
+/// let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
+/// let matches: Vec<_> = haystacks
+///     .iter()
+///     .fuzzy_match("fBr", &Config::default())
+///     .collect();
+/// ```
+pub mod iter {
+    pub use crate::one_shot::{FuzzyMatch, FuzzyMatchExt, FuzzyMatchIndices};
+}
 
 use r#const::*;
 

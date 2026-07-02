@@ -3,7 +3,7 @@ use crate::{Config, Match, MatchIndices};
 mod matcher;
 mod parallel;
 
-pub use matcher::Matcher;
+pub use matcher::{FuzzyMatch, FuzzyMatchExt, FuzzyMatchIndices, Matcher};
 pub use parallel::match_list_parallel;
 
 pub fn match_list<S1: AsRef<str>, S2: AsRef<str>>(
