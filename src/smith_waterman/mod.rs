@@ -9,7 +9,7 @@
 //! haystack: "some/long/foo/path"
 //!
 //! // assuming 4 lane SIMD for simplicity
-//! // in reality, we use 16 SIMD lanes (16 bytes each, 256 bit)
+//! // in reality, we use anywhere from 8-64 SIMD lanes
 //!
 //! score_matrix:
 //!    [s   o   m   e]   [/   l   o   n]   [g   /   f   o]   [o   /   p   a]   [t   h   _   _]

@@ -119,7 +119,7 @@ fn match_list_bench_impl(
         let mut matcher = Matcher::new(needle, &Config::default());
         b.iter(|| matcher.match_list(black_box(haystack)))
     });
-    group.bench_with_input(benchmark_id("Frizbee Iter"), haystack, |b, haystack| {
+    group.bench_with_input(benchmark_id("Iter"), haystack, |b, haystack| {
         let mut matcher = Matcher::new(needle, &Config::default());
         b.iter(|| {
             let mut matches = matcher

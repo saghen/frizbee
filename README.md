@@ -111,7 +111,7 @@ needle: "foo"
 haystack: "some/long/foo/path"
 
 // assuming 4 lane SIMD for simplicity
-// in reality, we use 16 SIMD lanes (16 bits per lane, 256 bit)
+// in reality, we use anywhere from 8-64 SIMD lanes
 
 // the final matrix would look like this
 score_matrix:
@@ -182,7 +182,7 @@ Frizbee matches against UTF-8 bytes directly rather than converting to UTF-32 co
 The prefilter path is largely the same as the ASCII path, except we match on the final byte of the UTF-8 codepoint, since it's by far the most discriminating. The prefix bytes of the UTF-8 codepoint identify the script/block, and nearby characters are likely to have a similar prefix. If `!mask.is_zero()`, we then perform offset loads to match the rest of the bytes in the unicode char.
 
 ```rust
-let mask = eq(needle_char.last(), load(haystack, start + needle_char_len - 1)
+let mask = eq(needle_char.last(), load(haystack, start + needle_char_len - 1))
 if mask.is_zero() { /* continue to next chunk */ }
 
 match needle_char_len {
@@ -206,7 +206,7 @@ The matrix receives a row per needle UTF-8 codepoint, rather than per needle byt
 
 Frizbee will not perform any [unicode normalization](https://docs.rs/unicode-normalization/latest/unicode_normalization/) before matching. You should apply this yourself if you need it.
 
-With the default `UnicodeMatching::Smart`, an ASCII needle matching against a haystack with multi-byte UTF-8 codepoints will have a slightly lower score than a pure ASCII haystack. For example, `hw` matched against `h😀w` will receive a penalty to the score of `gap_open_penalty + gap_extend_penalty * 4` due to the emoji taking up 4 bytes. If the haystack was instead `hew`, the penalty would be `gap_open_penality + gap_extend_penalty`. This should typically be a non-issue, but you can force the slower unicode path with `UnicodeMatching::Respect` on ASCII needles, if necessary.
+With the default `UnicodeMatching::Smart`, an ASCII needle matching against a haystack with multi-byte UTF-8 codepoints will have a slightly lower score than a pure ASCII haystack. For example, `hw` matched against `h😀w` will receive a penalty to the score of `gap_open_penalty + gap_extend_penalty * 4` due to the emoji taking up 4 bytes. If the haystack was instead `hew`, the penalty would be `gap_open_penalty + gap_extend_penalty`. This should typically be a non-issue, but you can force the slower unicode path with `UnicodeMatching::Respect` on ASCII needles, if necessary.
 
 For case-insensitive matching, the case flipped version will be skipped if it's a different byte length or has multiple codepoints (such as the German `ß` -> `SS`).
 
