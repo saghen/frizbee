@@ -5,13 +5,13 @@ You may test these cases yourself via the included benchmarks. Benchmarks were r
 
 ```bash
 $ cargo version -v
-cargo 1.98.0-nightly (0b1123a48 2026-06-01)
+cargo 1.98.0-nightly (a595d0da2 2026-06-20)
 release: 1.98.0-nightly
-commit-hash: 0b1123a48825309b697312b44fdb64b3df00c958
-commit-date: 2026-06-01
+commit-hash: a595d0da21f228b7fdae64d3d5c0e527ea66bb59
+commit-date: 2026-06-20
 host: x86_64-unknown-linux-gnu
 libgit2: 1.9.4 (sys:0.21.0 vendored)
-libcurl: 8.20.0-DEV (sys:0.4.88+curl-8.20.0 vendored ssl:OpenSSL/3.6.2)
+libcurl: 8.20.0-DEV (sys:0.4.89+curl-8.20.0 vendored ssl:OpenSSL/3.6.2)
 ssl: OpenSSL 3.6.2 7 Apr 2026
 os: NixOS 26.11.0 (zokor) [64-bit]
 ```
