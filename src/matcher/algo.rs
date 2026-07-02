@@ -107,6 +107,7 @@ where
     /// per configuration, so it monomorphizes once per backend. Each kernel
     /// call crosses the `#[target_feature]` boundary instead of inlining into
     /// a shared loop.
+    #[inline(always)]
     pub(super) fn match_one_impl<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
         &mut self,
         haystack: H,
@@ -134,6 +135,7 @@ where
     /// `match_one_impl` but returning the matched character indices. Like the
     /// list variant it branches on the typo/unicode configuration at runtime so
     /// it monomorphizes once per backend.
+    #[inline(always)]
     pub(super) fn match_one_indices_impl<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
         &mut self,
         haystack: H,
