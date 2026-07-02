@@ -1,8 +1,10 @@
 use crate::smith_waterman::score_fits_in_u8;
+use crate::sort::radix_sort;
 use crate::{Config, Match, MatchIndices};
 
 mod algo;
 mod backend;
+use algo::{MANY_TYPOS, NO_PREFILTER, Specialized};
 use backend::*;
 
 #[derive(Debug, Clone)]
@@ -12,6 +14,7 @@ pub struct Matcher {
     backend: MatcherBackend,
 }
 
+/// Many variants so we use a macro to expand to the correct impl
 macro_rules! dispatch {
     ($self:expr, $m:ident => $body:expr) => {
         match $self {
@@ -33,6 +36,27 @@ macro_rules! dispatch {
             MatcherBackend::NEON($m) => $body,
             MatcherBackend::ScalarU8($m) => $body,
             MatcherBackend::Scalar($m) => $body,
+        }
+    };
+}
+
+/// Each of these receives its own inline(always) hot loop, so a single function that branches
+/// would be enormous (thousands of symbols). So instead, we dispatch to the correct implementation
+/// which contains the `#[target_feature]` and hot loop (in backend.rs)
+#[rustfmt::skip]
+macro_rules! dispatch_typos {
+    ($max_typos:expr, $needs_unicode:expr, |$typos:ident, $unicode:ident| $body:expr) => {
+        match ($max_typos, $needs_unicode) {
+            (None, false)     => { const $typos: u16 = NO_PREFILTER; const $unicode: bool = false; $body }
+            (None, true)      => { const $typos: u16 = NO_PREFILTER; const $unicode: bool = true;  $body }
+            (Some(0), false)  => { const $typos: u16 = 0;            const $unicode: bool = false; $body }
+            (Some(0), true)   => { const $typos: u16 = 0;            const $unicode: bool = true;  $body }
+            (Some(1), false)  => { const $typos: u16 = 1;            const $unicode: bool = false; $body }
+            (Some(1), true)   => { const $typos: u16 = 1;            const $unicode: bool = true;  $body }
+            (Some(2), false)  => { const $typos: u16 = 2;            const $unicode: bool = false; $body }
+            (Some(2), true)   => { const $typos: u16 = 2;            const $unicode: bool = true;  $body }
+            (Some(_), false)  => { const $typos: u16 = MANY_TYPOS;   const $unicode: bool = false; $body }
+            (Some(_), true)   => { const $typos: u16 = MANY_TYPOS;   const $unicode: bool = true;  $body }
         }
     };
 }
@@ -63,11 +87,34 @@ impl Matcher {
     }
 
     pub fn match_list<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<Match> {
-        unsafe { dispatch!(&mut self.backend, matcher => matcher.match_list(haystacks)) }
+        let mut matches = vec![];
+        self.match_list_into(haystacks, 0, &mut matches);
+        if !self.needle.is_empty() && self.config.sort {
+            radix_sort(&mut matches);
+        }
+        matches
     }
 
     pub fn match_list_indices<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<MatchIndices> {
-        unsafe { dispatch!(&mut self.backend, matcher => matcher.match_list_indices(haystacks)) }
+        Self::guard_against_haystack_overflow(haystacks.len(), 0);
+        if self.needle.is_empty() {
+            return (0..haystacks.len()).map(MatchIndices::from_index).collect();
+        }
+
+        let needs_unicode = self.config.unicode.respects_unicode_for(&self.needle);
+        let mut matches = dispatch!(&mut self.backend, matcher => {
+            dispatch_typos!(self.config.max_typos, needs_unicode, |TYPOS, UNICODE| {
+                // SAFETY: the backend was only constructed after its
+                // `is_available()` check passed (see `get_backend`), so its
+                // target features are available here.
+                unsafe { matcher.match_list_indices::<TYPOS, UNICODE, S>(haystacks) }
+            })
+        });
+
+        if self.config.sort {
+            matches.sort_unstable();
+        }
+        matches
     }
 
     pub(super) fn match_list_into<S: AsRef<str>>(
@@ -76,31 +123,25 @@ impl Matcher {
         haystack_index_offset: u32,
         matches: &mut Vec<Match>,
     ) {
-        unsafe {
-            dispatch!(&mut self.backend, matcher => {
-                matcher.match_list_into(haystacks, haystack_index_offset, matches)
-            })
-        }
-    }
-
-    #[inline(always)]
-    fn empty_match_list_into<S: AsRef<str>>(
-        haystacks: &[S],
-        haystack_index_offset: u32,
-        matches: &mut Vec<Match>,
-    ) {
         Self::guard_against_haystack_overflow(haystacks.len(), haystack_index_offset);
-
-        for index in (0..haystacks.len()).map(|i| i + haystack_index_offset as usize) {
-            matches.push(Match::from_index(index));
+        if self.needle.is_empty() {
+            let indices = (0..haystacks.len()).map(|i| i + haystack_index_offset as usize);
+            matches.extend(indices.map(Match::from_index));
+            return;
         }
-    }
 
-    #[inline(always)]
-    fn empty_match_list_indices<S: AsRef<str>>(haystacks: &[S]) -> Vec<MatchIndices> {
-        Self::guard_against_haystack_overflow(haystacks.len(), 0);
-
-        (0..haystacks.len()).map(MatchIndices::from_index).collect()
+        let needs_unicode = self.config.unicode.respects_unicode_for(&self.needle);
+        dispatch!(&mut self.backend, matcher => {
+            dispatch_typos!(self.config.max_typos, needs_unicode, |TYPOS, UNICODE| {
+                unsafe {
+                    matcher.match_list::<TYPOS, UNICODE, S>(
+                        haystacks,
+                        haystack_index_offset,
+                        matches,
+                    )
+                }
+            })
+        })
     }
 
     #[inline(always)]
@@ -122,24 +163,24 @@ impl Matcher {
             if use_u8 {
                 if MatcherAVX512U8::is_available() {
                     return MatcherBackend::AVX512U8(unsafe {
-                        MatcherAVX512U8::new(needle, config)
+                        MatcherAVX512U8::build(needle, config)
                     });
                 }
                 if MatcherAVXU8::is_available() {
-                    return MatcherBackend::AVXU8(unsafe { MatcherAVXU8::new(needle, config) });
+                    return MatcherBackend::AVXU8(unsafe { MatcherAVXU8::build(needle, config) });
                 }
                 if MatcherSSEU8::is_available() {
-                    return MatcherBackend::SSEU8(unsafe { MatcherSSEU8::new(needle, config) });
+                    return MatcherBackend::SSEU8(unsafe { MatcherSSEU8::build(needle, config) });
                 }
             } else {
                 if MatcherAVX512::is_available() {
-                    return MatcherBackend::AVX512(unsafe { MatcherAVX512::new(needle, config) });
+                    return MatcherBackend::AVX512(unsafe { MatcherAVX512::build(needle, config) });
                 }
                 if MatcherAVX::is_available() {
-                    return MatcherBackend::AVX(unsafe { MatcherAVX::new(needle, config) });
+                    return MatcherBackend::AVX(unsafe { MatcherAVX::build(needle, config) });
                 }
                 if MatcherSSE::is_available() {
-                    return MatcherBackend::SSE(unsafe { MatcherSSE::new(needle, config) });
+                    return MatcherBackend::SSE(unsafe { MatcherSSE::build(needle, config) });
                 }
             }
         }
@@ -148,17 +189,17 @@ impl Matcher {
         {
             if use_u8 {
                 if MatcherNEONU8::is_available() {
-                    return MatcherBackend::NEONU8(unsafe { MatcherNEONU8::new(needle, config) });
+                    return MatcherBackend::NEONU8(unsafe { MatcherNEONU8::build(needle, config) });
                 }
             } else if MatcherNEON::is_available() {
-                return MatcherBackend::NEON(unsafe { MatcherNEON::new(needle, config) });
+                return MatcherBackend::NEON(unsafe { MatcherNEON::build(needle, config) });
             }
         }
 
         if use_u8 {
-            MatcherBackend::ScalarU8(unsafe { MatcherScalarU8::new(needle, config) })
+            MatcherBackend::ScalarU8(unsafe { MatcherScalarU8::build(needle, config) })
         } else {
-            MatcherBackend::Scalar(unsafe { MatcherScalar::new(needle, config) })
+            MatcherBackend::Scalar(unsafe { MatcherScalar::build(needle, config) })
         }
     }
 }

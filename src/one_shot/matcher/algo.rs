@@ -1,10 +1,31 @@
-use super::Matcher;
 use crate::prefilter::{Kernel as PrefilterKernel, Window};
 use crate::smith_waterman::Kernel as SmithWatermanKernel;
-use crate::sort::radix_sort;
 use crate::{Config, Match, MatchIndices};
 
-const MANY_TYPOS: u16 = u16::MAX;
+/// Magic numbers for `TYPOS` specialization keys beyond the literal counts 0/1/2
+pub(super) const MANY_TYPOS: u16 = u16::MAX;
+pub(super) const NO_PREFILTER: u16 = u16::MAX - 1;
+
+/// Fully inlined per-backend implementations, specialized for each configuration
+/// (0 typos, 1 typo, unicode variants, ...) and built with the backend's `#[target_feature]`.
+///
+/// # Safety
+/// The backend's required CPU features must be available
+pub(crate) trait Specialized: Sized {
+    unsafe fn build(needle: &str, config: &Config) -> Self;
+
+    unsafe fn match_list<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
+        &mut self,
+        haystacks: &[H],
+        haystack_index_offset: u32,
+        matches: &mut Vec<Match>,
+    );
+
+    unsafe fn match_list_indices<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
+        &mut self,
+        haystacks: &[H],
+    ) -> Vec<MatchIndices>;
+}
 
 #[derive(Debug, Clone)]
 pub struct MatcherImpl<P: PrefilterKernel, S: SmithWatermanKernel> {
@@ -20,7 +41,7 @@ where
     S: SmithWatermanKernel,
 {
     #[inline(always)]
-    pub fn new_impl(needle: &str, config: &Config) -> Self {
+    pub fn new(needle: &str, config: &Config) -> Self {
         let case_sensitive = config.casing.respects_case_for(needle);
         let matcher = Self {
             needle: needle.to_string(),
@@ -37,188 +58,15 @@ where
     }
 
     #[inline(always)]
-    pub fn match_list_impl<H: AsRef<str>>(&mut self, haystacks: &[H]) -> Vec<Match> {
-        let mut matches = vec![];
-        self.match_list_into_impl(haystacks, 0, &mut matches);
-
-        if !self.needle.is_empty() && self.config.sort {
-            radix_sort(&mut matches);
-        }
-
-        matches
-    }
-
-    #[inline(always)]
-    pub fn match_list_into_impl<H: AsRef<str>>(
+    pub(super) fn match_list_into_impl<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
         &mut self,
         haystacks: &[H],
         haystack_index_offset: u32,
         matches: &mut Vec<Match>,
     ) {
-        Matcher::guard_against_haystack_overflow(haystacks.len(), haystack_index_offset);
-        if self.needle.is_empty() {
-            Matcher::empty_match_list_into(haystacks, haystack_index_offset, matches);
-            return;
-        }
-
-        let needs_unicode = self
-            .config
-            .unicode
-            .respects_unicode_for(self.needle.as_str());
         let min_haystack_len = self.min_haystack_len();
-        match (self.config.max_typos, needs_unicode) {
-            (None, false) => self.match_list_unfiltered_into::<false, H>(
-                haystacks,
-                haystack_index_offset,
-                matches,
-            ),
-            (None, true) => self.match_list_unfiltered_into::<true, H>(
-                haystacks,
-                haystack_index_offset,
-                matches,
-            ),
-            (Some(0), false) => self.match_list_prefiltered_into::<0, false, H>(
-                haystacks,
-                haystack_index_offset,
-                min_haystack_len,
-                0,
-                matches,
-            ),
-            (Some(0), true) => self.match_list_prefiltered_into::<0, true, H>(
-                haystacks,
-                haystack_index_offset,
-                min_haystack_len,
-                0,
-                matches,
-            ),
-            (Some(1), false) => self.match_list_prefiltered_into::<1, false, H>(
-                haystacks,
-                haystack_index_offset,
-                min_haystack_len,
-                1,
-                matches,
-            ),
-            (Some(1), true) => self.match_list_prefiltered_into::<1, true, H>(
-                haystacks,
-                haystack_index_offset,
-                min_haystack_len,
-                1,
-                matches,
-            ),
-            (Some(2), false) => self.match_list_prefiltered_into::<2, false, H>(
-                haystacks,
-                haystack_index_offset,
-                min_haystack_len,
-                2,
-                matches,
-            ),
-            (Some(2), true) => self.match_list_prefiltered_into::<2, true, H>(
-                haystacks,
-                haystack_index_offset,
-                min_haystack_len,
-                2,
-                matches,
-            ),
-            (Some(max_typos), false) => self.match_list_prefiltered_into::<MANY_TYPOS, false, H>(
-                haystacks,
-                haystack_index_offset,
-                min_haystack_len,
-                max_typos,
-                matches,
-            ),
-            (Some(max_typos), true) => self.match_list_prefiltered_into::<MANY_TYPOS, true, H>(
-                haystacks,
-                haystack_index_offset,
-                min_haystack_len,
-                max_typos,
-                matches,
-            ),
-        }
-    }
-
-    #[inline(always)]
-    pub fn match_list_indices_impl<H: AsRef<str>>(&mut self, haystacks: &[H]) -> Vec<MatchIndices> {
-        Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
-        if self.needle.is_empty() {
-            return Matcher::empty_match_list_indices(haystacks);
-        }
-
-        let needs_unicode = self
-            .config
-            .unicode
-            .respects_unicode_for(self.needle.as_str());
-        let min_haystack_len = self.min_haystack_len();
-        let mut matches = match (self.config.max_typos, needs_unicode) {
-            (None, false) => self.match_list_indices_unfiltered::<false, H>(haystacks),
-            (None, true) => self.match_list_indices_unfiltered::<true, H>(haystacks),
-            (Some(0), false) => {
-                self.match_list_indices_prefiltered::<0, false, H>(haystacks, min_haystack_len, 0)
-            }
-            (Some(0), true) => {
-                self.match_list_indices_prefiltered::<0, true, H>(haystacks, min_haystack_len, 0)
-            }
-            (Some(1), false) => {
-                self.match_list_indices_prefiltered::<1, false, H>(haystacks, min_haystack_len, 1)
-            }
-            (Some(1), true) => {
-                self.match_list_indices_prefiltered::<1, true, H>(haystacks, min_haystack_len, 1)
-            }
-            (Some(2), false) => {
-                self.match_list_indices_prefiltered::<2, false, H>(haystacks, min_haystack_len, 2)
-            }
-            (Some(2), true) => {
-                self.match_list_indices_prefiltered::<2, true, H>(haystacks, min_haystack_len, 2)
-            }
-            (Some(max_typos), false) => self
-                .match_list_indices_prefiltered::<MANY_TYPOS, false, H>(
-                    haystacks,
-                    min_haystack_len,
-                    max_typos,
-                ),
-            (Some(max_typos), true) => self.match_list_indices_prefiltered::<MANY_TYPOS, true, H>(
-                haystacks,
-                min_haystack_len,
-                max_typos,
-            ),
-        };
-
-        if self.config.sort {
-            matches.sort_unstable();
-        }
-
-        matches
-    }
-
-    #[inline(always)]
-    fn match_list_unfiltered_into<const UNICODE: bool, H: AsRef<str>>(
-        &mut self,
-        haystacks: &[H],
-        haystack_index_offset: u32,
-        matches: &mut Vec<Match>,
-    ) {
-        let mut index = haystack_index_offset;
-        for haystack_str in haystacks {
-            matches.push(self.smith_waterman_one::<UNICODE>(
-                haystack_str.as_ref().as_bytes(),
-                index,
-                0,
-                true,
-            ));
-            index += 1;
-        }
-    }
-
-    #[inline(always)]
-    fn match_list_prefiltered_into<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
-        &mut self,
-        haystacks: &[H],
-        haystack_index_offset: u32,
-        min_haystack_len: usize,
-        max_typos: u16,
-        matches: &mut Vec<Match>,
-    ) {
-        let mut index = haystack_index_offset;
-        for haystack_str in haystacks {
+        let max_typos = self.max_typos_runtime::<TYPOS>();
+        for (index, haystack_str) in (haystack_index_offset..).zip(haystacks.iter()) {
             let haystack = haystack_str.as_ref().as_bytes();
             let original_len = haystack.len();
             if original_len >= min_haystack_len {
@@ -235,7 +83,6 @@ where
                     ));
                 }
             }
-            index += 1;
         }
     }
 
@@ -246,6 +93,7 @@ where
         max_typos: u16,
     ) -> Window {
         match TYPOS {
+            NO_PREFILTER => (true, 0, haystack.len()),
             0 if UNICODE => self.prefilter.match_haystack_unicode(haystack),
             0 => self.prefilter.match_haystack(haystack),
             1 if UNICODE => self.prefilter.match_haystack_unicode_1_typo(haystack),
@@ -263,29 +111,17 @@ where
     }
 
     #[inline(always)]
-    fn match_list_indices_unfiltered<const UNICODE: bool, H: AsRef<str>>(
+    pub(super) fn match_list_indices_impl<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
         &mut self,
         haystacks: &[H],
     ) -> Vec<MatchIndices> {
-        let mut matches = vec![];
-        for (index, haystack_str) in haystacks.iter().enumerate() {
-            let haystack = haystack_str.as_ref().as_bytes();
-            if let Some(match_) =
-                self.smith_waterman_indices_one::<UNICODE>(haystack, 0, index as u32, true, None)
-            {
-                matches.push(match_);
-            }
-        }
-        matches
-    }
-
-    #[inline(always)]
-    fn match_list_indices_prefiltered<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
-        &mut self,
-        haystacks: &[H],
-        min_haystack_len: usize,
-        max_typos: u16,
-    ) -> Vec<MatchIndices> {
+        let min_haystack_len = self.min_haystack_len();
+        let max_typos = self.max_typos_runtime::<TYPOS>();
+        let max_typos_opt = if TYPOS == NO_PREFILTER {
+            None
+        } else {
+            Some(max_typos)
+        };
         let mut matches = vec![];
         for (index, haystack_str) in haystacks.iter().enumerate() {
             let haystack = haystack_str.as_ref().as_bytes();
@@ -301,7 +137,7 @@ where
                         start_pos,
                         index as u32,
                         include_exact,
-                        Some(max_typos),
+                        max_typos_opt,
                     ) {
                         matches.push(match_);
                     }
@@ -376,6 +212,18 @@ where
             exact,
             indices,
         })
+    }
+
+    /// The runtime typo budget for a `TYPOS` specialization: 0/1/2 encode the
+    /// count directly, `MANY_TYPOS` reads it from the config, and
+    /// `NO_PREFILTER` never uses it.
+    #[inline(always)]
+    fn max_typos_runtime<const TYPOS: u16>(&self) -> u16 {
+        if TYPOS == MANY_TYPOS {
+            self.config.max_typos.unwrap_or(0)
+        } else {
+            TYPOS
+        }
     }
 
     #[inline(always)]

@@ -1,6 +1,6 @@
 //! Definitions for all target feature-specific implementations of the matcher
 
-use super::algo::MatcherImpl;
+use super::algo::{MatcherImpl, Specialized};
 use crate::{Config, Match, MatchIndices};
 
 #[cfg(target_arch = "aarch64")]
@@ -58,75 +58,76 @@ pub enum MatcherBackend {
     Scalar(MatcherScalar),
 }
 
-macro_rules! impl_matcher_entrypoints {
+/// Implements [`Specialized`] for one concrete backend, attaching the
+/// backend's `#[target_feature]` to each method (see the [`Specialized`] docs
+/// for how this establishes the feature boundary). The bodies forward to the
+/// `#[inline(always)]` loop helpers on [`MatcherImpl`]. Scalar backends omit
+/// the feature argument.
+macro_rules! impl_specialized {
     ($prefilter:ty, $smith_waterman:ty $(, target_feature = $feature:literal)?) => {
-        impl MatcherImpl<$prefilter, $smith_waterman> {
+        impl Specialized for MatcherImpl<$prefilter, $smith_waterman> {
             #[inline]
             $(#[target_feature(enable = $feature)])?
-            pub unsafe fn new(needle: &str, config: &Config) -> Self {
-                Self::new_impl(needle, config)
+            unsafe fn build(needle: &str, config: &Config) -> Self {
+                Self::new(needle, config)
             }
 
-            #[inline]
             $(#[target_feature(enable = $feature)])?
-            pub unsafe fn match_list<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<Match> {
-                self.match_list_impl(haystacks)
-            }
-
-            #[inline]
-            $(#[target_feature(enable = $feature)])?
-            pub unsafe fn match_list_into<S: AsRef<str>>(
+            unsafe fn match_list<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
                 &mut self,
-                haystacks: &[S],
+                haystacks: &[H],
                 haystack_index_offset: u32,
                 matches: &mut Vec<Match>,
             ) {
-                self.match_list_into_impl(haystacks, haystack_index_offset, matches)
+                self.match_list_into_impl::<TYPOS, UNICODE, H>(
+                    haystacks,
+                    haystack_index_offset,
+                    matches,
+                )
             }
 
-            #[inline]
             $(#[target_feature(enable = $feature)])?
-            pub unsafe fn match_list_indices<S: AsRef<str>>(
+            unsafe fn match_list_indices<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
                 &mut self,
-                haystacks: &[S],
+                haystacks: &[H],
             ) -> Vec<MatchIndices> {
-                self.match_list_indices_impl(haystacks)
+                self.match_list_indices_impl::<TYPOS, UNICODE, H>(haystacks)
             }
         }
     };
 }
 
 #[cfg(target_arch = "x86_64")]
-impl_matcher_entrypoints!(
+impl_specialized!(
     PrefilterAVX512,
     SmithWatermanAVX512U8,
     target_feature = "avx512f,avx512bw,avx512vbmi,bmi1,bmi2"
 );
 #[cfg(target_arch = "x86_64")]
-impl_matcher_entrypoints!(
+impl_specialized!(
     PrefilterAVX512,
     SmithWatermanAVX512,
     target_feature = "avx512f,avx512bw,bmi1,bmi2"
 );
 #[cfg(target_arch = "x86_64")]
-impl_matcher_entrypoints!(PrefilterAVX, SmithWatermanAVXU8, target_feature = "avx2");
+impl_specialized!(PrefilterAVX, SmithWatermanAVXU8, target_feature = "avx2");
 #[cfg(target_arch = "x86_64")]
-impl_matcher_entrypoints!(PrefilterAVX, SmithWatermanAVX, target_feature = "avx2");
+impl_specialized!(PrefilterAVX, SmithWatermanAVX, target_feature = "avx2");
 #[cfg(target_arch = "x86_64")]
-impl_matcher_entrypoints!(
+impl_specialized!(
     PrefilterSSE,
     SmithWatermanSSEU8,
     target_feature = "sse2,ssse3,sse4.1"
 );
 #[cfg(target_arch = "x86_64")]
-impl_matcher_entrypoints!(
+impl_specialized!(
     PrefilterSSE,
     SmithWatermanSSE,
     target_feature = "sse2,ssse3,sse4.1"
 );
 #[cfg(target_arch = "aarch64")]
-impl_matcher_entrypoints!(PrefilterNEON, SmithWatermanNEONU8, target_feature = "neon");
+impl_specialized!(PrefilterNEON, SmithWatermanNEONU8, target_feature = "neon");
 #[cfg(target_arch = "aarch64")]
-impl_matcher_entrypoints!(PrefilterNEON, SmithWatermanNEON, target_feature = "neon");
-impl_matcher_entrypoints!(PrefilterScalar, SmithWatermanScalarU8);
-impl_matcher_entrypoints!(PrefilterScalar, SmithWatermanScalar);
+impl_specialized!(PrefilterNEON, SmithWatermanNEON, target_feature = "neon");
+impl_specialized!(PrefilterScalar, SmithWatermanScalarU8);
+impl_specialized!(PrefilterScalar, SmithWatermanScalar);
