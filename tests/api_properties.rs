@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
@@ -6,8 +5,11 @@ use frizbee::{
     CaseMatching, Config, Match, MatchIndices, Matcher, Scoring, match_list, match_list_indices,
     match_list_parallel,
 };
-use proptest::prelude::*;
-use proptest::test_runner::{Config as ProptestConfig, TestCaseError, TestRunner};
+
+// Did you know you could do this?? News to me
+#[path = "../src/smith_waterman/backend/tests/generator.rs"]
+mod generator;
+use generator::{ByteCursor, run_generated_inputs, test_bound};
 
 #[derive(Debug, Clone)]
 struct ApiCase {
@@ -54,114 +56,9 @@ impl ApiCase {
     }
 }
 
-struct ByteCursor<'a> {
-    input: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> ByteCursor<'a> {
-    fn new(input: &'a [u8]) -> Self {
-        Self { input, pos: 0 }
-    }
-
-    fn next(&mut self) -> u8 {
-        let byte = if self.input.is_empty() {
-            (self.pos as u8).wrapping_mul(31).wrapping_add(13)
-        } else {
-            self.input[self.pos % self.input.len()]
-                .wrapping_add(((self.pos / self.input.len()) as u8).wrapping_mul(23))
-        };
-        self.pos += 1;
-        byte
-    }
-
-    fn bool(&mut self) -> bool {
-        self.next() & 1 == 1
-    }
-
-    fn usize(&mut self) -> usize {
-        let mut value = 0usize;
-        for shift in (0..usize::BITS as usize).step_by(8) {
-            value |= (self.next() as usize) << shift;
-        }
-        value
-    }
-
-    fn len(&mut self, max: usize, boundaries: &[usize]) -> usize {
-        if self.next() % 4 == 0 {
-            boundaries[(self.next() as usize) % boundaries.len()].min(max)
-        } else {
-            self.usize() % (max + 1)
-        }
-    }
-
-    fn string(&mut self, len: usize) -> String {
-        (0..len).map(|_| self.char()).collect()
-    }
-
-    fn char(&mut self) -> char {
-        let byte = self.next();
-        if byte & 0x0f == 0 {
-            return match (byte >> 4) & 3 {
-                0 => 'é',
-                1 => 'ن',
-                2 => '다',
-                _ => '😀',
-            };
-        }
-
-        match byte % 18 {
-            0 => 'a',
-            1 => ' ',
-            2 => '/',
-            3 => '.',
-            4 => ',',
-            5 => '_',
-            6 => '-',
-            7 => ':',
-            8..=11 => (b'a' + (byte % 26)) as char,
-            12..=15 => (b'A' + (byte % 26)) as char,
-            _ => (b'0' + (byte % 10)) as char,
-        }
-    }
-}
-
-fn test_iterations(default: usize) -> usize {
-    if cfg!(miri) { default.min(4) } else { default }
-}
-
-fn run_generated_inputs<F>(iterations: usize, max_len: usize, check_input: F)
-where
-    F: Fn(&[u8]),
-{
-    let strategy = prop::collection::vec(any::<u8>(), 0..=max_len);
-    let mut runner = TestRunner::new(ProptestConfig {
-        cases: test_iterations(iterations) as u32,
-        ..ProptestConfig::default()
-    });
-
-    runner
-        .run(&strategy, |input| {
-            catch_unwind(AssertUnwindSafe(|| check_input(&input)))
-                .map_err(|payload| TestCaseError::fail(panic_payload_to_string(payload)))?;
-            Ok(())
-        })
-        .unwrap();
-}
-
-fn panic_payload_to_string(payload: Box<dyn Any + Send>) -> String {
-    if let Some(message) = payload.downcast_ref::<String>() {
-        message.clone()
-    } else if let Some(message) = payload.downcast_ref::<&'static str>() {
-        (*message).to_owned()
-    } else {
-        "property assertion panicked".to_owned()
-    }
-}
-
 #[test]
 fn generated_public_api_properties() {
-    run_generated_inputs(192, if cfg!(miri) { 384 } else { 4096 }, |input| {
+    run_generated_inputs(192, test_bound(4096, 384), |input| {
         let case = ApiCase::from_bytes(input);
         assert_public_api_case(&case);
     });
@@ -302,6 +199,23 @@ fn indices_views(matches: &[MatchIndices]) -> Vec<(u16, u32, bool, Vec<usize>)> 
         .collect()
 }
 
+/// The haystack indices of a match list, in result order.
+fn match_indices(matches: &[Match]) -> Vec<u32> {
+    matches.iter().map(|match_| match_.index).collect()
+}
+
+/// `len` `"nomatch-{i}"` haystacks with the given indices overwritten — used to
+/// place matches at specific chunk boundaries in the parallel tests.
+fn haystacks_with(len: usize, patches: &[(usize, &str)]) -> Vec<String> {
+    let mut haystacks = (0..len)
+        .map(|index| format!("nomatch-{index}"))
+        .collect::<Vec<_>>();
+    for &(index, value) in patches {
+        haystacks[index] = value.to_string();
+    }
+    haystacks
+}
+
 #[test]
 fn empty_needle_matches_everything() {
     let haystacks = ["foo", "bar"];
@@ -412,13 +326,7 @@ fn unicode_matcher_typo_prefilter_counts_scalar_values() {
     };
 
     let matches = match_list("إن", &haystacks, &config);
-    assert_eq!(
-        matches
-            .iter()
-            .map(|match_| match_.index)
-            .collect::<Vec<_>>(),
-        vec![0]
-    );
+    assert_eq!(match_indices(&matches), vec![0]);
 
     let many_typo_config = Config {
         max_typos: Some(2),
@@ -426,13 +334,7 @@ fn unicode_matcher_typo_prefilter_counts_scalar_values() {
         ..Config::default()
     };
     let matches = match_list("éन😀", &haystacks, &many_typo_config);
-    assert_eq!(
-        matches
-            .iter()
-            .map(|match_| match_.index)
-            .collect::<Vec<_>>(),
-        vec![1]
-    );
+    assert_eq!(match_indices(&matches), vec![1]);
 }
 
 #[test]
@@ -443,10 +345,7 @@ fn case_matching_modes_apply_to_matches_and_indices() {
         ..Config::default()
     };
     assert_eq!(
-        match_list("foo", &haystacks, &config)
-            .iter()
-            .map(|match_| match_.index)
-            .collect::<Vec<_>>(),
+        match_indices(&match_list("foo", &haystacks, &config)),
         vec![0, 1, 2, 3]
     );
 
@@ -456,10 +355,7 @@ fn case_matching_modes_apply_to_matches_and_indices() {
         ..Config::default()
     };
     assert_eq!(
-        match_list("foo", &haystacks, &config)
-            .iter()
-            .map(|match_| match_.index)
-            .collect::<Vec<_>>(),
+        match_indices(&match_list("foo", &haystacks, &config)),
         vec![0, 3]
     );
     assert_eq!(
@@ -476,10 +372,11 @@ fn case_matching_modes_apply_to_matches_and_indices() {
         ..Config::default()
     };
     assert_eq!(
-        match_list("FoO", &["foo", "FOO", "FoO", "xxFoOxx"], &config)
-            .iter()
-            .map(|match_| match_.index)
-            .collect::<Vec<_>>(),
+        match_indices(&match_list(
+            "FoO",
+            &["foo", "FOO", "FoO", "xxFoOxx"],
+            &config
+        )),
         vec![2, 3]
     );
 }
@@ -503,20 +400,18 @@ fn zero_parallel_threads_panics() {
 
 #[test]
 fn parallel_chunk_boundaries_match_sequential() {
-    let mut haystacks = (0..4101)
-        .map(|index| format!("nomatch-{index}"))
-        .collect::<Vec<_>>();
-    for (index, value) in [
-        (0, "abc"),
-        (2047, "xabc"),
-        (2048, "abxc"),
-        (2049, "alpha/beta/abc"),
-        (4095, "ABC"),
-        (4096, "a_b_c"),
-        (4100, "zabc"),
-    ] {
-        haystacks[index] = value.to_string();
-    }
+    let haystacks = haystacks_with(
+        4101,
+        &[
+            (0, "abc"),
+            (2047, "xabc"),
+            (2048, "abxc"),
+            (2049, "alpha/beta/abc"),
+            (4095, "ABC"),
+            (4096, "a_b_c"),
+            (4100, "zabc"),
+        ],
+    );
 
     let sorted = Config {
         sort: true,
@@ -543,25 +438,14 @@ fn parallel_chunk_boundaries_match_sequential() {
 
 #[test]
 fn sorted_parallel_equal_scores_use_index_tiebreaking_across_chunks() {
-    let mut haystacks = (0..4097)
-        .map(|index| format!("nomatch-{index}"))
-        .collect::<Vec<_>>();
-    haystacks[2047] = "abc".to_string();
-    haystacks[2048] = "abc".to_string();
-    haystacks[4096] = "abc".to_string();
+    let haystacks = haystacks_with(4097, &[(2047, "abc"), (2048, "abc"), (4096, "abc")]);
 
     let config = Config {
         sort: true,
         ..Config::default()
     };
     let sequential = match_list("abc", &haystacks, &config);
-    assert_eq!(
-        sequential
-            .iter()
-            .map(|match_| match_.index)
-            .collect::<Vec<_>>(),
-        vec![2047, 2048, 4096]
-    );
+    assert_eq!(match_indices(&sequential), vec![2047, 2048, 4096]);
 
     let parallel = match_list_parallel("abc", &haystacks, &config, 8);
     assert_match_views_eq("equal-score chunk tie", &parallel, &sequential);
