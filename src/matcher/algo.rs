@@ -239,9 +239,11 @@ where
         include_exact: bool,
     ) -> Match {
         let mut score = if UNICODE {
-            self.smith_waterman.score_haystack_unicode(haystack)
+            self.smith_waterman
+                .score_haystack_unicode(haystack, haystack_start_pos)
         } else {
-            self.smith_waterman.score_haystack(haystack)
+            self.smith_waterman
+                .score_haystack(haystack, haystack_start_pos)
         };
 
         let exact = include_exact && self.needle.as_bytes() == haystack;

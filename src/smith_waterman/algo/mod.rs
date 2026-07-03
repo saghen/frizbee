@@ -65,7 +65,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             });
         }
 
-        let score = self.score_haystack(haystack);
+        let score = self.score_haystack(haystack, haystack_start_pos == 0);
         if score == 0 {
             if let Some(max_typos) = max_typos
                 && self.needle.len() > max_typos as usize
@@ -117,7 +117,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             });
         }
 
-        let score = self.score_haystack_unicode(haystack);
+        let score = self.score_haystack_unicode(haystack, haystack_start_pos == 0);
         if score == 0 {
             if let Some(max_typos) = max_typos
                 && self.needle_unicode.len() > max_typos as usize
@@ -156,13 +156,13 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
     }
 
     #[inline(always)]
-    fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
-        SmithWaterman::score_haystack(self, haystack)
+    fn score_haystack(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16 {
+        SmithWaterman::score_haystack(self, haystack, haystack_start_pos == 0)
     }
 
     #[inline(always)]
-    fn score_haystack_unicode(&mut self, haystack: &[u8]) -> u16 {
-        SmithWaterman::score_haystack_unicode(self, haystack)
+    fn score_haystack_unicode(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16 {
+        SmithWaterman::score_haystack_unicode(self, haystack, haystack_start_pos == 0)
     }
 
     #[cfg(feature = "match_end_col")]

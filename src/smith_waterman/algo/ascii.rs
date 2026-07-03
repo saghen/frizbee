@@ -7,7 +7,7 @@ use crate::smith_waterman::{
 
 impl<B: Backend> SmithWaterman<B> {
     #[inline(always)]
-    pub(crate) fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
+    pub(crate) fn score_haystack(&mut self, haystack: &[u8], include_prefix: bool) -> u16 {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(
                 self.needle.as_bytes(),
@@ -42,7 +42,11 @@ impl<B: Backend> SmithWaterman<B> {
 
             // State
             // TODO: have prefix bonus scale based on distance
-            let mut prefix_bonus_masked = B::Score::first_lane(scoring.prefix_bonus);
+            let mut prefix_bonus_masked = if include_prefix {
+                B::Score::first_lane(scoring.prefix_bonus)
+            } else {
+                B::Score::zero()
+            };
             let mut prev_chunk_char_is_delimiter_mask = B::Mask::zero();
             let mut prev_chunk_is_lower_mask = B::Mask::zero();
             let mut max_scores = B::Score::zero();

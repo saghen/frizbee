@@ -125,7 +125,7 @@ fn cases() -> Vec<(&'static str, &'static str)> {
 
 fn score_with<B: Backend>(needle: &str, haystack: &str) -> u16 {
     let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), false);
-    matcher.score_haystack(haystack.as_bytes())
+    matcher.score_haystack(haystack.as_bytes(), true)
 }
 
 fn indices_with<B: Backend>(needle: &str, haystack: &str) -> Option<Vec<usize>> {
@@ -210,7 +210,7 @@ fn cross_backend_parity_indices() {
 
 fn score_bytes_with<B: Backend>(needle: &str, haystack: &[u8], case_sensitive: bool) -> u16 {
     let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), case_sensitive);
-    matcher.score_haystack(haystack)
+    matcher.score_haystack(haystack, true)
 }
 
 fn indices_bytes_with<B: Backend>(

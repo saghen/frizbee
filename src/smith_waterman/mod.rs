@@ -132,8 +132,8 @@ pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
         haystack_start_pos: usize,
         max_typos: Option<u16>,
     ) -> Option<(u16, Vec<usize>)>;
-    fn score_haystack(&mut self, haystack: &[u8]) -> u16;
-    fn score_haystack_unicode(&mut self, haystack: &[u8]) -> u16;
+    fn score_haystack(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16;
+    fn score_haystack_unicode(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16;
     #[cfg(feature = "match_end_col")]
     fn match_end_col(&self, haystack: &[u8]) -> u16;
 }
@@ -148,12 +148,12 @@ mod tests {
 
     fn get_score(needle: &str, haystack: &str) -> u16 {
         let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
-        matcher.score_haystack(haystack.as_bytes())
+        matcher.score_haystack(haystack.as_bytes(), true)
     }
 
     fn get_unicode_score(needle: &str, haystack: &str) -> u16 {
         let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
-        matcher.score_haystack_unicode(haystack.as_bytes())
+        matcher.score_haystack_unicode(haystack.as_bytes(), true)
     }
 
     fn get_score_typos(needle: &str, haystack: &str, max_typos: u16) -> Option<u16> {
@@ -169,7 +169,7 @@ mod tests {
         let mut matcher =
             SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), case_sensitive);
 
-        let score = matcher.score_haystack(haystack.as_bytes());
+        let score = matcher.score_haystack(haystack.as_bytes(), true);
         matcher
             .has_alignment_path(score, max_typos)
             .then_some(score)
@@ -350,7 +350,7 @@ mod tests {
     #[cfg(feature = "match_end_col")]
     fn get_end_col(needle: &str, haystack: &str) -> u16 {
         let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
-        matcher.score_haystack(haystack.as_bytes());
+        matcher.score_haystack(haystack.as_bytes(), true);
         matcher.match_end_col(haystack.as_bytes())
     }
 
