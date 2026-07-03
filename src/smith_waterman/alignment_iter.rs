@@ -132,16 +132,14 @@ impl<'a> Iterator for AlignmentPathIter<'a> {
             return None;
         }
 
-        let current_pos = (
-            self.row_idx - 1,
-            self.col_idx - self.lanes_per_chunk + self.haystack_start_pos,
-        );
+        let haystack_idx = self.col_idx - self.lanes_per_chunk;
+        let current_pos = (self.row_idx - 1, haystack_idx + self.haystack_start_pos);
 
         // Cannot move up or left when on a continuation byte (multi-byte unicode char)
         // so walk left
         if let Some(haystack) = self.unicode_haystack
             && haystack
-                .get(current_pos.1)
+                .get(haystack_idx)
                 .is_some_and(|byte| byte & 0xC0 == 0x80)
         {
             self.col_idx -= 1;
@@ -165,14 +163,9 @@ impl<'a> Iterator for AlignmentPathIter<'a> {
         if diag >= left && diag >= up {
             self.row_idx -= 1;
             self.col_idx -= 1;
-            // Must be a mismatch if score didn't increase
-            if diag >= self.score {
-                self.typo_count += 1;
-                self.score = diag;
-                return Some(Some(Alignment::Mismatch));
-            }
+            self.typo_count += 1;
             self.score = diag;
-            Some(Some(Alignment::Match(current_pos)))
+            Some(Some(Alignment::Mismatch))
         // Skipped character in haystack (left)
         } else if left >= up {
             self.col_idx -= 1;

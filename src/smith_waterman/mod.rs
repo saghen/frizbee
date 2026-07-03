@@ -432,6 +432,18 @@ mod tests {
     }
 
     #[test]
+    fn unicode_indices_with_offset_trace_through_multibyte_haystack_gaps() {
+        let mut matcher = SmithWaterman::<BackendScalar8>::new("éx", &Scoring::default(), false);
+
+        assert_eq!(
+            matcher
+                .score_haystack_unicode_indices("é😀x".as_bytes(), 3, None)
+                .map(|(_, indices)| indices),
+            Some(vec![9, 4, 3])
+        );
+    }
+
+    #[test]
     fn unicode_indices_trace_through_multibyte_haystack_gaps() {
         assert_eq!(get_unicode_indices("ab", "aéb"), Some(vec![3, 0]));
         assert_eq!(get_unicode_indices("ab", "aé😀b"), Some(vec![7, 0]));
