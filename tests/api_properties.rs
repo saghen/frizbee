@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use frizbee::{
-    CaseMatching, Config, Match, MatchIndices, Matcher, Scoring, match_list, match_list_indices,
-    match_list_parallel,
+    CaseMatching, Config, Match, MatchIndices, Matcher, Matching, Scoring, match_list,
+    match_list_indices, match_list_parallel,
 };
 
 // Did you know you could do this?? News to me
@@ -42,6 +42,13 @@ impl ApiCase {
             1 => CaseMatching::Smart,
             _ => CaseMatching::Respect,
         };
+        let matching = match cursor.next() % 5 {
+            0 => Matching::Fuzzy,
+            1 => Matching::Exact,
+            2 => Matching::Prefix,
+            3 => Matching::Suffix,
+            _ => Matching::Substring,
+        };
 
         Self {
             needle: cursor.string(needle_len),
@@ -49,6 +56,7 @@ impl ApiCase {
             config: Config {
                 max_typos,
                 casing,
+                matching,
                 sort: cursor.bool(),
                 ..Config::default()
             },
@@ -143,7 +151,7 @@ fn assert_indices_contract(case: &ApiCase, matches: &[Match], indices: &[MatchIn
         }
     }
 
-    if case.config.max_typos.is_none() {
+    if case.config.max_typos.is_none() || case.config.matching != Matching::Fuzzy {
         assert_eq!(
             indices_set, match_set,
             "indices and matches should agree exactly without typo filtering for {case:?}"

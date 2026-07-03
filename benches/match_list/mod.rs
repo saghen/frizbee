@@ -1,5 +1,5 @@
 use criterion::BenchmarkId;
-use frizbee::{Config, Matcher, radix_sort_matches};
+use frizbee::{Config, Matcher, Matching, radix_sort_matches};
 use std::{
     hint::black_box,
     sync::Arc,
@@ -128,6 +128,16 @@ fn match_list_bench_impl(
             radix_sort_matches(&mut matches);
             matches
         })
+    });
+    group.bench_with_input(benchmark_id("Substring"), haystack, |b, haystack| {
+        let mut matcher = Matcher::new(
+            needle,
+            &Config {
+                matching: Matching::Substring,
+                ..Default::default()
+            },
+        );
+        b.iter(|| matcher.match_list(black_box(haystack)))
     });
     group.bench_with_input(benchmark_id("All Scores"), haystack, |b, haystack| {
         let mut matcher = Matcher::new(

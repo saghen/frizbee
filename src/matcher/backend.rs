@@ -4,6 +4,12 @@ use super::algo::{MatcherImpl, Specialized};
 use crate::{Config, Match, MatchIndices};
 
 #[cfg(target_arch = "aarch64")]
+use crate::literal::LiteralNEON;
+use crate::literal::LiteralScalar;
+#[cfg(target_arch = "x86_64")]
+use crate::literal::{LiteralAVX, LiteralAVX512, LiteralSSE};
+
+#[cfg(target_arch = "aarch64")]
 use crate::prefilter::backend::PrefilterNEON;
 use crate::prefilter::backend::PrefilterScalar;
 #[cfg(target_arch = "x86_64")]
@@ -58,6 +64,18 @@ pub enum MatcherBackend {
     NEON(MatcherNEON),
     ScalarU8(MatcherScalarU8),
     Scalar(MatcherScalar),
+
+    // Literal matching backends (exact / prefix / suffix / substring). Selected when
+    // `Config::matching` is not `Matching::Fuzzy`.
+    #[cfg(target_arch = "x86_64")]
+    LiteralAVX512(LiteralAVX512),
+    #[cfg(target_arch = "x86_64")]
+    LiteralAVX(LiteralAVX),
+    #[cfg(target_arch = "x86_64")]
+    LiteralSSE(LiteralSSE),
+    #[cfg(target_arch = "aarch64")]
+    LiteralNEON(LiteralNEON),
+    LiteralScalar(LiteralScalar),
 }
 
 /// Implements [`Specialized`] for one concrete backend, attaching the

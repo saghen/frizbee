@@ -2,7 +2,13 @@ use crate::smith_waterman::score_fits_in_u8;
 use crate::sort::radix_sort_matches;
 use crate::{Config, Match, MatchIndices};
 
-mod algo;
+#[cfg(target_arch = "aarch64")]
+use crate::literal::LiteralNEON;
+use crate::literal::LiteralScalar;
+#[cfg(target_arch = "x86_64")]
+use crate::literal::{LiteralAVX, LiteralAVX512, LiteralSSE};
+
+pub(crate) mod algo;
 mod backend;
 mod iter;
 mod parallel;
@@ -10,6 +16,7 @@ use algo::{MANY_TYPOS, NO_PREFILTER, Specialized};
 use backend::*;
 pub use iter::{FuzzyMatch, FuzzyMatchExt, FuzzyMatchIndices};
 
+/// Primary entrypoint for fuzzy matching
 #[derive(Debug, Clone)]
 pub struct Matcher {
     needle: String,
@@ -40,6 +47,15 @@ macro_rules! dispatch {
             MatcherBackend::NEON($m) => $body,
             MatcherBackend::ScalarU8($m) => $body,
             MatcherBackend::Scalar($m) => $body,
+            #[cfg(target_arch = "x86_64")]
+            MatcherBackend::LiteralAVX512($m) => $body,
+            #[cfg(target_arch = "x86_64")]
+            MatcherBackend::LiteralAVX($m) => $body,
+            #[cfg(target_arch = "x86_64")]
+            MatcherBackend::LiteralSSE($m) => $body,
+            #[cfg(target_arch = "aarch64")]
+            MatcherBackend::LiteralNEON($m) => $body,
+            MatcherBackend::LiteralScalar($m) => $body,
         }
     };
 }
@@ -288,6 +304,10 @@ impl Matcher {
     }
 
     fn get_backend(needle: &str, config: &Config) -> MatcherBackend {
+        if !config.matching.is_fuzzy() {
+            return Self::get_literal_backend(needle, config);
+        }
+
         let use_u8 = score_fits_in_u8(needle.len(), &config.scoring);
 
         #[cfg(target_arch = "x86_64")]
@@ -333,6 +353,32 @@ impl Matcher {
         } else {
             MatcherBackend::Scalar(unsafe { MatcherScalar::build(needle, config) })
         }
+    }
+
+    fn get_literal_backend(needle: &str, config: &Config) -> MatcherBackend {
+        #[cfg(target_arch = "x86_64")]
+        {
+            if LiteralAVX512::is_available() {
+                return MatcherBackend::LiteralAVX512(unsafe {
+                    LiteralAVX512::build(needle, config)
+                });
+            }
+            if LiteralAVX::is_available() {
+                return MatcherBackend::LiteralAVX(unsafe { LiteralAVX::build(needle, config) });
+            }
+            if LiteralSSE::is_available() {
+                return MatcherBackend::LiteralSSE(unsafe { LiteralSSE::build(needle, config) });
+            }
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            if LiteralNEON::is_available() {
+                return MatcherBackend::LiteralNEON(unsafe { LiteralNEON::build(needle, config) });
+            }
+        }
+
+        MatcherBackend::LiteralScalar(unsafe { LiteralScalar::build(needle, config) })
     }
 }
 
