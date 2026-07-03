@@ -284,7 +284,7 @@ pub enum UnicodeMatching {
     Smart,
     /// Always use expensive unicode Smith Waterman for correctness across
     /// multi-byte unicode chars in the haystack
-    Respect,
+    Always,
 }
 
 impl UnicodeMatching {
@@ -293,7 +293,7 @@ impl UnicodeMatching {
         match self {
             UnicodeMatching::Ignore => false,
             UnicodeMatching::Smart => !needle.is_ascii(),
-            UnicodeMatching::Respect => true,
+            UnicodeMatching::Always => true,
         }
     }
 }

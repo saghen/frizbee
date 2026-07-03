@@ -206,7 +206,7 @@ The matrix receives a row per needle UTF-8 codepoint, rather than per needle byt
 
 Frizbee will not perform any [unicode normalization](https://docs.rs/unicode-normalization/latest/unicode_normalization/) before matching. You should apply this yourself if you need it.
 
-With the default `UnicodeMatching::Smart`, an ASCII needle matching against a haystack with multi-byte UTF-8 codepoints will have a slightly lower score than a pure ASCII haystack. For example, `hw` matched against `h😀w` will receive a penalty to the score of `gap_open_penalty + gap_extend_penalty * 4` due to the emoji taking up 4 bytes. If the haystack was instead `hew`, the penalty would be `gap_open_penalty + gap_extend_penalty`. This should typically be a non-issue, but you can force the slower unicode path with `UnicodeMatching::Respect` on ASCII needles, if necessary.
+With the default `UnicodeMatching::Smart`, an ASCII needle matching against a haystack with multi-byte UTF-8 codepoints will have a slightly lower score than a pure ASCII haystack. For example, `hw` matched against `h😀w` will receive a penalty to the score of `gap_open_penalty + gap_extend_penalty * 4` due to the emoji taking up 4 bytes. If the haystack was instead `hew`, the penalty would be `gap_open_penalty + gap_extend_penalty`. This should typically be a non-issue, but you can force the slower unicode path with `UnicodeMatching::Always` on ASCII needles, if necessary.
 
 For case-insensitive matching, the case flipped version will be skipped if it's a different byte length or has multiple codepoints (such as the German `ß` -> `SS`).
 
