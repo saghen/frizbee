@@ -391,7 +391,7 @@ mod tests {
     #[test]
     fn unicode_prefilter_respects_case_setting() {
         assert_eq!(unicode_result_generic("É", "é", false), (true, 0, 2));
-        assert_eq!(unicode_result_generic("É", "é", true).0, false);
+        assert!(!unicode_result_generic("É", "é", true).0);
     }
 
     #[test]

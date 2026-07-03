@@ -224,8 +224,8 @@ impl<const LANES: usize> ScoreVec for ScalarScoreU16<LANES> {
         const { assert!(L >= 0 && (L as usize) <= LANES) };
         let n = L as usize;
         let mut out = [0u16; LANES];
-        for idx in 0..n {
-            out[idx] = prev.0[LANES - n + idx];
+        for (idx, item) in out.iter_mut().enumerate().take(n) {
+            *item = prev.0[LANES - n + idx];
         }
         out[n..LANES].copy_from_slice(&self.0[..(LANES - n)]);
         Self(out)
@@ -319,8 +319,8 @@ impl<const LANES: usize> ScoreVec for ScalarScoreU8<LANES> {
         const { assert!(L >= 0 && (L as usize) <= LANES) };
         let n = L as usize;
         let mut out = [0u8; LANES];
-        for idx in 0..n {
-            out[idx] = prev.0[LANES - n + idx];
+        for (idx, item) in out.iter_mut().enumerate().take(n) {
+            *item = prev.0[LANES - n + idx];
         }
         out[n..LANES].copy_from_slice(&self.0[..(LANES - n)]);
         Self(out)

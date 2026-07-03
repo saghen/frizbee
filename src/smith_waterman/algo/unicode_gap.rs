@@ -105,6 +105,7 @@
 
 use crate::smith_waterman::backend::{Backend, ScoreVec};
 
+#[allow(clippy::too_many_arguments)]
 #[inline(always)]
 unsafe fn unicode_gap_step<B: Backend, const SHIFT: i32>(
     row: &mut B::Score,
@@ -166,6 +167,7 @@ unsafe fn prepare_next_unicode_gap_step<B: Backend, const SHIFT: i32>(
 
 macro_rules! unicode_propagator {
     ($name:ident, [$($prepare_shift:literal),*], $final_shift:literal) => {
+        #[allow(clippy::too_many_arguments)]
         #[inline(always)]
         pub(crate) unsafe fn $name<B: Backend>(
             row: B::Score,

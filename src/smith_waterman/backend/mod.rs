@@ -93,6 +93,7 @@ pub trait Backend: Sized + core::fmt::Debug + Clone + 'static {
     ///
     /// # Safety
     /// The backend's required target features must be enabled at the call site.
+    #[allow(clippy::too_many_arguments)]
     unsafe fn propagate_horizontal_unicode_gaps(
         row: Self::Score,
         adjacent_row: Self::Score,

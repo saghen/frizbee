@@ -36,6 +36,7 @@ pub(crate) struct AlignmentPathIter<'a> {
 }
 
 impl<'a> AlignmentPathIter<'a> {
+    #[allow(clippy::too_many_arguments)]
     #[inline(always)]
     pub fn new<B: Backend>(
         score_matrix: &'a Matrix<B>,

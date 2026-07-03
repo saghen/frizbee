@@ -53,7 +53,7 @@ impl<'a> ByteCursor<'a> {
     /// A length in `0..=max`, snapped to one of `boundaries` a quarter of the
     /// time so chunk-edge lengths are over-represented.
     pub fn len(&mut self, max: usize, boundaries: &[usize]) -> usize {
-        if self.next() % 4 == 0 {
+        if self.next().is_multiple_of(4) {
             boundaries[(self.next() as usize) % boundaries.len()].min(max)
         } else {
             self.usize() % (max + 1)

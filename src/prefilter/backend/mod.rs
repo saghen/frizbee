@@ -34,7 +34,7 @@ pub(crate) trait BitMaskOps {
     fn zero() -> Self;
     fn all() -> Self;
     fn first_n(n: usize) -> Self;
-    fn is_zero(self) -> bool;
+    fn is_zero(&self) -> bool;
     fn trailing_zeros(self) -> usize;
     fn leading_zeros(self) -> usize;
     fn or(self, other: Self) -> Self;
@@ -65,8 +65,8 @@ macro_rules! impl_mask {
             }
 
             #[inline(always)]
-            fn is_zero(self) -> bool {
-                self == 0
+            fn is_zero(&self) -> bool {
+                *self == 0
             }
 
             #[inline(always)]

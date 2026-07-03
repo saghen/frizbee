@@ -44,10 +44,12 @@ pub enum MatcherBackend {
     AVX512(MatcherAVX512),
     #[cfg(target_arch = "x86_64")]
     AVXU8(MatcherAVXU8),
+    #[allow(clippy::upper_case_acronyms)]
     #[cfg(target_arch = "x86_64")]
     AVX(MatcherAVX),
     #[cfg(target_arch = "x86_64")]
     SSEU8(MatcherSSEU8),
+    #[allow(clippy::upper_case_acronyms)]
     #[cfg(target_arch = "x86_64")]
     SSE(MatcherSSE),
     #[cfg(target_arch = "aarch64")]
