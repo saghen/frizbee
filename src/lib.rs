@@ -34,6 +34,10 @@
 //! let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
 //!
 //! let mut matcher = Matcher::new(needle, &Config::default());
+//! // or use a matching mode (fuzzy, substring, prefix, suffix, exact) based on the query
+//! // syntax, e.g. foo, 'foo, ^foo, foo$, ^foo$
+//! let mut matcher = Matcher::from_query(needle);
+//!
 //! let matches = matcher.match_list(&haystacks);
 //! ```
 //!
