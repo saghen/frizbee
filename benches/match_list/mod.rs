@@ -95,6 +95,7 @@ fn match_list_bench_impl(
             BenchmarkInput::SequentialAndParallel { .. } => BenchmarkId::new(name, "Sequential"),
         }
     };
+    let is_sequential_and_parallel = matches!(input, BenchmarkInput::SequentialAndParallel { .. });
 
     group.throughput(criterion::Throughput::Bytes(size as u64));
 
@@ -129,10 +130,13 @@ fn match_list_bench_impl(
             matches
         })
     });
-    group.bench_with_input(benchmark_id("Substring"), haystack, |b, haystack| {
-        let mut matcher = Matcher::new(needle, &Config::default().matching(Matching::Substring));
-        b.iter(|| matcher.match_list(black_box(haystack)))
-    });
+    if is_sequential_and_parallel {
+        group.bench_with_input(benchmark_id("Substring"), haystack, |b, haystack| {
+            let mut matcher =
+                Matcher::new(needle, &Config::default().matching(Matching::Substring));
+            b.iter(|| matcher.match_list(black_box(haystack)))
+        });
+    }
     group.bench_with_input(benchmark_id("All Scores"), haystack, |b, haystack| {
         let mut matcher = Matcher::new(needle, &Config::default().max_typos(None));
         b.iter(|| matcher.match_list(black_box(haystack)))
@@ -180,6 +184,15 @@ fn match_list_bench_impl(
             BenchmarkId::new("Frizbee", "Parallel (x8)"),
             haystack,
             |b, haystack| b.iter(|| match_list_parallel(needle, haystack, Some(0))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("Substring", "Parallel (x8)"),
+            haystack,
+            |b, haystack| {
+                let mut matcher =
+                    Matcher::new(needle, &Config::default().matching(Matching::Substring));
+                b.iter(|| matcher.match_list_parallel(haystack, 8))
+            },
         );
         group.bench_with_input(
             BenchmarkId::new("All Scores", "Parallel (x8)"),
