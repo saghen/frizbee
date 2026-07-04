@@ -1,6 +1,6 @@
 use crate::smith_waterman::score_fits_in_u8;
 use crate::sort::radix_sort_matches;
-use crate::{Config, Match, MatchIndices};
+use crate::{Config, Match, MatchIndices, Matching};
 
 #[cfg(target_arch = "aarch64")]
 use crate::literal::LiteralNEON;
@@ -89,6 +89,55 @@ impl Matcher {
             config: config.clone(),
             needs_unicode: config.unicode.respects_unicode_for(needle),
         }
+    }
+
+    /// Creates a matcher from a given query string, where special syntax changes
+    /// the matching mode
+    ///
+    /// `foo` - Matching::Fuzzy
+    /// `^foo` - Matching::Prefix
+    /// `foo$` - Matching::Suffix
+    /// `'foo` - Matching::Substring
+    /// `^foo$` - Matching::Exact
+    ///
+    /// Any special character can be escaped with a backslash, e.g. `\^foo`,
+    /// `foo\$` or `\'foo` match the literal leading/trailing character.
+    pub fn from_query(query: &str) -> Self {
+        let mut needle = query;
+        let mut prefix = false;
+        let mut suffix = false;
+        let mut substring = false;
+
+        // Leading
+        if let Some(rest) = needle.strip_prefix('^') {
+            needle = rest;
+            prefix = true;
+        } else if let Some(rest) = needle.strip_prefix('\'') {
+            needle = rest;
+            substring = true;
+        } else if needle.starts_with("\\^") || needle.starts_with("\\'") {
+            needle = &needle[1..]; // drop the backslash, keep the literal char
+        }
+
+        // Trailing
+        let needle = if let Some(head) = needle.strip_suffix("\\$") {
+            format!("{head}$") // drop the backslash, keep the literal `$`
+        } else if let Some(head) = needle.strip_suffix('$') {
+            suffix = true;
+            head.to_string()
+        } else {
+            needle.to_string()
+        };
+
+        let mode = match (prefix, suffix, substring) {
+            (true, true, _) => Matching::Exact,
+            (true, false, _) => Matching::Prefix,
+            (false, true, _) => Matching::Suffix,
+            (false, false, true) => Matching::Substring,
+            _ => Matching::Fuzzy,
+        };
+
+        Self::new(&needle, &Config::default().matching(mode))
     }
 
     pub fn config(&self) -> &Config {
@@ -386,6 +435,28 @@ impl Matcher {
 mod tests {
     use super::*;
     use crate::{CaseMatching, match_list};
+
+    fn assert_from_query(query: &str, needle: &str, matching: Matching) {
+        let matcher = Matcher::from_query(query);
+        assert_eq!(matcher.needle(), needle);
+        assert_eq!(matcher.config().matching, matching);
+    }
+
+    #[test]
+    fn from_query_selects_matching_mode() {
+        assert_from_query("foo", "foo", Matching::Fuzzy);
+        assert_from_query("^foo", "foo", Matching::Prefix);
+        assert_from_query("foo$", "foo", Matching::Suffix);
+        assert_from_query("'foo", "foo", Matching::Substring);
+        assert_from_query("^foo$", "foo", Matching::Exact);
+    }
+
+    #[test]
+    fn from_query_escapes_special_syntax() {
+        assert_from_query("\\^foo", "^foo", Matching::Fuzzy);
+        assert_from_query("foo\\$", "foo$", Matching::Fuzzy);
+        assert_from_query("\\'foo", "'foo", Matching::Fuzzy);
+    }
 
     #[test]
     fn test_basic() {
