@@ -332,10 +332,7 @@ mod tests {
     #[test]
     fn unsorted_output_preserves_candidate_order() {
         let haystacks = ["foo", "nomatch", "xfoo", "f_o_o", "bar"];
-        let config = Config {
-            sort: false,
-            ..Config::default()
-        };
+        let config = Config::default().sort(false);
 
         let matches = match_list("foo", &haystacks, &config);
         assert_eq!(
@@ -350,10 +347,7 @@ mod tests {
     #[test]
     fn match_list_indices_reports_expected_public_indices() {
         let haystacks = ["xabcx", "a_b_c", "nomatch"];
-        let config = Config {
-            sort: false,
-            ..Config::default()
-        };
+        let config = Config::default().sort(false);
 
         let matches = match_list_indices("abc", &haystacks, &config);
         assert_eq!(matches.len(), 2);
@@ -366,10 +360,7 @@ mod tests {
     #[test]
     #[cfg(feature = "match_end_col")]
     fn filtered_match_end_col_uses_original_haystack_offsets() {
-        let config = Config {
-            sort: false,
-            ..Config::default()
-        };
+        let config = Config::default().sort(false);
 
         let matches = match_list("abc", &["xxabcxx"], &config);
         assert_eq!(matches.len(), 1);

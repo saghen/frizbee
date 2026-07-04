@@ -261,6 +261,44 @@ impl Default for Config {
     }
 }
 
+impl Config {
+    /// Sets the matching mode
+    pub fn matching(mut self, matching: Matching) -> Self {
+        self.matching = matching;
+        self
+    }
+
+    /// Sets the maximum number of typos allowed
+    pub fn max_typos(mut self, max_typos: Option<u16>) -> Self {
+        self.max_typos = max_typos;
+        self
+    }
+
+    /// Sets the casing mode
+    pub fn casing(mut self, casing: CaseMatching) -> Self {
+        self.casing = casing;
+        self
+    }
+
+    /// Sets the unicode mode
+    pub fn unicode(mut self, unicode: UnicodeMatching) -> Self {
+        self.unicode = unicode;
+        self
+    }
+
+    /// Sets whether to sort the results
+    pub fn sort(mut self, sort: bool) -> Self {
+        self.sort = sort;
+        self
+    }
+
+    /// Sets the scoring
+    pub fn scoring(mut self, scoring: Scoring) -> Self {
+        self.scoring = scoring;
+        self
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CaseMatching {

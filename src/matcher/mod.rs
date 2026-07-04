@@ -392,10 +392,7 @@ mod tests {
         let needle = "deadbe";
         let haystack = vec!["deadbeef", "deadbf", "deadbeefg", "deadbe"];
 
-        let config = Config {
-            max_typos: None,
-            ..Config::default()
-        };
+        let config = Config::default().max_typos(None);
         let matches = match_list(needle, &haystack, &config);
 
         println!("{:?}", matches);
@@ -411,14 +408,7 @@ mod tests {
         let needle = "deadbe";
         let haystack = vec!["deadbeef", "deadbf", "deadbeefg", "deadbe"];
 
-        let matches = match_list(
-            needle,
-            &haystack,
-            &Config {
-                max_typos: Some(0),
-                ..Config::default()
-            },
-        );
+        let matches = match_list(needle, &haystack, &Config::default().max_typos(Some(0)));
         assert_eq!(matches.len(), 3);
     }
 
@@ -461,10 +451,7 @@ mod tests {
 
     #[test]
     fn test_small_needle() {
-        let config = Config {
-            max_typos: Some(2),
-            ..Config::default()
-        };
+        let config = Config::default().max_typos(Some(2));
         let matches = match_list("1", &["1"], &config);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].index, 0);
@@ -474,10 +461,7 @@ mod tests {
     #[test]
     fn test_case_sensitive_matching() {
         let haystack = ["foo", "FOO", "fOo", "xxfooxx"];
-        let config = Config {
-            sort: false,
-            ..Config::default()
-        };
+        let config = Config::default().sort(false);
 
         let matches = match_list("foo", &haystack, &config);
         assert_eq!(
@@ -485,11 +469,7 @@ mod tests {
             vec![0, 1, 2, 3]
         );
 
-        let config = Config {
-            casing: CaseMatching::Respect,
-            sort: false,
-            ..Config::default()
-        };
+        let config = Config::default().casing(CaseMatching::Respect).sort(false);
 
         let matches = match_list("foo", &haystack, &config);
         assert_eq!(
@@ -503,11 +483,7 @@ mod tests {
             vec![0, 3]
         );
 
-        let config = Config {
-            casing: CaseMatching::Smart,
-            sort: false,
-            ..Config::default()
-        };
+        let config = Config::default().casing(CaseMatching::Smart).sort(false);
 
         let matches = match_list("FoO", &["foo", "FOO", "FoO", "xxFoOxx"], &config);
         assert_eq!(
@@ -529,11 +505,7 @@ mod tests {
         ];
         for needle in ["deadbe", "é다😀"] {
             for max_typos in [None, Some(0), Some(1), Some(2), Some(3)] {
-                let config = Config {
-                    max_typos,
-                    sort: false,
-                    ..Config::default()
-                };
+                let config = Config::default().max_typos(max_typos).sort(false);
                 let mut matcher = Matcher::new(needle, &config);
                 let from_iter = matcher.match_iter(haystacks.iter()).collect::<Vec<_>>();
                 let from_list = matcher.match_list(&haystacks);
@@ -569,11 +541,7 @@ mod tests {
         ];
         for needle in ["deadbe", "é다😀"] {
             for max_typos in [None, Some(0), Some(1), Some(2), Some(3)] {
-                let config = Config {
-                    max_typos,
-                    sort: false,
-                    ..Config::default()
-                };
+                let config = Config::default().max_typos(max_typos).sort(false);
                 let mut matcher = Matcher::new(needle, &config);
                 let from_iter = matcher
                     .match_iter_indices(haystacks.iter())
@@ -663,11 +631,7 @@ mod tests {
             "abcdefghijklmnopqrst".to_string(),
             "no-match".to_string(),
         ];
-        let first_config = Config {
-            max_typos: None,
-            sort: false,
-            ..Config::default()
-        };
+        let first_config = Config::default().max_typos(None).sort(false);
         let mut matcher = Matcher::new(long_needle, &first_config);
 
         let first = matcher.match_list(&first_haystacks);
@@ -683,11 +647,7 @@ mod tests {
             "bar".to_string(),
         ];
         matcher.set_needle("fB");
-        let second_config = Config {
-            casing: CaseMatching::Smart,
-            sort: false,
-            ..Config::default()
-        };
+        let second_config = Config::default().casing(CaseMatching::Smart).sort(false);
         matcher.set_config(second_config.clone());
         let second = matcher.match_list(&second_haystacks);
         assert_eq!(
@@ -702,11 +662,7 @@ mod tests {
             "plain ascii".to_string(),
         ];
         matcher.set_needle("é다😀");
-        let unicode_config = Config {
-            max_typos: Some(0),
-            sort: false,
-            ..Config::default()
-        };
+        let unicode_config = Config::default().max_typos(Some(0)).sort(false);
         matcher.set_config(unicode_config.clone());
         let unicode = matcher.match_list(&unicode_haystacks);
         assert_eq!(
@@ -715,12 +671,10 @@ mod tests {
         );
 
         matcher.set_needle("fB");
-        let third_config = Config {
-            casing: CaseMatching::Ignore,
-            max_typos: Some(1),
-            sort: true,
-            ..Config::default()
-        };
+        let third_config = Config::default()
+            .casing(CaseMatching::Ignore)
+            .max_typos(Some(1))
+            .sort(true);
         matcher.set_config(third_config.clone());
         let third = matcher.match_list(&first_haystacks);
         assert_eq!(&third, &match_list("fB", &first_haystacks, &third_config));
@@ -729,11 +683,7 @@ mod tests {
     #[test]
     #[cfg(feature = "match_end_col")]
     fn test_match_end_col_through_match_list() {
-        let config = Config {
-            max_typos: None,
-            sort: false,
-            ..Config::default()
-        };
+        let config = Config::default().max_typos(None).sort(false);
         let matches = match_list("abc", &["xabcx", "abcdef", "xxabc"], &config);
         assert_eq!(matches.len(), 3);
         assert_eq!(matches[0].end_col, 3);

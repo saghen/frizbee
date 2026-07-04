@@ -11,7 +11,7 @@ For commercial support, please [contact me](mailto:frizbee@liam.super.fish). I'd
 See [the docs](https://docs.rs/frizbee) for more usage examples.
 
 ```rust
-use frizbee::{match_list, match_list_parallel, Config};
+use frizbee::{match_list, match_list_parallel, Config, Matching};
 
 let needle = "fBr";
 let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
@@ -19,6 +19,8 @@ let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
 let matches = match_list(needle, &haystacks, &Config::default());
 // or in parallel (8 threads)
 let matches = match_list_parallel(needle, &haystacks, &Config::default(), 8);
+// or use a non-fuzzy matching mode (exact, prefix, suffix, substring)
+let matches = match_list(needle, &haystacks, &Config::default().matching(Matching::Substring));
 ```
 
 or use the slightly slower `fuzzy_match` iterator API
@@ -175,7 +177,7 @@ The parallel implementation uses work-stealing to distribute the work across thr
 
 ### Unicode
 
-Frizbee matches against UTF-8 bytes directly rather than converting to UTF-32 codepoints like Nucleo. This results in near-native performance without preprocessing or any extra memory usage. By default, with `config.unicode = UnicodeMatching::Smart`, the unicode path will only be taken when the needle contains non-ASCII characters.
+Frizbee matches against UTF-8 bytes directly rather than converting to UTF-32 codepoints like Nucleo. This results in near-native performance without preprocessing or any extra memory usage. By default, `Config::default()` uses `UnicodeMatching::Smart`, so the unicode path will only be taken when the needle contains non-ASCII characters.
 
 #### Prefiltering
 

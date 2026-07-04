@@ -159,11 +159,7 @@ mod backend_parity {
                 Matching::Suffix,
                 Matching::Substring,
             ] {
-                let config = Config {
-                    matching,
-                    sort: false,
-                    ..Config::default()
-                };
+                let config = Config::default().matching(matching).sort(false);
                 let expected = unsafe { probe::<LiteralScalar>(needle, haystack, &config) };
 
                 #[cfg(target_arch = "x86_64")]

@@ -20,11 +20,7 @@ mod tests {
     const CHAR_SCORE: u16 = MATCH_SCORE + MATCHING_CASE_BONUS;
 
     fn config(matching: Matching) -> Config {
-        Config {
-            matching,
-            sort: false,
-            ..Config::default()
-        }
+        Config::default().matching(matching).sort(false)
     }
 
     fn scores(matching: Matching, needle: &str, haystacks: &[&str]) -> Vec<(u32, u16, bool)> {
@@ -42,12 +38,10 @@ mod tests {
 
     /// Best-scoring substring occurrence under the given casing, or `None` when the needle is absent.
     fn get_score_case(needle: &str, haystack: &str, casing: CaseMatching) -> Option<u16> {
-        let config = Config {
-            matching: Matching::Substring,
-            casing,
-            sort: false,
-            ..Config::default()
-        };
+        let config = Config::default()
+            .matching(Matching::Substring)
+            .casing(casing)
+            .sort(false);
         match_list(needle, &[haystack], &config)
             .first()
             .map(|m| m.score)
@@ -137,12 +131,10 @@ mod tests {
     fn casing_respect_and_smart() {
         let haystacks = ["foo", "FOO", "fOo"];
         // Respect: only exact case.
-        let respect = Config {
-            matching: Matching::Prefix,
-            casing: CaseMatching::Respect,
-            sort: false,
-            ..Config::default()
-        };
+        let respect = Config::default()
+            .matching(Matching::Prefix)
+            .casing(CaseMatching::Respect)
+            .sort(false);
         assert_eq!(
             match_list("foo", &haystacks, &respect)
                 .iter()

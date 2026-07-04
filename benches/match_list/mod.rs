@@ -130,53 +130,23 @@ fn match_list_bench_impl(
         })
     });
     group.bench_with_input(benchmark_id("Substring"), haystack, |b, haystack| {
-        let mut matcher = Matcher::new(
-            needle,
-            &Config {
-                matching: Matching::Substring,
-                ..Default::default()
-            },
-        );
+        let mut matcher = Matcher::new(needle, &Config::default().matching(Matching::Substring));
         b.iter(|| matcher.match_list(black_box(haystack)))
     });
     group.bench_with_input(benchmark_id("All Scores"), haystack, |b, haystack| {
-        let mut matcher = Matcher::new(
-            needle,
-            &Config {
-                max_typos: None,
-                ..Default::default()
-            },
-        );
+        let mut matcher = Matcher::new(needle, &Config::default().max_typos(None));
         b.iter(|| matcher.match_list(black_box(haystack)))
     });
     group.bench_with_input(benchmark_id("1 Typo"), haystack, |b, haystack| {
-        let mut matcher = Matcher::new(
-            needle,
-            &Config {
-                max_typos: Some(1),
-                ..Default::default()
-            },
-        );
+        let mut matcher = Matcher::new(needle, &Config::default().max_typos(Some(1)));
         b.iter(|| matcher.match_list(black_box(haystack)))
     });
     group.bench_with_input(benchmark_id("2 Typos"), haystack, |b, haystack| {
-        let mut matcher = Matcher::new(
-            needle,
-            &Config {
-                max_typos: Some(2),
-                ..Default::default()
-            },
-        );
+        let mut matcher = Matcher::new(needle, &Config::default().max_typos(Some(2)));
         b.iter(|| matcher.match_list(black_box(haystack)))
     });
     group.bench_with_input(benchmark_id("3 Typos"), haystack, |b, haystack| {
-        let mut matcher = Matcher::new(
-            needle,
-            &Config {
-                max_typos: Some(3),
-                ..Default::default()
-            },
-        );
+        let mut matcher = Matcher::new(needle, &Config::default().max_typos(Some(3)));
         b.iter(|| matcher.match_list(black_box(haystack)))
     });
 
@@ -239,13 +209,11 @@ fn match_list_parallel(
     haystack: &[&str],
     max_typos: Option<u16>,
 ) -> Vec<frizbee::Match> {
+    let config = Config::default().max_typos(max_typos);
     frizbee::match_list_parallel(
         black_box(needle),
         black_box(haystack),
-        black_box(&Config {
-            max_typos,
-            ..Default::default()
-        }),
+        black_box(&config),
         8,
     )
 }
