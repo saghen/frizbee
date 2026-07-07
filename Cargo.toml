@@ -2,7 +2,7 @@
 name = "neo_frizbee"
 description = "Fast typo-resistant fuzzy matching via SIMD smith waterman, similar algorithm to FZF/FZY"
 license = "MIT"
-version = "0.10.1"
+version = "0.10.4"
 edition = "2024"
 repository = "https://github.com/saghen/frizbee"
 

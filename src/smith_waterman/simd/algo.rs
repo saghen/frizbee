@@ -308,16 +308,8 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
             return 0;
         }
         if total_len > MAX_HAYSTACK_LEN {
-            // Reconstruct contiguous buffer for greedy fallback (vanishingly rare)
-            let mut buf = vec![0u8; total_len];
-            for (i, &ptr) in chunk_ptrs.iter().enumerate() {
-                let start = i * 16;
-                let take = 16.min(total_len - start);
-                unsafe {
-                    core::ptr::copy_nonoverlapping(ptr, buf.as_mut_ptr().add(start), take);
-                }
-            }
-            return match_greedy(self.needle.as_bytes(), &buf, &self.scoring)
+            return self
+                .match_greedy_chunked(chunk_ptrs, total_len)
                 .map(|(score, _)| score)
                 .unwrap_or(0);
         }
@@ -441,6 +433,24 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
         }
     }
 
+    /// Greedy fallback for haystacks that exceed the preallocated DP matrix.
+    /// Reconstructs a contiguous buffer from the chunk pointers.
+    fn match_greedy_chunked(
+        &self,
+        chunk_ptrs: &[*const u8],
+        total_len: usize,
+    ) -> Option<(u16, Vec<usize>)> {
+        let mut buf = vec![0u8; total_len];
+        for (i, &ptr) in chunk_ptrs.iter().enumerate() {
+            let start = i * 16;
+            let take = 16.min(total_len - start);
+            unsafe {
+                core::ptr::copy_nonoverlapping(ptr, buf.as_mut_ptr().add(start), take);
+            }
+        }
+        match_greedy(self.needle.as_bytes(), &buf, &self.scoring)
+    }
+
     #[inline(always)]
     pub fn match_haystack_chunked(
         &mut self,
@@ -448,6 +458,13 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
         byte_len: u16,
         max_typos: Option<u16>,
     ) -> Option<u16> {
+        let total_len = byte_len as usize;
+        if total_len > MAX_HAYSTACK_LEN {
+            return self
+                .match_greedy_chunked(chunk_ptrs, total_len)
+                .map(|(score, _)| score);
+        }
+
         let score = self.score_haystack_chunked(chunk_ptrs, byte_len);
         match max_typos {
             Some(max_typos) if !self.has_alignment_path(score, max_typos) => None,
@@ -463,6 +480,13 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
         byte_len: u16,
         max_typos: Option<u16>,
     ) -> Option<(u16, u16)> {
+        let total_len = byte_len as usize;
+        if total_len > MAX_HAYSTACK_LEN {
+            return self
+                .match_greedy_chunked(chunk_ptrs, total_len)
+                .map(|(score, indices)| (score, indices.last().copied().unwrap_or(0) as u16));
+        }
+
         let score = self.score_haystack_chunked(chunk_ptrs, byte_len);
         if score == 0 {
             return None;

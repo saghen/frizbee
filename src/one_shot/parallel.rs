@@ -95,10 +95,14 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: Matchable + Sync>(
 ///
 /// For each item, `resolve` fills a stack buffer with chunk pointers and returns
 /// `Some((chunk_count, byte_len))` or `None` to skip the item.
+///
+/// `N` is the chunk pointer capacity and must cover the longest haystack:
+/// `max_haystack_bytes.div_ceil(16)`.
 pub fn match_list_parallel_resolved<
     S1: AsRef<str>,
     T: Sync,
-    F: Fn(&T, &mut [*const u8; 32]) -> Option<(usize, u16)> + Sync,
+    F: Fn(&T, &mut [*const u8; N]) -> Option<(usize, u16)> + Sync,
+    const N: usize,
 >(
     needle: S1,
     items: &[T],
@@ -109,7 +113,7 @@ pub fn match_list_parallel_resolved<
     assert!(items.len() < (u32::MAX as usize), "item index overflow");
 
     if needle.as_ref().is_empty() {
-        let mut ptrs_buf = [core::ptr::null::<u8>(); 32];
+        let mut ptrs_buf = [core::ptr::null::<u8>(); N];
         return items
             .iter()
             .enumerate()

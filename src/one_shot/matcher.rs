@@ -471,19 +471,22 @@ impl Matcher {
     ///
     /// This avoids the lifetime issue of `MatchableChunked` — the resolver
     /// writes into a buffer owned by the caller, not by the item.
-    pub fn match_list_resolved_into<T, F>(
+    ///
+    /// `N` is the chunk pointer capacity and must cover the longest haystack:
+    /// `max_haystack_bytes.div_ceil(16)`.
+    pub fn match_list_resolved_into<T, F, const N: usize>(
         &mut self,
         items: &[T],
         item_index_offset: u32,
         resolve: &F,
         matches: &mut Vec<Match>,
     ) where
-        F: Fn(&T, &mut [*const u8; 32]) -> Option<(usize, u16)>, // (chunk_count, byte_len)
+        F: Fn(&T, &mut [*const u8; N]) -> Option<(usize, u16)>, // (chunk_count, byte_len)
     {
         Matcher::guard_against_haystack_overflow(items.len(), item_index_offset);
 
         if self.needle.is_empty() {
-            let mut ptrs_buf = [core::ptr::null::<u8>(); 32];
+            let mut ptrs_buf = [core::ptr::null::<u8>(); N];
             for (i, item) in items.iter().enumerate() {
                 if resolve(item, &mut ptrs_buf).is_some() {
                     matches.push(Match::from_index(i + item_index_offset as usize));
@@ -500,7 +503,7 @@ impl Matcher {
             .unwrap_or(0);
 
         for (index, item) in items.iter().enumerate() {
-            let mut ptrs_buf = [core::ptr::null::<u8>(); 32];
+            let mut ptrs_buf = [core::ptr::null::<u8>(); N];
             let Some((chunk_count, byte_len)) = resolve(item, &mut ptrs_buf) else {
                 continue;
             };
