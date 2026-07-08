@@ -117,52 +117,6 @@ pub mod iter {
     pub use crate::matcher::{FuzzyMatch, FuzzyMatchExt, FuzzyMatchIndices};
 }
 
-/// Matches a list of haystacks, returning a list of [`Match`] values.
-/// This API provides the most performant path when matching on lists.
-///
-/// This API should not be called with one item at a time as it performs dynamic dispatch to
-/// the underlying backend. Instead, consider using the [`Matcher::match_iter`],
-/// [`Matcher::match_one`] or [`iter::FuzzyMatchExt`] API.
-pub fn match_list<S1: AsRef<str>, S2: AsRef<str>>(
-    needle: S1,
-    haystacks: &[S2],
-    config: &Config,
-) -> Vec<Match> {
-    Matcher::new(needle.as_ref(), config).match_list(haystacks)
-}
-
-/// Matches a list of haystacks, returning a list of [`MatchIndices`] which are equivalent
-/// to [`Match`] except they include the indices of the matched characters in the haystack.
-///
-/// This API has not been optimized for performance, and should only be used on small lists or
-/// after matching a list of haystacks with [`match_list`]. Useful for displaying
-/// matched indices in the UI.
-///
-/// This API should not be called with one item at a time as it performs dynamic dispatch to
-/// the underlying backend. Instead, consider using the [`Matcher::match_iter_indices`] or
-/// [`iter::FuzzyMatchExt`] API.
-pub fn match_list_indices<S1: AsRef<str>, S2: AsRef<str>>(
-    needle: S1,
-    haystacks: &[S2],
-    config: &Config,
-) -> Vec<MatchIndices> {
-    Matcher::new(needle.as_ref(), config).match_list_indices(haystacks)
-}
-
-/// Matches a list of haystacks in parallel on multiple real threads, returning a list of
-/// [`Match`] values. Threads work on 2048 item chunks, and the final result is ordered
-/// according to [`crate::Config::sort`]. The `threads` must be >0.
-///
-/// This API provides the most performant path when matching on lists.
-pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
-    needle: S1,
-    haystacks: &[S2],
-    config: &Config,
-    threads: usize,
-) -> Vec<Match> {
-    Matcher::new(needle.as_ref(), config).match_list_parallel(haystacks, threads)
-}
-
 /// Result of a fuzzy match, containing the score and index in the haystack
 #[derive(Debug, Clone, Copy, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
