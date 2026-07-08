@@ -19,6 +19,9 @@ let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
 let matches = match_list(needle, &haystacks, &Config::default());
 // or in parallel (8 threads)
 let matches = match_list_parallel(needle, &haystacks, &Config::default(), 8);
+// or use a matching mode (fuzzy, substring, prefix, suffix, exact) based on the query
+// syntax, e.g. foo, 'foo, ^foo, foo$, ^foo$
+let matches = Matcher::from_query(needle).match_list(&haystacks);
 ```
 
 or use the slightly slower `fuzzy_match` iterator API
@@ -175,7 +178,7 @@ The parallel implementation uses work-stealing to distribute the work across thr
 
 ### Unicode
 
-Frizbee matches against UTF-8 bytes directly rather than converting to UTF-32 codepoints like Nucleo. This results in near-native performance without preprocessing or any extra memory usage. By default, with `config.unicode = UnicodeMatching::Smart`, the unicode path will only be taken when the needle contains non-ASCII characters.
+Frizbee matches against UTF-8 bytes directly rather than converting to UTF-32 codepoints like Nucleo. This results in near-native performance without preprocessing or any extra memory usage. By default, `Config::default()` uses `UnicodeMatching::Smart`, so the unicode path will only be taken when the needle contains non-ASCII characters.
 
 #### Prefiltering
 

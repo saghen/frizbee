@@ -1,5 +1,5 @@
 use criterion::BenchmarkId;
-use frizbee::{Config, Matcher, radix_sort_matches};
+use frizbee::{Config, Matcher, Matching, radix_sort_matches};
 use std::{
     hint::black_box,
     sync::Arc,
@@ -95,6 +95,7 @@ fn match_list_bench_impl(
             BenchmarkInput::SequentialAndParallel { .. } => BenchmarkId::new(name, "Sequential"),
         }
     };
+    let is_sequential_and_parallel = matches!(input, BenchmarkInput::SequentialAndParallel { .. });
 
     group.throughput(criterion::Throughput::Bytes(size as u64));
 
@@ -129,44 +130,27 @@ fn match_list_bench_impl(
             matches
         })
     });
+    if is_sequential_and_parallel {
+        group.bench_with_input(benchmark_id("Substring"), haystack, |b, haystack| {
+            let mut matcher =
+                Matcher::new(needle, &Config::default().matching(Matching::Substring));
+            b.iter(|| matcher.match_list(black_box(haystack)))
+        });
+    }
     group.bench_with_input(benchmark_id("All Scores"), haystack, |b, haystack| {
-        let mut matcher = Matcher::new(
-            needle,
-            &Config {
-                max_typos: None,
-                ..Default::default()
-            },
-        );
+        let mut matcher = Matcher::new(needle, &Config::default().max_typos(None));
         b.iter(|| matcher.match_list(black_box(haystack)))
     });
     group.bench_with_input(benchmark_id("1 Typo"), haystack, |b, haystack| {
-        let mut matcher = Matcher::new(
-            needle,
-            &Config {
-                max_typos: Some(1),
-                ..Default::default()
-            },
-        );
+        let mut matcher = Matcher::new(needle, &Config::default().max_typos(Some(1)));
         b.iter(|| matcher.match_list(black_box(haystack)))
     });
     group.bench_with_input(benchmark_id("2 Typos"), haystack, |b, haystack| {
-        let mut matcher = Matcher::new(
-            needle,
-            &Config {
-                max_typos: Some(2),
-                ..Default::default()
-            },
-        );
+        let mut matcher = Matcher::new(needle, &Config::default().max_typos(Some(2)));
         b.iter(|| matcher.match_list(black_box(haystack)))
     });
     group.bench_with_input(benchmark_id("3 Typos"), haystack, |b, haystack| {
-        let mut matcher = Matcher::new(
-            needle,
-            &Config {
-                max_typos: Some(3),
-                ..Default::default()
-            },
-        );
+        let mut matcher = Matcher::new(needle, &Config::default().max_typos(Some(3)));
         b.iter(|| matcher.match_list(black_box(haystack)))
     });
 
@@ -202,6 +186,15 @@ fn match_list_bench_impl(
             |b, haystack| b.iter(|| match_list_parallel(needle, haystack, Some(0))),
         );
         group.bench_with_input(
+            BenchmarkId::new("Substring", "Parallel (x8)"),
+            haystack,
+            |b, haystack| {
+                let mut matcher =
+                    Matcher::new(needle, &Config::default().matching(Matching::Substring));
+                b.iter(|| matcher.match_list_parallel(haystack, 8))
+            },
+        );
+        group.bench_with_input(
             BenchmarkId::new("All Scores", "Parallel (x8)"),
             haystack,
             |b, haystack| b.iter(|| match_list_parallel(needle, haystack, None)),
@@ -229,13 +222,11 @@ fn match_list_parallel(
     haystack: &[&str],
     max_typos: Option<u16>,
 ) -> Vec<frizbee::Match> {
+    let config = Config::default().max_typos(max_typos);
     frizbee::match_list_parallel(
         black_box(needle),
         black_box(haystack),
-        black_box(&Config {
-            max_typos,
-            ..Default::default()
-        }),
+        black_box(&config),
         8,
     )
 }

@@ -313,21 +313,15 @@ where
 
     #[inline(always)]
     fn guard_against_score_overflow(&self) {
+        // The largest bonus a matched character can earn on top of `match_score`: a gap-adjusted
+        // delimiter or half a capitalization bonus (whichever is larger), plus the case bonus.
         let scoring = &self.config.scoring;
-        let max_per_char_score = scoring.match_score
-            + scoring
-                .delimiter_bonus
-                .saturating_sub(scoring.gap_open_penalty)
-                .max(scoring.capitalization_bonus.div_ceil(2))
+        let max_bonus_per_char = scoring
+            .delimiter_bonus
+            .saturating_sub(scoring.gap_open_penalty)
+            .max(scoring.capitalization_bonus.div_ceil(2))
             + scoring.matching_case_bonus;
-        let max_needle_len =
-            (u16::MAX - scoring.prefix_bonus - scoring.exact_match_bonus) / max_per_char_score;
-        assert!(
-            self.needle.len() <= max_needle_len as usize,
-            "needle too long and could overflow the u16 score: {} > {}",
-            self.needle.len(),
-            max_needle_len
-        );
+        scoring.guard_against_score_overflow(self.needle.len(), max_bonus_per_char);
     }
 }
 
@@ -338,10 +332,7 @@ mod tests {
     #[test]
     fn unsorted_output_preserves_candidate_order() {
         let haystacks = ["foo", "nomatch", "xfoo", "f_o_o", "bar"];
-        let config = Config {
-            sort: false,
-            ..Config::default()
-        };
+        let config = Config::default().sort(false);
 
         let matches = match_list("foo", &haystacks, &config);
         assert_eq!(
@@ -356,10 +347,7 @@ mod tests {
     #[test]
     fn match_list_indices_reports_expected_public_indices() {
         let haystacks = ["xabcx", "a_b_c", "nomatch"];
-        let config = Config {
-            sort: false,
-            ..Config::default()
-        };
+        let config = Config::default().sort(false);
 
         let matches = match_list_indices("abc", &haystacks, &config);
         assert_eq!(matches.len(), 2);
@@ -372,10 +360,7 @@ mod tests {
     #[test]
     #[cfg(feature = "match_end_col")]
     fn filtered_match_end_col_uses_original_haystack_offsets() {
-        let config = Config {
-            sort: false,
-            ..Config::default()
-        };
+        let config = Config::default().sort(false);
 
         let matches = match_list("abc", &["xxabcxx"], &config);
         assert_eq!(matches.len(), 1);

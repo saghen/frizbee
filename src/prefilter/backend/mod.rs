@@ -15,6 +15,18 @@ mod sse;
 #[cfg(target_arch = "x86_64")]
 pub use avx::PrefilterAVX;
 
+// Low-level SIMD backends re-exported so other modules (e.g. the literal matcher) can build on
+// the raw byte-search primitives (`splat`/`occ`/`load`) directly.
+#[cfg(target_arch = "x86_64")]
+pub(crate) use avx::PrefilterAVXBackend;
+#[cfg(target_arch = "x86_64")]
+pub(crate) use avx512::PrefilterAVX512Backend;
+#[cfg(target_arch = "aarch64")]
+pub(crate) use neon::PrefilterNEONBackend;
+pub(crate) use scalar::PrefilterScalarBackend;
+#[cfg(target_arch = "x86_64")]
+pub(crate) use sse::PrefilterSSEBackend;
+
 #[cfg(target_arch = "x86_64")]
 pub type PrefilterAVX512 = Prefilter<avx512::PrefilterAVX512Backend>;
 #[cfg(target_arch = "aarch64")]

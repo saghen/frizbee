@@ -34,6 +34,10 @@
 //! let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
 //!
 //! let mut matcher = Matcher::new(needle, &Config::default());
+//! // or use a matching mode (fuzzy, substring, prefix, suffix, exact) based on the query
+//! // syntax, e.g. foo, 'foo, ^foo, foo$, ^foo$
+//! let mut matcher = Matcher::from_query(needle);
+//!
 //! let matches = matcher.match_list(&haystacks);
 //! ```
 //!
@@ -57,6 +61,7 @@ use serde::{Deserialize, Serialize};
 
 mod r#const;
 mod k_merge;
+mod literal;
 mod matcher;
 mod prefilter;
 mod smith_waterman;
@@ -129,6 +134,7 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
     Matcher::new(needle.as_ref(), config).match_list_parallel(haystacks, threads)
 }
 
+/// Result of a fuzzy match, containing the score and index in the haystack
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Match {
@@ -175,6 +181,8 @@ impl PartialEq for Match {
 }
 impl Eq for Match {}
 
+/// Like [`Match`] but includes the indices of the chars in the haystack that matched the needle in
+/// reverse order
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MatchIndices {
@@ -231,6 +239,11 @@ pub struct Config {
     /// Controls how unicode is handled while matching.
     #[cfg_attr(feature = "serde", serde(default))]
     pub unicode: UnicodeMatching,
+    /// Selects the matching algorithm: fuzzy (Smith-Waterman) or one of the literal modes
+    /// (exact, prefix, suffix, substring). Literal modes require the needle to appear as a
+    /// contiguous run of characters and do not support typos (`max_typos` is ignored).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub matching: Matching,
     /// Sort the results by score (descending)
     pub sort: bool,
     /// Controls the scoring used by the smith waterman algorithm. You may tweak these but pay
@@ -245,9 +258,48 @@ impl Default for Config {
             max_typos: Some(0),
             casing: CaseMatching::Ignore,
             unicode: UnicodeMatching::Smart,
+            matching: Matching::Fuzzy,
             sort: true,
             scoring: Scoring::default(),
         }
+    }
+}
+
+impl Config {
+    /// Sets the matching mode
+    pub fn matching(mut self, matching: Matching) -> Self {
+        self.matching = matching;
+        self
+    }
+
+    /// Sets the maximum number of typos allowed
+    pub fn max_typos(mut self, max_typos: Option<u16>) -> Self {
+        self.max_typos = max_typos;
+        self
+    }
+
+    /// Sets the casing mode
+    pub fn casing(mut self, casing: CaseMatching) -> Self {
+        self.casing = casing;
+        self
+    }
+
+    /// Sets the unicode mode
+    pub fn unicode(mut self, unicode: UnicodeMatching) -> Self {
+        self.unicode = unicode;
+        self
+    }
+
+    /// Sets whether to sort the results
+    pub fn sort(mut self, sort: bool) -> Self {
+        self.sort = sort;
+        self
+    }
+
+    /// Sets the scoring
+    pub fn scoring(mut self, scoring: Scoring) -> Self {
+        self.scoring = scoring;
+        self
     }
 }
 
@@ -298,6 +350,39 @@ impl UnicodeMatching {
     }
 }
 
+/// Selects the matching algorithm
+///
+/// [`Matching::Fuzzy`] uses the Smith-Waterman algorithm (with typos, gaps and substitutions)
+/// [`Matching::Exact`] matches the haystack exactly
+/// [`Matching::Prefix`] matches the haystack if it starts with the needle
+/// [`Matching::Suffix`] matches the haystack if it ends with the needle
+/// [`Matching::Substring`] matches the haystack if it contains the needle
+///
+/// Only the [`Matching::Fuzzy`] mode supports typos
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum Matching {
+    /// Smith-Waterman fuzzy matching (the default)
+    #[default]
+    Fuzzy,
+    /// The haystack must equal the needle
+    Exact,
+    /// The haystack must start with the needle
+    Prefix,
+    /// The haystack must end with the needle
+    Suffix,
+    /// The needle must appear somewhere in the haystack. When it appears more than once, the
+    /// highest-scoring occurrence is used, preferring earlier matches on tie
+    Substring,
+}
+
+impl Matching {
+    #[inline(always)]
+    pub(crate) fn is_fuzzy(self) -> bool {
+        matches!(self, Matching::Fuzzy)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
@@ -339,5 +424,19 @@ impl Default for Scoring {
             exact_match_bonus: EXACT_MATCH_BONUS,
             delimiter_bonus: DELIMITER_BONUS,
         }
+    }
+}
+
+impl Scoring {
+    /// Panics if a needle of `needle_len` bytes could overflow the `u16` score. `max_bonus_per_char`
+    /// is the largest bonus a single matched character can add on top of `match_score`; it differs
+    /// between the fuzzy and literal scorers, so each passes its own.
+    pub(crate) fn guard_against_score_overflow(&self, needle_len: usize, max_bonus_per_char: u16) {
+        let max_per_char = self.match_score + max_bonus_per_char;
+        let max_needle_len = (u16::MAX - self.prefix_bonus - self.exact_match_bonus) / max_per_char;
+        assert!(
+            needle_len <= max_needle_len as usize,
+            "needle too long and could overflow the u16 score: {needle_len} > {max_needle_len}"
+        );
     }
 }

@@ -113,10 +113,7 @@ mod tests {
             haystacks[index] = value.to_string();
         }
 
-        let config = Config {
-            sort: true,
-            ..Config::default()
-        };
+        let config = Config::default().sort(true);
         let sequential = match_list("abc", &haystacks, &config);
         assert!(sequential.is_sorted());
 

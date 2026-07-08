@@ -154,11 +154,7 @@ mod tests {
     fn fuzzy_match_matches_match_iter() {
         for needle in ["deadbe", "é다😀"] {
             for max_typos in [None, Some(0), Some(1), Some(2), Some(3)] {
-                let config = Config {
-                    max_typos,
-                    sort: false,
-                    ..Config::default()
-                };
+                let config = Config::default().max_typos(max_typos).sort(false);
                 let from_ext = HAYSTACKS
                     .iter()
                     .fuzzy_match(needle, &config)
@@ -178,11 +174,7 @@ mod tests {
     fn fuzzy_match_indices_matches_match_iter_indices() {
         for needle in ["deadbe", "é다😀"] {
             for max_typos in [None, Some(0), Some(1), Some(2), Some(3)] {
-                let config = Config {
-                    max_typos,
-                    sort: false,
-                    ..Config::default()
-                };
+                let config = Config::default().max_typos(max_typos).sort(false);
                 let from_ext = HAYSTACKS
                     .iter()
                     .fuzzy_match_indices(needle, &config)
@@ -226,14 +218,7 @@ mod tests {
         let scores = HAYSTACKS
             .iter()
             .filter(|h| !h.starts_with("no"))
-            .fuzzy_match(
-                "deadbe",
-                &Config {
-                    max_typos: Some(0),
-                    sort: false,
-                    ..Config::default()
-                },
-            )
+            .fuzzy_match("deadbe", &Config::default().max_typos(Some(0)).sort(false))
             .map(|m| m.index)
             .collect::<Vec<_>>();
         assert!(!scores.is_empty());

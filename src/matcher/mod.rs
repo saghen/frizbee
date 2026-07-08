@@ -1,8 +1,14 @@
 use crate::smith_waterman::score_fits_in_u8;
 use crate::sort::radix_sort_matches;
-use crate::{Config, Match, MatchIndices};
+use crate::{Config, Match, MatchIndices, Matching};
 
-mod algo;
+#[cfg(target_arch = "aarch64")]
+use crate::literal::LiteralNEON;
+use crate::literal::LiteralScalar;
+#[cfg(target_arch = "x86_64")]
+use crate::literal::{LiteralAVX, LiteralAVX512, LiteralSSE};
+
+pub(crate) mod algo;
 mod backend;
 mod iter;
 mod parallel;
@@ -10,6 +16,7 @@ use algo::{MANY_TYPOS, NO_PREFILTER, Specialized};
 use backend::*;
 pub use iter::{FuzzyMatch, FuzzyMatchExt, FuzzyMatchIndices};
 
+/// Primary entrypoint for fuzzy matching
 #[derive(Debug, Clone)]
 pub struct Matcher {
     needle: String,
@@ -40,6 +47,15 @@ macro_rules! dispatch {
             MatcherBackend::NEON($m) => $body,
             MatcherBackend::ScalarU8($m) => $body,
             MatcherBackend::Scalar($m) => $body,
+            #[cfg(target_arch = "x86_64")]
+            MatcherBackend::LiteralAVX512($m) => $body,
+            #[cfg(target_arch = "x86_64")]
+            MatcherBackend::LiteralAVX($m) => $body,
+            #[cfg(target_arch = "x86_64")]
+            MatcherBackend::LiteralSSE($m) => $body,
+            #[cfg(target_arch = "aarch64")]
+            MatcherBackend::LiteralNEON($m) => $body,
+            MatcherBackend::LiteralScalar($m) => $body,
         }
     };
 }
@@ -73,6 +89,55 @@ impl Matcher {
             config: config.clone(),
             needs_unicode: config.unicode.respects_unicode_for(needle),
         }
+    }
+
+    /// Creates a matcher from a given query string, where special syntax changes
+    /// the matching mode
+    ///
+    /// `foo` - Matching::Fuzzy
+    /// `^foo` - Matching::Prefix
+    /// `foo$` - Matching::Suffix
+    /// `'foo` - Matching::Substring
+    /// `^foo$` - Matching::Exact
+    ///
+    /// Any special character can be escaped with a backslash, e.g. `\^foo`,
+    /// `foo\$` or `\'foo` match the literal leading/trailing character.
+    pub fn from_query(query: &str) -> Self {
+        let mut needle = query;
+        let mut prefix = false;
+        let mut suffix = false;
+        let mut substring = false;
+
+        // Leading
+        if let Some(rest) = needle.strip_prefix('^') {
+            needle = rest;
+            prefix = true;
+        } else if let Some(rest) = needle.strip_prefix('\'') {
+            needle = rest;
+            substring = true;
+        } else if needle.starts_with("\\^") || needle.starts_with("\\'") {
+            needle = &needle[1..]; // drop the backslash, keep the literal char
+        }
+
+        // Trailing
+        let needle = if let Some(head) = needle.strip_suffix("\\$") {
+            format!("{head}$") // drop the backslash, keep the literal `$`
+        } else if let Some(head) = needle.strip_suffix('$') {
+            suffix = true;
+            head.to_string()
+        } else {
+            needle.to_string()
+        };
+
+        let mode = match (prefix, suffix, substring) {
+            (true, true, _) => Matching::Exact,
+            (true, false, _) => Matching::Prefix,
+            (false, true, _) => Matching::Suffix,
+            (false, false, true) => Matching::Substring,
+            _ => Matching::Fuzzy,
+        };
+
+        Self::new(&needle, &Config::default().matching(mode))
     }
 
     pub fn config(&self) -> &Config {
@@ -288,6 +353,10 @@ impl Matcher {
     }
 
     fn get_backend(needle: &str, config: &Config) -> MatcherBackend {
+        if !config.matching.is_fuzzy() {
+            return Self::get_literal_backend(needle, config);
+        }
+
         let use_u8 = score_fits_in_u8(needle.len(), &config.scoring);
 
         #[cfg(target_arch = "x86_64")]
@@ -334,6 +403,32 @@ impl Matcher {
             MatcherBackend::Scalar(unsafe { MatcherScalar::build(needle, config) })
         }
     }
+
+    fn get_literal_backend(needle: &str, config: &Config) -> MatcherBackend {
+        #[cfg(target_arch = "x86_64")]
+        {
+            if LiteralAVX512::is_available() {
+                return MatcherBackend::LiteralAVX512(unsafe {
+                    LiteralAVX512::build(needle, config)
+                });
+            }
+            if LiteralAVX::is_available() {
+                return MatcherBackend::LiteralAVX(unsafe { LiteralAVX::build(needle, config) });
+            }
+            if LiteralSSE::is_available() {
+                return MatcherBackend::LiteralSSE(unsafe { LiteralSSE::build(needle, config) });
+            }
+        }
+
+        #[cfg(target_arch = "aarch64")]
+        {
+            if LiteralNEON::is_available() {
+                return MatcherBackend::LiteralNEON(unsafe { LiteralNEON::build(needle, config) });
+            }
+        }
+
+        MatcherBackend::LiteralScalar(unsafe { LiteralScalar::build(needle, config) })
+    }
 }
 
 #[cfg(test)]
@@ -341,15 +436,34 @@ mod tests {
     use super::*;
     use crate::{CaseMatching, match_list};
 
+    fn assert_from_query(query: &str, needle: &str, matching: Matching) {
+        let matcher = Matcher::from_query(query);
+        assert_eq!(matcher.needle(), needle);
+        assert_eq!(matcher.config().matching, matching);
+    }
+
+    #[test]
+    fn from_query_selects_matching_mode() {
+        assert_from_query("foo", "foo", Matching::Fuzzy);
+        assert_from_query("^foo", "foo", Matching::Prefix);
+        assert_from_query("foo$", "foo", Matching::Suffix);
+        assert_from_query("'foo", "foo", Matching::Substring);
+        assert_from_query("^foo$", "foo", Matching::Exact);
+    }
+
+    #[test]
+    fn from_query_escapes_special_syntax() {
+        assert_from_query("\\^foo", "^foo", Matching::Fuzzy);
+        assert_from_query("foo\\$", "foo$", Matching::Fuzzy);
+        assert_from_query("\\'foo", "'foo", Matching::Fuzzy);
+    }
+
     #[test]
     fn test_basic() {
         let needle = "deadbe";
         let haystack = vec!["deadbeef", "deadbf", "deadbeefg", "deadbe"];
 
-        let config = Config {
-            max_typos: None,
-            ..Config::default()
-        };
+        let config = Config::default().max_typos(None);
         let matches = match_list(needle, &haystack, &config);
 
         println!("{:?}", matches);
@@ -365,14 +479,7 @@ mod tests {
         let needle = "deadbe";
         let haystack = vec!["deadbeef", "deadbf", "deadbeefg", "deadbe"];
 
-        let matches = match_list(
-            needle,
-            &haystack,
-            &Config {
-                max_typos: Some(0),
-                ..Config::default()
-            },
-        );
+        let matches = match_list(needle, &haystack, &Config::default().max_typos(Some(0)));
         assert_eq!(matches.len(), 3);
     }
 
@@ -415,10 +522,7 @@ mod tests {
 
     #[test]
     fn test_small_needle() {
-        let config = Config {
-            max_typos: Some(2),
-            ..Config::default()
-        };
+        let config = Config::default().max_typos(Some(2));
         let matches = match_list("1", &["1"], &config);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].index, 0);
@@ -428,10 +532,7 @@ mod tests {
     #[test]
     fn test_case_sensitive_matching() {
         let haystack = ["foo", "FOO", "fOo", "xxfooxx"];
-        let config = Config {
-            sort: false,
-            ..Config::default()
-        };
+        let config = Config::default().sort(false);
 
         let matches = match_list("foo", &haystack, &config);
         assert_eq!(
@@ -439,11 +540,7 @@ mod tests {
             vec![0, 1, 2, 3]
         );
 
-        let config = Config {
-            casing: CaseMatching::Respect,
-            sort: false,
-            ..Config::default()
-        };
+        let config = Config::default().casing(CaseMatching::Respect).sort(false);
 
         let matches = match_list("foo", &haystack, &config);
         assert_eq!(
@@ -457,11 +554,7 @@ mod tests {
             vec![0, 3]
         );
 
-        let config = Config {
-            casing: CaseMatching::Smart,
-            sort: false,
-            ..Config::default()
-        };
+        let config = Config::default().casing(CaseMatching::Smart).sort(false);
 
         let matches = match_list("FoO", &["foo", "FOO", "FoO", "xxFoOxx"], &config);
         assert_eq!(
@@ -483,11 +576,7 @@ mod tests {
         ];
         for needle in ["deadbe", "é다😀"] {
             for max_typos in [None, Some(0), Some(1), Some(2), Some(3)] {
-                let config = Config {
-                    max_typos,
-                    sort: false,
-                    ..Config::default()
-                };
+                let config = Config::default().max_typos(max_typos).sort(false);
                 let mut matcher = Matcher::new(needle, &config);
                 let from_iter = matcher.match_iter(haystacks.iter()).collect::<Vec<_>>();
                 let from_list = matcher.match_list(&haystacks);
@@ -523,11 +612,7 @@ mod tests {
         ];
         for needle in ["deadbe", "é다😀"] {
             for max_typos in [None, Some(0), Some(1), Some(2), Some(3)] {
-                let config = Config {
-                    max_typos,
-                    sort: false,
-                    ..Config::default()
-                };
+                let config = Config::default().max_typos(max_typos).sort(false);
                 let mut matcher = Matcher::new(needle, &config);
                 let from_iter = matcher
                     .match_iter_indices(haystacks.iter())
@@ -617,11 +702,7 @@ mod tests {
             "abcdefghijklmnopqrst".to_string(),
             "no-match".to_string(),
         ];
-        let first_config = Config {
-            max_typos: None,
-            sort: false,
-            ..Config::default()
-        };
+        let first_config = Config::default().max_typos(None).sort(false);
         let mut matcher = Matcher::new(long_needle, &first_config);
 
         let first = matcher.match_list(&first_haystacks);
@@ -637,11 +718,7 @@ mod tests {
             "bar".to_string(),
         ];
         matcher.set_needle("fB");
-        let second_config = Config {
-            casing: CaseMatching::Smart,
-            sort: false,
-            ..Config::default()
-        };
+        let second_config = Config::default().casing(CaseMatching::Smart).sort(false);
         matcher.set_config(second_config.clone());
         let second = matcher.match_list(&second_haystacks);
         assert_eq!(
@@ -656,11 +733,7 @@ mod tests {
             "plain ascii".to_string(),
         ];
         matcher.set_needle("é다😀");
-        let unicode_config = Config {
-            max_typos: Some(0),
-            sort: false,
-            ..Config::default()
-        };
+        let unicode_config = Config::default().max_typos(Some(0)).sort(false);
         matcher.set_config(unicode_config.clone());
         let unicode = matcher.match_list(&unicode_haystacks);
         assert_eq!(
@@ -669,12 +742,10 @@ mod tests {
         );
 
         matcher.set_needle("fB");
-        let third_config = Config {
-            casing: CaseMatching::Ignore,
-            max_typos: Some(1),
-            sort: true,
-            ..Config::default()
-        };
+        let third_config = Config::default()
+            .casing(CaseMatching::Ignore)
+            .max_typos(Some(1))
+            .sort(true);
         matcher.set_config(third_config.clone());
         let third = matcher.match_list(&first_haystacks);
         assert_eq!(&third, &match_list("fB", &first_haystacks, &third_config));
@@ -683,11 +754,7 @@ mod tests {
     #[test]
     #[cfg(feature = "match_end_col")]
     fn test_match_end_col_through_match_list() {
-        let config = Config {
-            max_typos: None,
-            sort: false,
-            ..Config::default()
-        };
+        let config = Config::default().max_typos(None).sort(false);
         let matches = match_list("abc", &["xabcx", "abcdef", "xxabc"], &config);
         assert_eq!(matches.len(), 3);
         assert_eq!(matches[0].end_col, 3);

@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use frizbee::{
-    CaseMatching, Config, Match, MatchIndices, Matcher, Scoring, match_list, match_list_indices,
-    match_list_parallel,
+    CaseMatching, Config, Match, MatchIndices, Matcher, Matching, Scoring, match_list,
+    match_list_indices, match_list_parallel,
 };
 
 // Did you know you could do this?? News to me
@@ -42,16 +42,22 @@ impl ApiCase {
             1 => CaseMatching::Smart,
             _ => CaseMatching::Respect,
         };
+        let matching = match cursor.next() % 5 {
+            0 => Matching::Fuzzy,
+            1 => Matching::Exact,
+            2 => Matching::Prefix,
+            3 => Matching::Suffix,
+            _ => Matching::Substring,
+        };
 
         Self {
             needle: cursor.string(needle_len),
             haystacks,
-            config: Config {
-                max_typos,
-                casing,
-                sort: cursor.bool(),
-                ..Config::default()
-            },
+            config: Config::default()
+                .max_typos(max_typos)
+                .casing(casing)
+                .matching(matching)
+                .sort(cursor.bool()),
         }
     }
 }
@@ -143,7 +149,7 @@ fn assert_indices_contract(case: &ApiCase, matches: &[Match], indices: &[MatchIn
         }
     }
 
-    if case.config.max_typos.is_none() {
+    if case.config.max_typos.is_none() || case.config.matching != Matching::Fuzzy {
         assert_eq!(
             indices_set, match_set,
             "indices and matches should agree exactly without typo filtering for {case:?}"
@@ -258,11 +264,7 @@ fn unicode_matcher_zero_typo_uses_byte_offsets_and_exact_flags() {
         "nomatch".to_string(),
         "x".repeat(65),
     ];
-    let config = Config {
-        max_typos: Some(0),
-        sort: false,
-        ..Config::default()
-    };
+    let config = Config::default().max_typos(Some(0)).sort(false);
 
     let matches = match_list("إن", &haystacks, &config);
     let mut matcher = Matcher::new("إن", &config);
@@ -289,11 +291,7 @@ fn unicode_matcher_zero_typo_uses_byte_offsets_and_exact_flags() {
 
 #[test]
 fn unicode_matcher_indices_cover_gaps_and_chunk_boundaries() {
-    let config = Config {
-        max_typos: None,
-        sort: false,
-        ..Config::default()
-    };
+    let config = Config::default().max_typos(None).sort(false);
 
     let gap_haystacks = ["é😀x"];
     let gap_matches = match_list("éx", &gap_haystacks, &config);
@@ -319,20 +317,12 @@ fn unicode_matcher_indices_cover_gaps_and_chunk_boundaries() {
 #[test]
 fn unicode_matcher_typo_prefilter_counts_scalar_values() {
     let haystacks = ["ن", "😀", "x"];
-    let config = Config {
-        max_typos: Some(1),
-        sort: false,
-        ..Config::default()
-    };
+    let config = Config::default().max_typos(Some(1)).sort(false);
 
     let matches = match_list("إن", &haystacks, &config);
     assert_eq!(match_indices(&matches), vec![0]);
 
-    let many_typo_config = Config {
-        max_typos: Some(2),
-        sort: false,
-        ..Config::default()
-    };
+    let many_typo_config = Config::default().max_typos(Some(2)).sort(false);
     let matches = match_list("éन😀", &haystacks, &many_typo_config);
     assert_eq!(match_indices(&matches), vec![1]);
 }
@@ -340,20 +330,13 @@ fn unicode_matcher_typo_prefilter_counts_scalar_values() {
 #[test]
 fn case_matching_modes_apply_to_matches_and_indices() {
     let haystacks = ["foo", "FOO", "fOo", "xxfooxx"];
-    let config = Config {
-        sort: false,
-        ..Config::default()
-    };
+    let config = Config::default().sort(false);
     assert_eq!(
         match_indices(&match_list("foo", &haystacks, &config)),
         vec![0, 1, 2, 3]
     );
 
-    let config = Config {
-        casing: CaseMatching::Respect,
-        sort: false,
-        ..Config::default()
-    };
+    let config = Config::default().casing(CaseMatching::Respect).sort(false);
     assert_eq!(
         match_indices(&match_list("foo", &haystacks, &config)),
         vec![0, 3]
@@ -366,11 +349,7 @@ fn case_matching_modes_apply_to_matches_and_indices() {
         vec![0, 3]
     );
 
-    let config = Config {
-        casing: CaseMatching::Smart,
-        sort: false,
-        ..Config::default()
-    };
+    let config = Config::default().casing(CaseMatching::Smart).sort(false);
     assert_eq!(
         match_indices(&match_list(
             "FoO",
@@ -413,10 +392,7 @@ fn parallel_chunk_boundaries_match_sequential() {
         ],
     );
 
-    let sorted = Config {
-        sort: true,
-        ..Config::default()
-    };
+    let sorted = Config::default().sort(true);
     let sequential = match_list("abc", &haystacks, &sorted);
     let parallel_one = match_list_parallel("abc", &haystacks, &sorted, 1);
     assert_match_views_eq("single-thread chunk boundary", &parallel_one, &sequential);
@@ -424,10 +400,7 @@ fn parallel_chunk_boundaries_match_sequential() {
     let parallel = match_list_parallel("abc", &haystacks, &sorted, 8);
     assert_match_views_eq("sorted chunk boundary", &parallel, &sequential);
 
-    let unsorted = Config {
-        sort: false,
-        ..Config::default()
-    };
+    let unsorted = Config::default().sort(false);
     let sequential = match_list("abc", &haystacks, &unsorted);
     let parallel = match_list_parallel("abc", &haystacks, &unsorted, 8);
     assert_eq!(
@@ -440,10 +413,7 @@ fn parallel_chunk_boundaries_match_sequential() {
 fn sorted_parallel_equal_scores_use_index_tiebreaking_across_chunks() {
     let haystacks = haystacks_with(4097, &[(2047, "abc"), (2048, "abc"), (4096, "abc")]);
 
-    let config = Config {
-        sort: true,
-        ..Config::default()
-    };
+    let config = Config::default().sort(true);
     let sequential = match_list("abc", &haystacks, &config);
     assert_eq!(match_indices(&sequential), vec![2047, 2048, 4096]);
 
@@ -454,10 +424,7 @@ fn sorted_parallel_equal_scores_use_index_tiebreaking_across_chunks() {
 #[test]
 fn public_indices_are_reverse_byte_offsets() {
     let haystacks = ["xabcx", "a_b_c", "nomatch"];
-    let config = Config {
-        sort: false,
-        ..Config::default()
-    };
+    let config = Config::default().sort(false);
 
     let matches = match_list_indices("abc", &haystacks, &config);
     assert_eq!(matches.len(), 2);
@@ -470,11 +437,7 @@ fn public_indices_are_reverse_byte_offsets() {
 #[test]
 #[cfg(feature = "match_end_col")]
 fn match_end_col_survives_prefilter_offsets() {
-    let config = Config {
-        max_typos: None,
-        sort: false,
-        ..Config::default()
-    };
+    let config = Config::default().max_typos(None).sort(false);
     let matches = match_list("abc", &["xabcx", "abcdef", "xxabc"], &config);
     assert_eq!(matches.len(), 3);
     assert_eq!(matches[0].end_col, 3);
@@ -484,14 +447,11 @@ fn match_end_col_survives_prefilter_offsets() {
 
 #[test]
 fn custom_scoring_stays_within_overflow_guard() {
-    let config = Config {
-        scoring: Scoring {
-            match_score: 8,
-            matching_case_bonus: 1,
-            ..Scoring::default()
-        },
-        ..Config::default()
-    };
+    let config = Config::default().scoring(Scoring {
+        match_score: 8,
+        matching_case_bonus: 1,
+        ..Scoring::default()
+    });
     let matches = match_list("abc", &["abc", "a_b_c"], &config);
     assert_eq!(matches.len(), 2);
 }
