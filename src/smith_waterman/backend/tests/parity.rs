@@ -128,7 +128,7 @@ fn score_with<B: Backend>(needle: &str, haystack: &str) -> u16 {
     matcher.score_haystack(haystack.as_bytes(), true)
 }
 
-fn indices_with<B: Backend>(needle: &str, haystack: &str) -> Option<Vec<usize>> {
+fn indices_with<B: Backend>(needle: &str, haystack: &str) -> Option<Vec<u32>> {
     let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), false);
     matcher
         .score_haystack_indices(haystack.as_bytes(), 0, None)
@@ -149,7 +149,7 @@ fn assert_indices_backend<B: Backend>(
     label: &str,
     needle: &str,
     haystack: &str,
-    want: Option<Vec<usize>>,
+    want: Option<Vec<u32>>,
 ) {
     if B::is_available() {
         let got = indices_with::<B>(needle, haystack);
@@ -218,7 +218,7 @@ fn indices_bytes_with<B: Backend>(
     haystack: &[u8],
     max_typos: Option<u16>,
     case_sensitive: bool,
-) -> Option<(u16, Vec<usize>)> {
+) -> Option<(u16, Vec<u32>)> {
     let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), case_sensitive);
     matcher.score_haystack_indices(haystack, 0, max_typos)
 }
@@ -278,7 +278,7 @@ fn assert_backend_matches_reference<B: Backend, R: Backend>(
 }
 
 /// Structural invariants that hold for any backend's returned indices.
-fn assert_indices_valid(label: &str, needle: &str, haystack: &[u8], indices: &[usize]) {
+fn assert_indices_valid(label: &str, needle: &str, haystack: &[u8], indices: &[u32]) {
     assert!(
         indices.windows(2).all(|window| window[0] > window[1]),
         "{} indices are not in reverse order: {:?}",
@@ -294,7 +294,7 @@ fn assert_indices_valid(label: &str, needle: &str, haystack: &[u8], indices: &[u
     );
     for &index in indices {
         assert!(
-            index < haystack.len(),
+            (index as usize) < haystack.len(),
             "{} index {} is out of bounds for haystack_len={}",
             label,
             index,

@@ -51,7 +51,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         haystack: &[u8],
         haystack_start_pos: usize,
         max_typos: Option<u16>,
-    ) -> Option<(u16, Vec<usize>)> {
+    ) -> Option<(u16, Vec<u32>)> {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(
                 self.needle.as_bytes(),
@@ -83,7 +83,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
                 Some(Alignment::Match((needle_idx, haystack_idx))) => {
                     let needle_char = self.needle.chars().nth(needle_idx).unwrap();
                     for byte in 0..needle_char.len_utf8() {
-                        indices.push(haystack_idx - byte);
+                        indices.push((haystack_idx - byte) as u32);
                     }
                 }
                 Some(_) => {}
@@ -103,7 +103,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         haystack: &[u8],
         haystack_start_pos: usize,
         max_typos: Option<u16>,
-    ) -> Option<(u16, Vec<usize>)> {
+    ) -> Option<(u16, Vec<u32>)> {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(
                 self.needle.as_bytes(),
@@ -140,7 +140,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
                 Some(Alignment::Match((needle_idx, haystack_idx))) => {
                     if prev_haystack_idx != haystack_idx {
                         let len = self.needle_unicode[needle_idx].len;
-                        indices.extend((0..len).rev().map(|offset| haystack_idx + offset));
+                        indices.extend((0..len).rev().map(|offset| (haystack_idx + offset) as u32));
                         prev_haystack_idx = haystack_idx;
                     }
                 }

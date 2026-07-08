@@ -142,7 +142,10 @@ impl<B: Backend> LiteralImpl<B> {
         let exact = pos == 0 && self.needle_len == haystack.len();
         // Every byte of the matched run is a matched index, but add in reverse order to match
         // the fuzzy matcher implementation
-        let indices = (pos..pos + self.needle_len).rev().collect();
+        let indices = (pos..pos + self.needle_len)
+            .rev()
+            .map(|i| i as u32)
+            .collect();
         Some(MatchIndices {
             index,
             score,

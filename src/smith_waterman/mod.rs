@@ -125,13 +125,13 @@ pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
         haystack: &[u8],
         haystack_start_pos: usize,
         max_typos: Option<u16>,
-    ) -> Option<(u16, Vec<usize>)>;
+    ) -> Option<(u16, Vec<u32>)>;
     fn score_haystack_unicode_indices(
         &mut self,
         haystack: &[u8],
         haystack_start_pos: usize,
         max_typos: Option<u16>,
-    ) -> Option<(u16, Vec<usize>)>;
+    ) -> Option<(u16, Vec<u32>)>;
     fn score_haystack(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16;
     fn score_haystack_unicode(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16;
     #[cfg(feature = "match_end_col")]
@@ -175,7 +175,7 @@ mod tests {
             .then_some(score)
     }
 
-    fn get_indices(needle: &str, haystack: &str) -> Option<Vec<usize>> {
+    fn get_indices(needle: &str, haystack: &str) -> Option<Vec<u32>> {
         let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
 
         matcher
@@ -183,7 +183,7 @@ mod tests {
             .map(|(_, indices)| indices)
     }
 
-    fn get_unicode_indices(needle: &str, haystack: &str) -> Option<Vec<usize>> {
+    fn get_unicode_indices(needle: &str, haystack: &str) -> Option<Vec<u32>> {
         let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
 
         matcher
@@ -475,7 +475,7 @@ mod tests {
     #[test]
     fn long_input_boundary_indices_stay_reverse_ordered() {
         for len in [1023, 1024, 1025] {
-            let haystack = format!("{}abc", "x".repeat(len - 3));
+            let haystack = format!("{}abc", "x".repeat((len - 3) as usize));
             assert_eq!(get_score("abc", &haystack), 3 * CHAR_SCORE, "len={len}");
             assert_eq!(
                 get_indices("abc", &haystack),

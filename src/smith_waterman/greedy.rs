@@ -9,7 +9,7 @@ pub fn match_greedy(
     haystack: &[u8],
     scoring: &Scoring,
     case_sensitive: bool,
-) -> Option<(u16, Vec<usize>)> {
+) -> Option<(u16, Vec<u32>)> {
     let needle = case_needle(needle, case_sensitive);
     if needle.len() > haystack.len() {
         return None;
@@ -74,7 +74,7 @@ pub fn match_greedy(
             previous_haystack_is_delimiter = delimiter_bonus_enabled && haystack_is_delimiter;
             previous_haystack_is_lower = haystack_is_lower;
 
-            indices.push(haystack_idx);
+            indices.push(haystack_idx as u32);
             haystack_idx += 1;
             continue 'outer;
         }

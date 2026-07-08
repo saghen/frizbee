@@ -101,7 +101,7 @@ mod backend_parity {
         needle: &str,
         haystack: &str,
         config: &Config,
-    ) -> (Option<(u16, bool)>, Option<Vec<usize>>) {
+    ) -> (Option<(u16, bool)>, Option<Vec<u32>>) {
         let mut matcher = unsafe { T::build(needle, config) };
         let (m, i) = if config.unicode.respects_unicode_for(needle) {
             (

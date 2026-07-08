@@ -192,14 +192,15 @@ pub struct MatchIndices {
     /// Matched the needle exactly (e.g. "foo" on "foo")
     pub exact: bool,
     /// Indices of the chars in the haystack that matched the needle in reverse order
-    pub indices: Vec<usize>,
+    pub indices: Vec<u32>,
 }
 
 impl MatchIndices {
     pub fn from_index(index: usize) -> Self {
         Self {
             score: 0,
-            index: index as u32,
+            index: u32::try_from(index)
+                .expect("too many items in haystack, will overflow the u32 index"),
             exact: false,
             indices: vec![],
         }
