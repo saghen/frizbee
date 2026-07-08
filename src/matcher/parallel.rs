@@ -67,18 +67,10 @@ impl Matcher {
                 })
                 .collect();
 
-            if matcher.config.sort {
-                k_merge_matches(
-                    handles
-                        .into_iter()
-                        .map(|h| h.join().unwrap())
-                        .collect::<Vec<_>>(),
-                )
+            if matcher.config.sort == SortStrategy::Score {
+                k_merge_matches(handles.into_iter().map(|h| h.join().unwrap()).collect())
             } else {
-                handles
-                    .into_iter()
-                    .flat_map(|h| h.join().unwrap())
-                    .collect()
+                k_merge_matches_by_index(handles.into_iter().map(|h| h.join().unwrap()).collect())
             }
         })
     }
