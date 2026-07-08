@@ -1,6 +1,6 @@
 use crate::smith_waterman::score_fits_in_u8;
 use crate::sort::radix_sort_matches;
-use crate::{Config, Match, MatchIndices, Matching, SortStrategy};
+use crate::{Config, Match, MatchIndices, Pattern, SortStrategy};
 
 #[cfg(target_arch = "aarch64")]
 use crate::literal::LiteralNEON;
@@ -15,15 +15,6 @@ mod parallel;
 use algo::{MANY_TYPOS, NO_PREFILTER, Specialized};
 use backend::*;
 pub use iter::{FuzzyMatch, FuzzyMatchExt, FuzzyMatchIndices};
-
-/// Primary entrypoint for fuzzy matching
-#[derive(Debug, Clone)]
-pub struct Matcher {
-    needle: String,
-    config: Config,
-    backend: MatcherBackend,
-    needs_unicode: bool,
-}
 
 /// Many variants so we use a macro to expand to the correct impl
 macro_rules! dispatch {
@@ -81,93 +72,116 @@ macro_rules! dispatch_typos {
     };
 }
 
+mod multi;
+use multi::{CompiledPattern, CompiledPatterns};
+
+/// Primary entrypoint for fuzzy matching
+#[derive(Debug, Clone)]
+pub struct Matcher {
+    config: Config,
+    raw_patterns: Vec<Pattern>,
+    patterns: CompiledPatterns,
+}
+
 impl Matcher {
-    pub fn new(needle: &str, config: &Config) -> Self {
+    /// Creates a matcher from a single [`Pattern`]. Strings convert into a pattern
+    /// that matches literally. Use [`Pattern::parse`] for query syntax, and
+    /// [`Matcher::from_patterns`] or [`Matcher::from_query`] for multi-pattern queries.
+    pub fn new(pattern: impl Into<Pattern>, config: &Config) -> Self {
+        Self::from_patterns(&[pattern.into()], config)
+    }
+
+    /// Creates a matcher from a list of [`Pattern`]s (see [`Pattern::parse_query`]),
+    /// matched independently. A haystack matches when all of the patterns match where
+    /// the score is the sum of each pattern's score.
+    ///
+    /// ```
+    /// use frizbee::{Config, Matcher, Pattern};
+    ///
+    /// let mut matcher = Matcher::from_patterns(&Pattern::parse_query("foo !^bar"), &Config::default());
+    /// let matches = matcher.match_list(&["foo", "barfoo", "foobar"]);
+    /// assert_eq!(matches.len(), 2); // "barfoo" starts with "bar"
+    /// ```
+    pub fn from_patterns(patterns: &[Pattern], config: &Config) -> Self {
         Self {
-            backend: Self::get_backend(needle, config),
-            needle: needle.to_string(),
+            patterns: Self::build_patterns(patterns, config),
+            raw_patterns: patterns.to_vec(),
             config: config.clone(),
-            needs_unicode: config.unicode.respects_unicode_for(needle),
         }
     }
 
-    /// Creates a matcher from a given query string, where special syntax changes
-    /// the matching mode
+    /// Shorthand for calling [`Matcher::from_patterns`] with [`Pattern::parse_query`].
     ///
-    /// `foo` - Matching::Fuzzy
-    /// `^foo` - Matching::Prefix
-    /// `foo$` - Matching::Suffix
-    /// `'foo` - Matching::Substring
-    /// `^foo$` - Matching::Exact
+    /// ```rust
+    /// use frizbee::{Config, Matcher};
     ///
-    /// Any special character can be escaped with a backslash, e.g. `\^foo`,
-    /// `foo\$` or `\'foo` match the literal leading/trailing character.
-    pub fn from_query(query: &str) -> Self {
-        let mut needle = query;
-        let mut prefix = false;
-        let mut suffix = false;
-        let mut substring = false;
+    /// let mut matcher = Matcher::from_query("foo !^bar", &Config::default());
+    /// let matches = matcher.match_list(&["foo", "barfoo", "foobar"]);
+    /// assert_eq!(matches.len(), 2); // "barfoo" starts with "bar"
+    /// ```
+    pub fn from_query(query: &str, config: &Config) -> Self {
+        Self::from_patterns(&Pattern::parse_query(query), config)
+    }
 
-        // Leading
-        if let Some(rest) = needle.strip_prefix('^') {
-            needle = rest;
-            prefix = true;
-        } else if let Some(rest) = needle.strip_prefix('\'') {
-            needle = rest;
-            substring = true;
-        } else if needle.starts_with("\\^") || needle.starts_with("\\'") {
-            needle = &needle[1..]; // drop the backslash, keep the literal char
-        }
-
-        // Trailing
-        let needle = if let Some(head) = needle.strip_suffix("\\$") {
-            format!("{head}$") // drop the backslash, keep the literal `$`
-        } else if let Some(head) = needle.strip_suffix('$') {
-            suffix = true;
-            head.to_string()
-        } else {
-            needle.to_string()
-        };
-
-        let mode = match (prefix, suffix, substring) {
-            (true, true, _) => Matching::Exact,
-            (true, false, _) => Matching::Prefix,
-            (false, true, _) => Matching::Suffix,
-            (false, false, true) => Matching::Substring,
-            _ => Matching::Fuzzy,
-        };
-
-        Self::new(&needle, &Config::default().matching(mode))
+    pub fn patterns(&self) -> &[Pattern] {
+        &self.raw_patterns
     }
 
     pub fn config(&self) -> &Config {
         &self.config
     }
 
-    pub fn needle(&self) -> &str {
-        &self.needle
-    }
-
-    /// Updates the config and rebuilds the internal matcher backend.
+    /// Updates the config and rebuilds the internal matcher backends.
     /// Skipped if the config is the same as the previous one.
     pub fn set_config(&mut self, config: Config) {
         if self.config == config {
             return;
         }
         self.config = config;
-        self.needs_unicode = self.config.unicode.respects_unicode_for(&self.needle);
-        self.backend = Self::get_backend(&self.needle, &self.config);
+        self.patterns = Self::build_patterns(&self.raw_patterns, &self.config);
     }
 
-    /// Updates the needle string and rebuilds the internal matcher backend.
-    /// Skipped if the needle is the same as the previous one.
-    pub fn set_needle(&mut self, needle: &str) {
-        if self.needle == needle {
+    /// Updates the pattern, as in [`Matcher::new`], and rebuilds the internal matcher
+    /// backend. Skipped if the pattern is the same as the previous one.
+    pub fn set_pattern(&mut self, pattern: impl Into<Pattern>) {
+        self.set_patterns(&[pattern.into()]);
+    }
+
+    /// Updates the patterns, as in [`Matcher::from_patterns`], and rebuilds the internal
+    /// matcher backends. Skipped if the patterns are the same as the previous ones.
+    pub fn set_patterns(&mut self, patterns: &[Pattern]) {
+        if self.raw_patterns == patterns {
             return;
         }
-        self.needle = needle.to_string();
-        self.needs_unicode = self.config.unicode.respects_unicode_for(needle);
-        self.backend = Self::get_backend(&self.needle, &self.config);
+        self.raw_patterns = patterns.to_vec();
+        self.patterns = Self::build_patterns(&self.raw_patterns, &self.config);
+    }
+
+    fn build_patterns(sources: &[Pattern], config: &Config) -> CompiledPatterns {
+        let mut compiled = sources
+            .iter()
+            .filter_map(|source| Self::compile(source, config))
+            .collect::<Vec<_>>();
+        match compiled.as_slice() {
+            [] => CompiledPatterns::Empty,
+            [single] if !single.negated => CompiledPatterns::Single(compiled.pop().unwrap()),
+            _ => CompiledPatterns::Multi(compiled),
+        }
+    }
+
+    /// Builds the backend for a pattern, resolving the matching mode from the config
+    /// when the pattern doesn't specify one. Returns `None` for empty needles.
+    fn compile(source: &Pattern, config: &Config) -> Option<CompiledPattern> {
+        if source.needle.is_empty() {
+            return None;
+        }
+        let matching = source.matching.unwrap_or(config.matching);
+        let config = config.clone().matching(matching);
+        Some(CompiledPattern {
+            negated: source.negated,
+            needs_unicode: config.unicode.respects_unicode_for(&source.needle),
+            backend: Self::get_backend(&source.needle, &config),
+        })
     }
 
     /// Matches a list of haystacks, returning a list of [`Match`] values.
@@ -179,7 +193,7 @@ impl Matcher {
     pub fn match_list<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<Match> {
         let mut matches = vec![];
         self.match_list_into(haystacks, 0, &mut matches);
-        if !self.needle.is_empty() && self.config.sort == SortStrategy::Score {
+        if !self.patterns.is_empty() && self.config.sort == SortStrategy::Score {
             radix_sort_matches(&mut matches);
         }
         matches
@@ -197,15 +211,26 @@ impl Matcher {
     /// [`iter::FuzzyMatchExt`] API.
     pub fn match_list_indices<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<MatchIndices> {
         Self::guard_against_haystack_overflow(haystacks.len(), 0);
-        if self.needle.is_empty() {
-            return (0..haystacks.len()).map(MatchIndices::from_index).collect();
-        }
-
-        let mut matches = dispatch!(&mut self.backend, matcher => {
-            dispatch_typos!(self.config.max_typos, self.needs_unicode, |TYPOS, UNICODE| {
-                unsafe { matcher.match_list_indices::<TYPOS, UNICODE, S>(haystacks) }
-            })
-        });
+        let max_typos = self.config.max_typos;
+        let mut matches = match &mut self.patterns {
+            CompiledPatterns::Empty => {
+                return (0..haystacks.len()).map(MatchIndices::from_index).collect();
+            }
+            CompiledPatterns::Single(pattern) => {
+                dispatch!(&mut pattern.backend, matcher => {
+                    dispatch_typos!(max_typos, pattern.needs_unicode, |TYPOS, UNICODE| {
+                        unsafe { matcher.match_list_indices::<TYPOS, UNICODE, S>(haystacks) }
+                    })
+                })
+            }
+            CompiledPatterns::Multi(patterns) => haystacks
+                .iter()
+                .enumerate()
+                .filter_map(|(index, haystack)| {
+                    Self::match_one_indices_multi(patterns, max_typos, haystack, index as u32)
+                })
+                .collect(),
+        };
 
         if self.config.sort == SortStrategy::Score {
             matches.sort_unstable();
@@ -282,14 +307,15 @@ impl Matcher {
     /// Consider using the [`Matcher::match_iter`] API or [`Matcher::match_list`] if you have more
     /// than one haystack to match, as they perform significantly better.
     pub fn match_one<S: AsRef<str>>(&mut self, haystack: S, index: u32) -> Option<Match> {
-        if self.needle.is_empty() {
-            return Some(Match::from_index(index as usize));
+        match &mut self.patterns {
+            CompiledPatterns::Empty => Some(Match::from_index(index as usize)),
+            CompiledPatterns::Single(pattern) => {
+                Self::dispatch_pattern_one(pattern, self.config.max_typos, haystack, index)
+            }
+            CompiledPatterns::Multi(patterns) => {
+                Self::match_one_multi(patterns, self.config.max_typos, haystack, index)
+            }
         }
-        dispatch!(&mut self.backend, matcher => {
-            dispatch_typos!(self.config.max_typos, self.needs_unicode, |TYPOS, UNICODE| {
-                unsafe { matcher.match_one::<TYPOS, UNICODE, S>(haystack, index) }
-            })
-        })
     }
 
     /// Matches a single haystack, returning its [`MatchIndices`] if it passes, which is
@@ -304,14 +330,15 @@ impl Matcher {
         haystack: S,
         index: u32,
     ) -> Option<MatchIndices> {
-        if self.needle.is_empty() {
-            return Some(MatchIndices::from_index(index as usize));
+        match &mut self.patterns {
+            CompiledPatterns::Empty => Some(MatchIndices::from_index(index as usize)),
+            CompiledPatterns::Single(pattern) => {
+                Self::dispatch_pattern_one_indices(pattern, self.config.max_typos, haystack, index)
+            }
+            CompiledPatterns::Multi(patterns) => {
+                Self::match_one_indices_multi(patterns, self.config.max_typos, haystack, index)
+            }
         }
-        dispatch!(&mut self.backend, matcher => {
-            dispatch_typos!(self.config.max_typos, self.needs_unicode, |TYPOS, UNICODE| {
-                unsafe { matcher.match_one_indices::<TYPOS, UNICODE, S>(haystack, index) }
-            })
-        })
     }
 
     fn match_list_into<S: AsRef<str>>(
@@ -321,15 +348,37 @@ impl Matcher {
         matches: &mut Vec<Match>,
     ) {
         Self::guard_against_haystack_overflow(haystacks.len(), haystack_index_offset);
-        if self.needle.is_empty() {
-            let indices = (0..haystacks.len()).map(|i| i + haystack_index_offset as usize);
-            matches.extend(indices.map(Match::from_index));
-            return;
+        match &mut self.patterns {
+            CompiledPatterns::Empty => {
+                let indices = (0..haystacks.len()).map(|i| i + haystack_index_offset as usize);
+                matches.extend(indices.map(Match::from_index));
+            }
+            CompiledPatterns::Single(pattern) => Self::dispatch_pattern_into(
+                pattern,
+                self.config.max_typos,
+                haystacks,
+                haystack_index_offset,
+                matches,
+            ),
+            CompiledPatterns::Multi(patterns) => Self::match_list_multi_into(
+                patterns,
+                self.config.max_typos,
+                haystacks,
+                haystack_index_offset,
+                matches,
+            ),
         }
+    }
 
-        let needs_unicode = self.config.unicode.respects_unicode_for(&self.needle);
-        dispatch!(&mut self.backend, matcher => {
-            dispatch_typos!(self.config.max_typos, needs_unicode, |TYPOS, UNICODE| {
+    fn dispatch_pattern_into<S: AsRef<str>>(
+        pattern: &mut CompiledPattern,
+        max_typos: Option<u16>,
+        haystacks: &[S],
+        haystack_index_offset: u32,
+        matches: &mut Vec<Match>,
+    ) {
+        dispatch!(&mut pattern.backend, matcher => {
+            dispatch_typos!(max_typos, pattern.needs_unicode, |TYPOS, UNICODE| {
                 unsafe {
                     matcher.match_list::<TYPOS, UNICODE, S>(
                         haystacks,
@@ -337,6 +386,32 @@ impl Matcher {
                         matches,
                     )
                 }
+            })
+        })
+    }
+
+    fn dispatch_pattern_one<S: AsRef<str>>(
+        pattern: &mut CompiledPattern,
+        max_typos: Option<u16>,
+        haystack: S,
+        index: u32,
+    ) -> Option<Match> {
+        dispatch!(&mut pattern.backend, matcher => {
+            dispatch_typos!(max_typos, pattern.needs_unicode, |TYPOS, UNICODE| {
+                unsafe { matcher.match_one::<TYPOS, UNICODE, S>(haystack, index) }
+            })
+        })
+    }
+
+    fn dispatch_pattern_one_indices<S: AsRef<str>>(
+        pattern: &mut CompiledPattern,
+        max_typos: Option<u16>,
+        haystack: S,
+        index: u32,
+    ) -> Option<MatchIndices> {
+        dispatch!(&mut pattern.backend, matcher => {
+            dispatch_typos!(max_typos, pattern.needs_unicode, |TYPOS, UNICODE| {
+                unsafe { matcher.match_one_indices::<TYPOS, UNICODE, S>(haystack, index) }
             })
         })
     }
@@ -435,28 +510,6 @@ impl Matcher {
 mod tests {
     use super::*;
     use crate::{CaseMatching, match_list};
-
-    fn assert_from_query(query: &str, needle: &str, matching: Matching) {
-        let matcher = Matcher::from_query(query);
-        assert_eq!(matcher.needle(), needle);
-        assert_eq!(matcher.config().matching, matching);
-    }
-
-    #[test]
-    fn from_query_selects_matching_mode() {
-        assert_from_query("foo", "foo", Matching::Fuzzy);
-        assert_from_query("^foo", "foo", Matching::Prefix);
-        assert_from_query("foo$", "foo", Matching::Suffix);
-        assert_from_query("'foo", "foo", Matching::Substring);
-        assert_from_query("^foo$", "foo", Matching::Exact);
-    }
-
-    #[test]
-    fn from_query_escapes_special_syntax() {
-        assert_from_query("\\^foo", "^foo", Matching::Fuzzy);
-        assert_from_query("foo\\$", "foo$", Matching::Fuzzy);
-        assert_from_query("\\'foo", "'foo", Matching::Fuzzy);
-    }
 
     #[test]
     fn test_basic() {
@@ -649,17 +702,7 @@ mod tests {
     fn test_empty_needle() {
         let haystack = ["foo", "bar"];
         let mut matcher = Matcher::new("", &Config::default());
-        let is_u8 = match &matcher.backend {
-            #[cfg(target_arch = "x86_64")]
-            MatcherBackend::AVX512U8(_) | MatcherBackend::AVXU8(_) | MatcherBackend::SSEU8(_) => {
-                true
-            }
-            #[cfg(target_arch = "aarch64")]
-            MatcherBackend::NEONU8(_) => true,
-            MatcherBackend::ScalarU8(_) => true,
-            _ => false,
-        };
-        assert!(is_u8);
+        assert!(matcher.patterns.is_empty());
 
         let matches = matcher.match_list(&haystack);
         assert_eq!(matches.len(), 2);
@@ -675,7 +718,10 @@ mod tests {
     #[test]
     fn u8_path_selected_for_short_needle() {
         let matcher = Matcher::new("abc", &Config::default());
-        let is_u8 = match &matcher.backend {
+        let CompiledPatterns::Single(pattern) = &matcher.patterns else {
+            panic!("expected a single pattern");
+        };
+        let is_u8 = match &pattern.backend {
             #[cfg(target_arch = "x86_64")]
             MatcherBackend::AVX512U8(_) | MatcherBackend::AVXU8(_) | MatcherBackend::SSEU8(_) => {
                 true
@@ -691,7 +737,10 @@ mod tests {
     #[test]
     fn u16_path_selected_for_long_needle() {
         let matcher = Matcher::new("abcdefghijklmnopqrst", &Config::default());
-        let is_u16 = match &matcher.backend {
+        let CompiledPatterns::Single(pattern) = &matcher.patterns else {
+            panic!("expected a single pattern");
+        };
+        let is_u16 = match &pattern.backend {
             #[cfg(target_arch = "x86_64")]
             MatcherBackend::AVX512(_) | MatcherBackend::AVX(_) | MatcherBackend::SSE(_) => true,
             #[cfg(target_arch = "aarch64")]
@@ -725,7 +774,7 @@ mod tests {
             "fbr".to_string(),
             "bar".to_string(),
         ];
-        matcher.set_needle("fB");
+        matcher.set_pattern("fB");
         let second_config = Config::default()
             .casing(CaseMatching::Smart)
             .sort(SortStrategy::Index);
@@ -742,7 +791,7 @@ mod tests {
             "é다".to_string(),
             "plain ascii".to_string(),
         ];
-        matcher.set_needle("é다😀");
+        matcher.set_pattern("é다😀");
         let unicode_config = Config::default()
             .max_typos(Some(0))
             .sort(SortStrategy::Index);
@@ -753,7 +802,7 @@ mod tests {
             &match_list("é다😀", &unicode_haystacks, &unicode_config)
         );
 
-        matcher.set_needle("fB");
+        matcher.set_pattern("fB");
         let third_config = Config::default()
             .casing(CaseMatching::Ignore)
             .max_typos(Some(1));

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use frizbee::{
-    CaseMatching, Config, Match, MatchIndices, Matcher, Matching, Scoring, SortStrategy,
+    CaseMatching, Config, Match, MatchIndices, Matcher, Matching, Pattern, Scoring, SortStrategy,
     match_list, match_list_indices, match_list_parallel,
 };
 
@@ -225,6 +225,179 @@ fn haystacks_with(len: usize, patches: &[(usize, &str)]) -> Vec<String> {
         haystacks[index] = value.to_string();
     }
     haystacks
+}
+
+#[derive(Debug, Clone)]
+struct MultiPatternCase {
+    patterns: Vec<Pattern>,
+    haystacks: Vec<String>,
+    config: Config,
+}
+
+impl MultiPatternCase {
+    fn from_bytes(input: &[u8]) -> Self {
+        let mut cursor = ByteCursor::new(input);
+        let pattern_count = 1 + (cursor.next() as usize) % 3;
+        let patterns = (0..pattern_count)
+            .map(|_| {
+                let matching = match cursor.next() % 6 {
+                    0 => None,
+                    1 => Some(Matching::Fuzzy),
+                    2 => Some(Matching::Exact),
+                    3 => Some(Matching::Prefix),
+                    4 => Some(Matching::Suffix),
+                    _ => Some(Matching::Substring),
+                };
+                let negated = cursor.bool();
+                let needle_len = cursor.len(8, &[0, 1, 2, 3, 7, 8]);
+                Pattern::new(&cursor.string(needle_len), matching, negated)
+            })
+            .collect();
+
+        let haystack_count = cursor.len(24, &[0, 1, 2, 7, 8, 15, 16, 24]);
+        let haystacks = (0..haystack_count)
+            .map(|_| {
+                let len = cursor.len(48, &[0, 1, 2, 7, 8, 15, 16, 31, 32, 48]);
+                cursor.string(len)
+            })
+            .collect();
+
+        let max_typos = match cursor.next() % 4 {
+            0 => None,
+            1 => Some(0),
+            2 => Some(1),
+            _ => Some(2),
+        };
+        let casing = match cursor.next() % 3 {
+            0 => CaseMatching::Ignore,
+            1 => CaseMatching::Smart,
+            _ => CaseMatching::Respect,
+        };
+        let matching = match cursor.next() % 5 {
+            0 => Matching::Fuzzy,
+            1 => Matching::Exact,
+            2 => Matching::Prefix,
+            3 => Matching::Suffix,
+            _ => Matching::Substring,
+        };
+
+        Self {
+            patterns,
+            haystacks,
+            config: Config::default()
+                .max_typos(max_typos)
+                .casing(casing)
+                .matching(matching),
+        }
+    }
+}
+
+/// Reference implementation: match each pattern independently with single-atom
+/// `match_list` calls, then intersect the non-negated patterns (summing scores)
+/// and subtract the negated ones.
+fn reference_multi_pattern(case: &MultiPatternCase) -> Vec<Match> {
+    let config = case.config.clone().sort(SortStrategy::Index);
+    let active = case
+        .patterns
+        .iter()
+        .filter(|pattern| !pattern.needle.is_empty())
+        .collect::<Vec<_>>();
+    if active.is_empty() {
+        return (0..case.haystacks.len()).map(Match::from_index).collect();
+    }
+
+    let per_pattern = active
+        .iter()
+        .map(|pattern| {
+            let matching = pattern.matching.unwrap_or(case.config.matching);
+            match_list(
+                &pattern.needle,
+                &case.haystacks,
+                &config.clone().matching(matching),
+            )
+            .into_iter()
+            .map(|match_| (match_.index, match_))
+            .collect::<BTreeMap<_, _>>()
+        })
+        .collect::<Vec<_>>();
+
+    (0..case.haystacks.len() as u32)
+        .filter_map(|index| {
+            let mut combined = Match::from_index(index as usize);
+            for (pattern, matches) in active.iter().zip(&per_pattern) {
+                let hit = matches.get(&index);
+                if pattern.negated {
+                    if hit.is_some() {
+                        return None;
+                    }
+                } else {
+                    let hit = hit?;
+                    combined.score = combined.score.saturating_add(hit.score);
+                    combined.exact |= hit.exact;
+                    #[cfg(feature = "match_end_col")]
+                    {
+                        combined.end_col = combined.end_col.max(hit.end_col);
+                    }
+                }
+            }
+            Some(combined)
+        })
+        .collect()
+}
+
+#[test]
+fn generated_multi_pattern_properties() {
+    run_generated_inputs(512, test_bound(4096, 256), |input| {
+        let case = MultiPatternCase::from_bytes(input);
+        assert_multi_pattern_case(&case);
+    });
+}
+
+fn assert_multi_pattern_case(case: &MultiPatternCase) {
+    let reference = reference_multi_pattern(case);
+
+    let index_config = case.config.clone().sort(SortStrategy::Index);
+    let mut matcher = Matcher::from_patterns(&case.patterns, &index_config);
+    let matches = matcher.match_list(&case.haystacks);
+    assert_match_views_eq("multi-pattern match_list", &matches, &reference);
+
+    let by_index = reference
+        .iter()
+        .map(|match_| (match_.index, match_))
+        .collect::<BTreeMap<_, _>>();
+    for (index, haystack) in case.haystacks.iter().enumerate() {
+        let one = matcher.match_one(haystack, index as u32);
+        match by_index.get(&(index as u32)) {
+            Some(&want) => {
+                let got =
+                    one.unwrap_or_else(|| panic!("match_one missing index {index} for {case:?}"));
+                assert_eq!(
+                    match_view(&got),
+                    match_view(want),
+                    "match_one mismatch at index {index} for {case:?}"
+                );
+            }
+            None => assert!(
+                one.is_none(),
+                "match_one unexpectedly matched index {index} for {case:?}"
+            ),
+        }
+    }
+
+    let score_config = case.config.clone().sort(SortStrategy::Score);
+    let mut matcher = Matcher::from_patterns(&case.patterns, &score_config);
+    let sorted = matcher.match_list(&case.haystacks);
+    assert!(sorted.is_sorted(), "unsorted result for {case:?}");
+    assert_eq!(
+        sorted_match_views(&sorted),
+        sorted_match_views(&reference),
+        "multi-pattern sorted multiset mismatch for {case:?}"
+    );
+
+    for threads in [2, 3, 8] {
+        let parallel = matcher.match_list_parallel(&case.haystacks, threads);
+        assert_match_views_eq("multi-pattern parallel", &parallel, &sorted);
+    }
 }
 
 #[test]

@@ -9,7 +9,7 @@ use crate::{Match, SortStrategy};
 impl Matcher {
     /// Matches a list of haystacks in parallel on multiple real threads, returning a list of
     /// [`Match`] values. Threads work on 2048 item chunks, and the final result is ordered
-    /// according to [`Config::sort`]. The `threads` must be >0.
+    /// according to [`crate::Config::sort`]. The `threads` must be >0.
     ///
     /// This API provides the most performant path when matching on lists.
     pub fn match_list_parallel<S: AsRef<str> + Sync>(
@@ -23,7 +23,7 @@ impl Matcher {
         // Limit threads based on the number of haystacks
         let threads = threads.min(haystacks.len().div_ceil(2000)).max(1);
 
-        if haystacks.is_empty() || self.needle.is_empty() || threads == 1 {
+        if haystacks.is_empty() || self.patterns.is_empty() || threads == 1 {
             return self.match_list(haystacks);
         }
 
@@ -123,5 +123,43 @@ mod tests {
     #[should_panic(expected = "threads must be positive")]
     fn zero_threads_panics() {
         let _ = match_list_parallel("a", &["a"], &Config::default(), 0);
+    }
+
+    #[test]
+    fn multi_pattern_matches_sequential_across_chunk_boundaries() {
+        use crate::{Matcher, Pattern, SortStrategy};
+
+        let mut haystacks = (0..4101)
+            .map(|index| format!("nomatch-{index}"))
+            .collect::<Vec<_>>();
+        for (index, value) in [
+            (0, "abc"),
+            (1, "abcxyz"),
+            (2047, "xabc"),
+            (2048, "abxc"),
+            (2049, "alpha/beta/abc"),
+            (2050, "xyz/abc"),
+            (4095, "ABC"),
+            (4096, "a_b_c"),
+            (4100, "zabc"),
+        ] {
+            haystacks[index] = value.to_string();
+        }
+
+        for query in ["abc !xyz", "abc a", "!abc !xyz"] {
+            for sort in [SortStrategy::Score, SortStrategy::Index] {
+                let config = Config::default().sort(sort);
+                let mut matcher = Matcher::from_patterns(&Pattern::parse_query(query), &config);
+                let sequential = matcher.match_list(&haystacks);
+
+                for &threads in thread_counts() {
+                    let parallel = matcher.match_list_parallel(&haystacks, threads);
+                    assert_eq!(
+                        &parallel, &sequential,
+                        "query={query:?}, sort={sort:?}, threads={threads}"
+                    );
+                }
+            }
+        }
     }
 }

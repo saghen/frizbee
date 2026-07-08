@@ -47,7 +47,7 @@ pub fn k_merge_matches(runs: Vec<Vec<Match>>) -> Vec<Match> {
 /// matches and `k` is the number of runs.
 ///
 /// This uses [`ByIndex`] ordering. Use [`k_merge_matches_by`] to select a
-/// different ordering or use [`k_merge_matches_by_score_then_index`] to sort by
+/// different ordering or use [`k_merge_matches`] to sort by
 /// score (desc), tie-broken by index (asc).
 pub fn k_merge_matches_by_index(runs: Vec<Vec<Match>>) -> Vec<Match> {
     k_merge_matches_by::<ByIndex>(runs)

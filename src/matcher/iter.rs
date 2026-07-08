@@ -1,5 +1,5 @@
 use super::Matcher;
-use crate::{Config, Match, MatchIndices};
+use crate::{Config, Match, MatchIndices, Pattern};
 
 /// Extension trait adding fuzzy matching functions to any iterator whose items
 /// are strings. Results are yielded lazily in iteration order (not sorted by score).
@@ -29,12 +29,12 @@ pub trait FuzzyMatchExt: Iterator + Sized {
     ///     .fuzzy_match("fBr", &Config::default())
     ///     .collect();
     /// ```
-    fn fuzzy_match(self, needle: &str, config: &Config) -> FuzzyMatch<Self>
+    fn fuzzy_match(self, pattern: impl Into<Pattern>, config: &Config) -> FuzzyMatch<Self>
     where
         Self::Item: AsRef<str>,
     {
         FuzzyMatch {
-            matcher: Matcher::new(needle, config),
+            matcher: Matcher::new(pattern, config),
             iter: self,
             index: 0,
         }
@@ -57,12 +57,16 @@ pub trait FuzzyMatchExt: Iterator + Sized {
     ///     .fuzzy_match_indices("fBr", &Config::default())
     ///     .collect();
     /// ```
-    fn fuzzy_match_indices(self, needle: &str, config: &Config) -> FuzzyMatchIndices<Self>
+    fn fuzzy_match_indices(
+        self,
+        pattern: impl Into<Pattern>,
+        config: &Config,
+    ) -> FuzzyMatchIndices<Self>
     where
         Self::Item: AsRef<str>,
     {
         FuzzyMatchIndices {
-            matcher: Matcher::new(needle, config),
+            matcher: Matcher::new(pattern, config),
             iter: self,
             index: 0,
         }

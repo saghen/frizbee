@@ -11,17 +11,22 @@ For commercial support, please [contact me](mailto:frizbee@liam.super.fish). I'd
 See [the docs](https://docs.rs/frizbee) for more usage examples.
 
 ```rust
-use frizbee::{match_list, match_list_parallel, Config};
+use frizbee::{match_list, match_list_parallel, Config, Matcher, Pattern};
 
 let needle = "fBr";
-let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
+let haystacks = ["fooBar", "foo_bar", "barfoo", "prelude", "println!"];
 
-let matches = match_list(needle, &haystacks, &Config::default());
+let mut matcher = Matcher::new(needle, &Config::default());
+let matches = matcher.match_list(&haystacks);
 // or in parallel (8 threads)
-let matches = match_list_parallel(needle, &haystacks, &Config::default(), 8);
-// or use a matching mode (fuzzy, substring, prefix, suffix, exact) based on the query
-// syntax, e.g. foo, 'foo, ^foo, foo$, ^foo$
-let matches = Matcher::from_query(needle).match_list(&haystacks);
+let matches = matcher.match_list_parallel(&haystacks, 8);
+
+// or perform multi-pattern matching (whitespace separated) with syntax for controlling
+// the matching mode:
+// fuzzy  substring  prefix    suffix    exact    negated (combines with others)
+// foo    'foo       ^foo      foo$      ^foo$    !foo
+let mut matcher = Matcher::from_query("foo !^bar", &Config::default());
+let matches = matcher.match_list(&haystacks);
 ```
 
 or use the slightly slower `fuzzy_match` iterator API

@@ -10,38 +10,66 @@
 //! - Supports deletion (unmatched char in needle, basis of typo-resistance)
 //! - Supports substitution (haystack and needle char mismatch, basis of typo-resistance)
 //!
-//! # Example: using `match_list`
-//!
-//! ```rust
-//! use frizbee::{match_list, match_list_parallel, Config};
-//!
-//! let needle = "fBr";
-//! let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
-//!
-//! let matches = match_list(needle, &haystacks, &Config::default());
-//! // or in parallel (8 threads)
-//! let matches = match_list_parallel(needle, &haystacks, &Config::default(), 8);
-//! ```
-//!
 //! # Example: using `Matcher`
 //!
-//! Useful for when you want to match one needle against more than one haystack.
+//! `Matcher` compiles the pattern once, allocates memory for the Smith Waterman matrix,
+//! and reuses the selected SIMD backend.
+//!
+//! Ideally, only construct these at most once per list. They're cheap to construct,
+//! but end up being expensive if you construct them for each item in your list.
 //!
 //! ```rust
-//! use frizbee::{Matcher, Config};
+//! use frizbee::{Config, Matcher};
 //!
 //! let needle = "fBr";
-//! let haystacks = ["fooBar", "foo_bar", "prelude", "println!"];
+//! let haystacks = ["fooBar", "foo_bar", "barfoo", "prelude", "println!"];
 //!
 //! let mut matcher = Matcher::new(needle, &Config::default());
-//! // or use a matching mode (fuzzy, substring, prefix, suffix, exact) based on the query
-//! // syntax, e.g. foo, 'foo, ^foo, foo$, ^foo$
-//! let mut matcher = Matcher::from_query(needle);
+//! let matches = matcher.match_list(&haystacks);
+//! // or in parallel (8 threads)
+//! let matches = matcher.match_list_parallel(&haystacks, 8);
+//! ```
 //!
+//! # Example: using multi-pattern queries
+//!
+//! `Matcher::from_query` parses whitespace-separated atoms. Atom syntax can
+//! control the matching mode:
+//!
+//! ```text
+//! fuzzy  substring  prefix    suffix    exact    negated (combines with others)
+//! foo    'foo       ^foo      foo$      ^foo$    !foo
+//! ```
+//!
+//! ```rust
+//! use frizbee::{Config, Matcher};
+//!
+//! let haystacks = ["foo", "barfoo", "foobar", "bar/foo"];
+//! let mut matcher = Matcher::from_query("foo !^bar", &Config::default());
+//! let matches = matcher.match_list(&haystacks);
+//! ```
+//!
+//! # Example: using explicit `Pattern`s
+//!
+//! If query syntax is not a good fit, build patterns directly and pass them to
+//! `Matcher::from_patterns` or `Matcher::new` (if you only have one pattern).
+//!
+//! ```rust
+//! use frizbee::{Config, Matcher, Matching, Pattern};
+//!
+//! let patterns = [
+//!     Pattern::new("foo", None, false),
+//!     Pattern::new("bar", Some(Matching::Prefix), true),
+//! ];
+//! let haystacks = ["foo", "barfoo", "foobar"];
+//!
+//! let mut matcher = Matcher::from_patterns(&patterns, &Config::default());
 //! let matches = matcher.match_list(&haystacks);
 //! ```
 //!
 //! # Example: using `FuzzyMatchExt`
+//!
+//! The iterator API is convenient when chaining with other iterator adapters,
+//! but it is slower than matching a full list with `Matcher::match_list`.
 //!
 //! ```rust
 //! use frizbee::{iter::FuzzyMatchExt, Config, radix_sort_matches};
@@ -60,17 +88,18 @@ use std::cmp::Ordering;
 use serde::{Deserialize, Serialize};
 
 mod r#const;
-mod k_merge;
+pub mod k_merge;
 mod literal;
 mod matcher;
+mod pattern;
 mod prefilter;
 mod smith_waterman;
 mod sort;
 
 use r#const::*;
 
-pub use k_merge::k_merge_matches;
 pub use matcher::Matcher;
+pub use pattern::Pattern;
 pub use sort::radix_sort_matches;
 
 /// Iterator extension for fuzzy matching
@@ -122,7 +151,7 @@ pub fn match_list_indices<S1: AsRef<str>, S2: AsRef<str>>(
 
 /// Matches a list of haystacks in parallel on multiple real threads, returning a list of
 /// [`Match`] values. Threads work on 2048 item chunks, and the final result is ordered
-/// according to [`Config::sort`]. The `threads` must be >0.
+/// according to [`crate::Config::sort`]. The `threads` must be >0.
 ///
 /// This API provides the most performant path when matching on lists.
 pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(

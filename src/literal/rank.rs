@@ -1,5 +1,5 @@
 //! Rates the likelihood of a byte appearing in a haystack
-//! Source: https://github.com/BurntSushi/memchr/blob/master/src/arch/all/packedpair/default_rank.rs
+//! Source: <https://github.com/BurntSushi/memchr/blob/master/src/arch/all/packedpair/default_rank.rs>
 //! MIT License
 //! Copyright (c) 2015 Andrew Gallant
 
