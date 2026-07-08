@@ -15,12 +15,16 @@ pub(crate) use backend::*;
 #[cfg(test)]
 mod tests {
     use crate::r#const::*;
-    use crate::{CaseMatching, Config, Match, Matching, match_list, match_list_indices};
+    use crate::{
+        CaseMatching, Config, Match, Matching, SortStrategy, match_list, match_list_indices,
+    };
 
     const CHAR_SCORE: u16 = MATCH_SCORE + MATCHING_CASE_BONUS;
 
     fn config(matching: Matching) -> Config {
-        Config::default().matching(matching).sort(false)
+        Config::default()
+            .matching(matching)
+            .sort(SortStrategy::Index)
     }
 
     fn scores(matching: Matching, needle: &str, haystacks: &[&str]) -> Vec<(u32, u16, bool)> {
@@ -41,7 +45,7 @@ mod tests {
         let config = Config::default()
             .matching(Matching::Substring)
             .casing(casing)
-            .sort(false);
+            .sort(SortStrategy::Index);
         match_list(needle, &[haystack], &config)
             .first()
             .map(|m| m.score)
@@ -134,7 +138,7 @@ mod tests {
         let respect = Config::default()
             .matching(Matching::Prefix)
             .casing(CaseMatching::Respect)
-            .sort(false);
+            .sort(SortStrategy::Index);
         assert_eq!(
             match_list("foo", &haystacks, &respect)
                 .iter()

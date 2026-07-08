@@ -1,6 +1,6 @@
 use crate::smith_waterman::score_fits_in_u8;
 use crate::sort::radix_sort_matches;
-use crate::{Config, Match, MatchIndices, Matching};
+use crate::{Config, Match, MatchIndices, Matching, SortStrategy};
 
 #[cfg(target_arch = "aarch64")]
 use crate::literal::LiteralNEON;
@@ -179,7 +179,7 @@ impl Matcher {
     pub fn match_list<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<Match> {
         let mut matches = vec![];
         self.match_list_into(haystacks, 0, &mut matches);
-        if !self.needle.is_empty() && self.config.sort {
+        if !self.needle.is_empty() && self.config.sort == SortStrategy::Score {
             radix_sort_matches(&mut matches);
         }
         matches
@@ -207,7 +207,7 @@ impl Matcher {
             })
         });
 
-        if self.config.sort {
+        if self.config.sort == SortStrategy::Score {
             matches.sort_unstable();
         }
         matches
@@ -532,7 +532,7 @@ mod tests {
     #[test]
     fn test_case_sensitive_matching() {
         let haystack = ["foo", "FOO", "fOo", "xxfooxx"];
-        let config = Config::default().sort(false);
+        let config = Config::default().sort(SortStrategy::Index);
 
         let matches = match_list("foo", &haystack, &config);
         assert_eq!(
@@ -540,7 +540,9 @@ mod tests {
             vec![0, 1, 2, 3]
         );
 
-        let config = Config::default().casing(CaseMatching::Respect).sort(false);
+        let config = Config::default()
+            .casing(CaseMatching::Respect)
+            .sort(SortStrategy::Index);
 
         let matches = match_list("foo", &haystack, &config);
         assert_eq!(
@@ -554,7 +556,9 @@ mod tests {
             vec![0, 3]
         );
 
-        let config = Config::default().casing(CaseMatching::Smart).sort(false);
+        let config = Config::default()
+            .casing(CaseMatching::Smart)
+            .sort(SortStrategy::Index);
 
         let matches = match_list("FoO", &["foo", "FOO", "FoO", "xxFoOxx"], &config);
         assert_eq!(
@@ -576,7 +580,9 @@ mod tests {
         ];
         for needle in ["deadbe", "é다😀"] {
             for max_typos in [None, Some(0), Some(1), Some(2), Some(3)] {
-                let config = Config::default().max_typos(max_typos).sort(false);
+                let config = Config::default()
+                    .max_typos(max_typos)
+                    .sort(SortStrategy::Index);
                 let mut matcher = Matcher::new(needle, &config);
                 let from_iter = matcher.match_iter(haystacks.iter()).collect::<Vec<_>>();
                 let from_list = matcher.match_list(&haystacks);
@@ -612,7 +618,9 @@ mod tests {
         ];
         for needle in ["deadbe", "é다😀"] {
             for max_typos in [None, Some(0), Some(1), Some(2), Some(3)] {
-                let config = Config::default().max_typos(max_typos).sort(false);
+                let config = Config::default()
+                    .max_typos(max_typos)
+                    .sort(SortStrategy::Index);
                 let mut matcher = Matcher::new(needle, &config);
                 let from_iter = matcher
                     .match_iter_indices(haystacks.iter())
@@ -702,7 +710,7 @@ mod tests {
             "abcdefghijklmnopqrst".to_string(),
             "no-match".to_string(),
         ];
-        let first_config = Config::default().max_typos(None).sort(false);
+        let first_config = Config::default().max_typos(None).sort(SortStrategy::Index);
         let mut matcher = Matcher::new(long_needle, &first_config);
 
         let first = matcher.match_list(&first_haystacks);
@@ -718,7 +726,9 @@ mod tests {
             "bar".to_string(),
         ];
         matcher.set_needle("fB");
-        let second_config = Config::default().casing(CaseMatching::Smart).sort(false);
+        let second_config = Config::default()
+            .casing(CaseMatching::Smart)
+            .sort(SortStrategy::Index);
         matcher.set_config(second_config.clone());
         let second = matcher.match_list(&second_haystacks);
         assert_eq!(
@@ -733,7 +743,9 @@ mod tests {
             "plain ascii".to_string(),
         ];
         matcher.set_needle("é다😀");
-        let unicode_config = Config::default().max_typos(Some(0)).sort(false);
+        let unicode_config = Config::default()
+            .max_typos(Some(0))
+            .sort(SortStrategy::Index);
         matcher.set_config(unicode_config.clone());
         let unicode = matcher.match_list(&unicode_haystacks);
         assert_eq!(
@@ -744,8 +756,7 @@ mod tests {
         matcher.set_needle("fB");
         let third_config = Config::default()
             .casing(CaseMatching::Ignore)
-            .max_typos(Some(1))
-            .sort(true);
+            .max_typos(Some(1));
         matcher.set_config(third_config.clone());
         let third = matcher.match_list(&first_haystacks);
         assert_eq!(&third, &match_list("fB", &first_haystacks, &third_config));
@@ -754,7 +765,7 @@ mod tests {
     #[test]
     #[cfg(feature = "match_end_col")]
     fn test_match_end_col_through_match_list() {
-        let config = Config::default().max_typos(None).sort(false);
+        let config = Config::default().max_typos(None).sort(SortStrategy::Index);
         let matches = match_list("abc", &["xabcx", "abcdef", "xxabc"], &config);
         assert_eq!(matches.len(), 3);
         assert_eq!(matches[0].end_col, 3);

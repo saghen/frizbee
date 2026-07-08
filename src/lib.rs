@@ -121,8 +121,8 @@ pub fn match_list_indices<S1: AsRef<str>, S2: AsRef<str>>(
 }
 
 /// Matches a list of haystacks in parallel on multiple real threads, returning a list of
-/// [`Match`] values. Threads work on 2048 item chunks, which are sorted and merged into a
-/// single sorted `Vec` at the end. The `threads` must be >0.
+/// [`Match`] values. Threads work on 2048 item chunks, and the final result is ordered
+/// according to [`Config::sort`]. The `threads` must be >0.
 ///
 /// This API provides the most performant path when matching on lists.
 pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
@@ -135,7 +135,7 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: AsRef<str> + Sync>(
 }
 
 /// Result of a fuzzy match, containing the score and index in the haystack
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Match {
     pub score: u16,
@@ -244,8 +244,9 @@ pub struct Config {
     /// contiguous run of characters and do not support typos (`max_typos` is ignored).
     #[cfg_attr(feature = "serde", serde(default))]
     pub matching: Matching,
-    /// Sort the results by score (descending)
-    pub sort: bool,
+    /// Controls how results are ordered.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub sort: SortStrategy,
     /// Controls the scoring used by the smith waterman algorithm. You may tweak these but pay
     /// close attention to the documentation for each property, as small changes can lead to
     /// poor matching.
@@ -259,7 +260,7 @@ impl Default for Config {
             casing: CaseMatching::Ignore,
             unicode: UnicodeMatching::Smart,
             matching: Matching::Fuzzy,
-            sort: true,
+            sort: SortStrategy::Score,
             scoring: Scoring::default(),
         }
     }
@@ -290,8 +291,8 @@ impl Config {
         self
     }
 
-    /// Sets whether to sort the results
-    pub fn sort(mut self, sort: bool) -> Self {
+    /// Sets how results are ordered
+    pub fn sort(mut self, sort: SortStrategy) -> Self {
         self.sort = sort;
         self
     }
@@ -301,6 +302,16 @@ impl Config {
         self.scoring = scoring;
         self
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum SortStrategy {
+    /// Sort by descending score, using haystack index as a tie breaker
+    #[default]
+    Score,
+    /// Preserve input order by haystack index
+    Index,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

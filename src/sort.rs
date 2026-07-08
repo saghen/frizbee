@@ -15,16 +15,7 @@ pub fn radix_sort_matches(matches: &mut [Match]) {
         offsets[idx - 1] = offsets[idx] + histogram[idx];
     }
 
-    let mut matches_b = vec![
-        Match {
-            score: 0,
-            index: 0,
-            exact: false,
-            #[cfg(feature = "match_end_col")]
-            end_col: 0,
-        };
-        matches.len()
-    ];
+    let mut matches_b = vec![Match::default(); matches.len()];
     for m in matches.iter() {
         let radix = m.score & 0xFF;
         matches_b[offsets[radix as usize] as usize] = *m;

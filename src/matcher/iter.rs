@@ -139,6 +139,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SortStrategy;
 
     const HAYSTACKS: [&str; 7] = [
         "deadbeef",
@@ -154,7 +155,9 @@ mod tests {
     fn fuzzy_match_matches_match_iter() {
         for needle in ["deadbe", "é다😀"] {
             for max_typos in [None, Some(0), Some(1), Some(2), Some(3)] {
-                let config = Config::default().max_typos(max_typos).sort(false);
+                let config = Config::default()
+                    .max_typos(max_typos)
+                    .sort(SortStrategy::Index);
                 let from_ext = HAYSTACKS
                     .iter()
                     .fuzzy_match(needle, &config)
@@ -174,7 +177,9 @@ mod tests {
     fn fuzzy_match_indices_matches_match_iter_indices() {
         for needle in ["deadbe", "é다😀"] {
             for max_typos in [None, Some(0), Some(1), Some(2), Some(3)] {
-                let config = Config::default().max_typos(max_typos).sort(false);
+                let config = Config::default()
+                    .max_typos(max_typos)
+                    .sort(SortStrategy::Index);
                 let from_ext = HAYSTACKS
                     .iter()
                     .fuzzy_match_indices(needle, &config)
@@ -218,7 +223,12 @@ mod tests {
         let scores = HAYSTACKS
             .iter()
             .filter(|h| !h.starts_with("no"))
-            .fuzzy_match("deadbe", &Config::default().max_typos(Some(0)).sort(false))
+            .fuzzy_match(
+                "deadbe",
+                &Config::default()
+                    .max_typos(Some(0))
+                    .sort(SortStrategy::Index),
+            )
             .map(|m| m.index)
             .collect::<Vec<_>>();
         assert!(!scores.is_empty());

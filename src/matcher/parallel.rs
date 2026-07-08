@@ -2,14 +2,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 use super::Matcher;
-use crate::Match;
-use crate::k_merge::k_merge_matches;
+use crate::k_merge::{k_merge_matches, k_merge_matches_by_index};
 use crate::sort::radix_sort_matches;
+use crate::{Match, SortStrategy};
 
 impl Matcher {
     /// Matches a list of haystacks in parallel on multiple real threads, returning a list of
-    /// [`Match`] values. Threads work on 2048 item chunks, which are sorted and merged into a
-    /// single sorted `Vec` at the end. The `threads` must be >0.
+    /// [`Match`] values. Threads work on 2048 item chunks, and the final result is ordered
+    /// according to [`Config::sort`]. The `threads` must be >0.
     ///
     /// This API provides the most performant path when matching on lists.
     pub fn match_list_parallel<S: AsRef<str> + Sync>(
@@ -58,7 +58,7 @@ impl Matcher {
                         }
 
                         // Each thread sorts so that we can perform k-way merge
-                        if matcher.config.sort {
+                        if matcher.config.sort == SortStrategy::Score {
                             radix_sort_matches(&mut local_matches);
                         }
 
@@ -105,7 +105,7 @@ mod tests {
             haystacks[index] = value.to_string();
         }
 
-        let config = Config::default().sort(true);
+        let config = Config::default();
         let sequential = match_list("abc", &haystacks, &config);
         assert!(sequential.is_sorted());
 

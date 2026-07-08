@@ -90,7 +90,7 @@ impl_specialized_literal!(PrefilterScalarBackend);
 #[cfg(test)]
 mod backend_parity {
     use crate::matcher::algo::Specialized;
-    use crate::{Config, Matching};
+    use crate::{Config, Matching, SortStrategy};
 
     /// Runs one needle/haystack through a specialized literal backend, returning the observable
     /// result of both `match_one` and `match_one_indices`. `UNICODE` is chosen the same way the real
@@ -159,7 +159,9 @@ mod backend_parity {
                 Matching::Suffix,
                 Matching::Substring,
             ] {
-                let config = Config::default().matching(matching).sort(false);
+                let config = Config::default()
+                    .matching(matching)
+                    .sort(SortStrategy::Index);
                 let expected = unsafe { probe::<LiteralScalar>(needle, haystack, &config) };
 
                 #[cfg(target_arch = "x86_64")]
