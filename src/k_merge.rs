@@ -1,3 +1,6 @@
+//! Merges multiple pre-sorted runs of [`crate::Match`]es into a single sorted [`Vec`]
+//! using the k-way merge algorithm specialized for [`crate::Match`]es.
+
 use crate::Match;
 
 /// Ordering policy for merging. Implementations must define a total order
