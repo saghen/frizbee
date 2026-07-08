@@ -20,6 +20,9 @@ impl Matcher {
         Self::guard_against_haystack_overflow(haystacks.len(), 0);
         assert!(threads > 0, "threads must be positive");
 
+        // Limit threads based on the number of haystacks
+        let threads = threads.min(haystacks.len().div_ceil(2000)).max(1);
+
         if haystacks.is_empty() || self.needle.is_empty() || threads == 1 {
             return self.match_list(haystacks);
         }
