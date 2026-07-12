@@ -244,7 +244,7 @@ impl Default for Config {
             casing: CaseMatching::Ignore,
             unicode: UnicodeMatching::Smart,
             matching: Matching::Fuzzy,
-            sort: SortStrategy::Score,
+            sort: SortStrategy::ScoreThenIndexAsc,
             scoring: Scoring::default(),
         }
     }
@@ -291,11 +291,46 @@ impl Config {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum SortStrategy {
-    /// Sort by descending score, using haystack index as a tie breaker
+    /// Sort by descending score, then ascending haystack index
     #[default]
-    Score,
-    /// Preserve input order by haystack index
-    Index,
+    ScoreThenIndexAsc,
+    /// Sort by descending score, then descending haystack index
+    ScoreThenIndexDesc,
+    /// Sort by ascending haystack index, preserving input order
+    IndexAsc,
+    /// Sort by descending haystack index, reversing input order
+    IndexDesc,
+}
+
+impl SortStrategy {
+    pub fn reverse(self) -> Self {
+        match self {
+            SortStrategy::ScoreThenIndexAsc => SortStrategy::ScoreThenIndexDesc,
+            SortStrategy::IndexAsc => SortStrategy::IndexDesc,
+            SortStrategy::ScoreThenIndexDesc => SortStrategy::ScoreThenIndexAsc,
+            SortStrategy::IndexDesc => SortStrategy::IndexAsc,
+        }
+    }
+
+    /// Whether the sort strategy matches index (asc) (normal order) or index (desc)
+    /// (reverse order).
+    ///
+    /// When this is `true`, the sort strategy may still sort by score (desc) first,
+    /// see [`SortStrategy::is_by_score`].
+    pub fn is_reversed(self) -> bool {
+        matches!(
+            self,
+            SortStrategy::IndexDesc | SortStrategy::ScoreThenIndexDesc
+        )
+    }
+
+    /// Whether the sort strategy matches by score (desc) first
+    pub fn is_by_score(self) -> bool {
+        matches!(
+            self,
+            SortStrategy::ScoreThenIndexAsc | SortStrategy::ScoreThenIndexDesc
+        )
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

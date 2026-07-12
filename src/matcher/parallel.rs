@@ -2,7 +2,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
 use super::Matcher;
-use crate::k_merge::{k_merge_matches, k_merge_matches_by_index};
+use crate::k_merge::{
+    k_merge_matches_by_index_asc, k_merge_matches_by_index_desc,
+    k_merge_matches_by_score_then_index_asc, k_merge_matches_by_score_then_index_desc,
+};
 use crate::sort::radix_sort_matches;
 use crate::{Match, SortStrategy};
 
@@ -61,7 +64,10 @@ impl Matcher {
                         }
 
                         // Each thread sorts so that we can perform k-way merge
-                        if matcher.config.sort == SortStrategy::Score {
+                        if matcher.config.sort.is_reversed() {
+                            local_matches.reverse();
+                        }
+                        if matcher.config.sort.is_by_score() {
                             radix_sort_matches(&mut local_matches);
                         }
 
@@ -70,10 +76,14 @@ impl Matcher {
                 })
                 .collect();
 
-            if matcher.config.sort == SortStrategy::Score {
-                k_merge_matches(handles.into_iter().map(|h| h.join().unwrap()).collect())
-            } else {
-                k_merge_matches_by_index(handles.into_iter().map(|h| h.join().unwrap()).collect())
+            let matches = handles.into_iter().map(|h| h.join().unwrap()).collect();
+            match matcher.config.sort {
+                SortStrategy::ScoreThenIndexAsc => k_merge_matches_by_score_then_index_asc(matches),
+                SortStrategy::ScoreThenIndexDesc => {
+                    k_merge_matches_by_score_then_index_desc(matches)
+                }
+                SortStrategy::IndexAsc => k_merge_matches_by_index_asc(matches),
+                SortStrategy::IndexDesc => k_merge_matches_by_index_desc(matches),
             }
         })
     }
@@ -81,7 +91,7 @@ impl Matcher {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Config, match_list, match_list_parallel};
+    use crate::{Config, Matcher};
 
     fn thread_counts() -> &'static [usize] {
         if cfg!(miri) {
@@ -109,11 +119,11 @@ mod tests {
         }
 
         let config = Config::default();
-        let sequential = match_list("abc", &haystacks, &config);
+        let sequential = Matcher::new("abc", &config).match_list(&haystacks);
         assert!(sequential.is_sorted());
 
         for &threads in thread_counts() {
-            let parallel = match_list_parallel("abc", &haystacks, &config, threads);
+            let parallel = Matcher::new("abc", &config).match_list_parallel(&haystacks, threads);
             assert_eq!(&parallel, &sequential, "threads={threads}");
             assert!(parallel.is_sorted(), "threads={threads}");
         }
@@ -122,7 +132,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "threads must be positive")]
     fn zero_threads_panics() {
-        let _ = match_list_parallel("a", &["a"], &Config::default(), 0);
+        let _ = Matcher::new("a", &Config::default()).match_list_parallel(&["a"], 0);
     }
 
     #[test]
@@ -147,7 +157,7 @@ mod tests {
         }
 
         for query in ["abc !xyz", "abc a", "!abc !xyz"] {
-            for sort in [SortStrategy::Score, SortStrategy::Index] {
+            for sort in [SortStrategy::ScoreThenIndexAsc, SortStrategy::IndexAsc] {
                 let config = Config::default().sort(sort);
                 let mut matcher = Matcher::from_patterns(&Pattern::parse_query(query), &config);
                 let sequential = matcher.match_list(&haystacks);

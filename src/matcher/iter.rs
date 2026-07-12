@@ -161,7 +161,7 @@ mod tests {
             for max_typos in [None, Some(0), Some(1), Some(2), Some(3)] {
                 let config = Config::default()
                     .max_typos(max_typos)
-                    .sort(SortStrategy::Index);
+                    .sort(SortStrategy::IndexAsc);
                 let from_ext = HAYSTACKS
                     .iter()
                     .fuzzy_match(needle, &config)
@@ -183,7 +183,7 @@ mod tests {
             for max_typos in [None, Some(0), Some(1), Some(2), Some(3)] {
                 let config = Config::default()
                     .max_typos(max_typos)
-                    .sort(SortStrategy::Index);
+                    .sort(SortStrategy::IndexAsc);
                 let from_ext = HAYSTACKS
                     .iter()
                     .fuzzy_match_indices(needle, &config)
@@ -231,7 +231,7 @@ mod tests {
                 "deadbe",
                 &Config::default()
                     .max_typos(Some(0))
-                    .sort(SortStrategy::Index),
+                    .sort(SortStrategy::IndexAsc),
             )
             .map(|m| m.index)
             .collect::<Vec<_>>();

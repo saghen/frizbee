@@ -154,7 +154,7 @@ impl Matcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CaseMatching, Config, Matching, Pattern, SortStrategy, match_list};
+    use crate::{CaseMatching, Config, Matching, Pattern, SortStrategy};
 
     fn multi(query: &str, config: &Config) -> Matcher {
         Matcher::from_patterns(&Pattern::parse_query(query), config)
@@ -163,7 +163,7 @@ mod tests {
     #[test]
     fn multi_pattern_negation() {
         let haystacks = ["foobar", "foo", "barfoo", "bar", "qux"];
-        let config = Config::default().sort(SortStrategy::Index);
+        let config = Config::default().sort(SortStrategy::IndexAsc);
         let matches = multi("foo !bar", &config).match_list(&haystacks);
         assert_eq!(matches.iter().map(|m| m.index).collect::<Vec<_>>(), vec![1]);
     }
@@ -171,7 +171,7 @@ mod tests {
     #[test]
     fn multi_pattern_negated_matching_modes() {
         let haystacks = ["foo/bar", "bar/foo", "foo", "foobar"];
-        let config = Config::default().sort(SortStrategy::Index);
+        let config = Config::default().sort(SortStrategy::IndexAsc);
 
         // Prefix negation: excludes only haystacks starting with "bar"
         let matches = multi("foo !^bar", &config).match_list(&haystacks);
@@ -191,8 +191,8 @@ mod tests {
     #[test]
     fn multi_pattern_scores_sum() {
         let haystacks = ["foo", "xfoox", "bar"];
-        let config = Config::default().sort(SortStrategy::Index);
-        let single = match_list("foo", &haystacks, &config);
+        let config = Config::default().sort(SortStrategy::IndexAsc);
+        let single = Matcher::new("foo", &config).match_list(&haystacks);
         let combined = multi("foo foo", &config).match_list(&haystacks);
 
         assert_eq!(combined.len(), single.len());
@@ -208,7 +208,7 @@ mod tests {
     #[test]
     fn multi_pattern_all_negated() {
         let haystacks = ["foo", "bar", "xfoox", "qux"];
-        let config = Config::default().sort(SortStrategy::Index);
+        let config = Config::default().sort(SortStrategy::IndexAsc);
         let matches = multi("!foo", &config).match_list(&haystacks);
         assert_eq!(
             matches.iter().map(|m| m.index).collect::<Vec<_>>(),
@@ -240,7 +240,7 @@ mod tests {
     fn multi_pattern_match_iter_matches_match_list() {
         let haystacks = ["foobar", "foo", "barfoo", "bar", "qux", "FooBar"];
         for query in ["foo !bar", "foo bar", "!foo", "^foo bar$", "foo !^bar"] {
-            let config = Config::default().sort(SortStrategy::Index);
+            let config = Config::default().sort(SortStrategy::IndexAsc);
             let mut matcher = multi(query, &config);
             let from_iter = matcher.match_iter(haystacks.iter()).collect::<Vec<_>>();
             let from_list = matcher.match_list(&haystacks);
@@ -252,7 +252,7 @@ mod tests {
     fn multi_pattern_match_list_indices_matches_match_list() {
         let haystacks = ["foobar", "foo", "barfoo", "bar", "qux", "FooBar"];
         for query in ["foo !bar", "foo bar", "!foo", "foo fo"] {
-            let config = Config::default().sort(SortStrategy::Index);
+            let config = Config::default().sort(SortStrategy::IndexAsc);
             let mut matcher = multi(query, &config);
             let matches = matcher.match_list(&haystacks);
             let indices = matcher.match_list_indices(&haystacks);
@@ -283,25 +283,22 @@ mod tests {
     #[test]
     fn pattern_matching_override_matches_config() {
         let haystacks = ["fooX", "xfoo", "foo"];
-        let config = Config::default().sort(SortStrategy::Index);
+        let config = Config::default().sort(SortStrategy::IndexAsc);
 
         let from_pattern = Matcher::from_patterns(
             &[Pattern::new("foo", Some(Matching::Prefix), false)],
             &config,
         )
         .match_list(&haystacks);
-        let from_config = match_list(
-            "foo",
-            &haystacks,
-            &config.clone().matching(Matching::Prefix),
-        );
+        let from_config =
+            Matcher::new("foo", &config.clone().matching(Matching::Prefix)).match_list(&haystacks);
         assert_eq!(from_pattern, from_config);
     }
 
     #[test]
     fn set_config_preserves_pattern_matching_override() {
         let haystacks = ["fooX", "xfoo"];
-        let config = Config::default().sort(SortStrategy::Index);
+        let config = Config::default().sort(SortStrategy::IndexAsc);
         let mut matcher = multi("^foo", &config);
         matcher.set_config(config.clone().max_typos(None));
 
@@ -311,7 +308,7 @@ mod tests {
 
     #[test]
     fn set_pattern_reverts_to_literal_matching() {
-        let config = Config::default().sort(SortStrategy::Index);
+        let config = Config::default().sort(SortStrategy::IndexAsc);
         let mut matcher = multi("^foo", &config);
         assert_eq!(matcher.patterns(), &[Pattern::parse("^foo")]);
         assert_eq!(matcher.match_list(&["foobar", "^foo"]).len(), 1);
@@ -324,7 +321,7 @@ mod tests {
 
     #[test]
     fn set_patterns_skips_rebuild_when_unchanged() {
-        let config = Config::default().sort(SortStrategy::Index);
+        let config = Config::default().sort(SortStrategy::IndexAsc);
         let mut matcher = Matcher::new("foo", &config);
         matcher.set_patterns(&["foo".into()]);
         matcher.set_pattern("foo");
@@ -336,7 +333,7 @@ mod tests {
         let haystacks = ["Foo BAR", "foo bar"];
         let config = Config::default()
             .casing(CaseMatching::Smart)
-            .sort(SortStrategy::Index);
+            .sort(SortStrategy::IndexAsc);
         // "Foo" is case sensitive (contains uppercase), "bar" is not
         let matches = multi("Foo bar", &config).match_list(&haystacks);
         assert_eq!(matches.iter().map(|m| m.index).collect::<Vec<_>>(), vec![0]);
@@ -345,7 +342,7 @@ mod tests {
     #[test]
     fn multi_pattern_unicode_per_pattern() {
         let haystacks = ["다나 foo", "dana foo", "다나"];
-        let config = Config::default().sort(SortStrategy::Index);
+        let config = Config::default().sort(SortStrategy::IndexAsc);
         let matches = multi("다나 foo", &config).match_list(&haystacks);
         assert_eq!(matches.iter().map(|m| m.index).collect::<Vec<_>>(), vec![0]);
     }

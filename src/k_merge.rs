@@ -10,56 +10,83 @@ pub trait MergeOrder {
     fn less(left: &Match, right: &Match) -> bool;
 }
 
-/// Order by score (desc), tie-broken by index (asc). The default behavior.
-pub struct ByScoreThenIndex;
+/// Order by score (desc), tie-broken by index (asc)
+pub struct ByScoreThenIndexAsc;
 
-impl MergeOrder for ByScoreThenIndex {
+impl MergeOrder for ByScoreThenIndexAsc {
     #[inline(always)]
     fn less(left: &Match, right: &Match) -> bool {
         left.score > right.score || (left.score == right.score && left.index < right.index)
     }
 }
 
-/// Order by index (asc) only.
-pub struct ByIndex;
+/// Order by score (desc), tie-broken by index (desc)
+pub struct ByScoreThenIndexDesc;
 
-impl MergeOrder for ByIndex {
+impl MergeOrder for ByScoreThenIndexDesc {
+    #[inline(always)]
+    fn less(left: &Match, right: &Match) -> bool {
+        left.score > right.score || (left.score == right.score && left.index > right.index)
+    }
+}
+
+/// Order by index (asc)
+pub struct ByIndexAsc;
+
+impl MergeOrder for ByIndexAsc {
     #[inline(always)]
     fn less(left: &Match, right: &Match) -> bool {
         left.index < right.index
     }
 }
 
-/// Merges multiple pre-sorted runs of `Match`es into a single sorted `Vec`.
-///
-/// Uses a binary heap of cursors (one per run) to repeatedly emit the next
-/// globally best match in O(n log k) time, where `n` is the total number of
-/// matches and `k` is the number of runs.
-///
-/// This uses the default [`ByScoreThenIndex`] ordering. Use
-/// [`k_merge_matches_by`] to select a different ordering or use
-/// [`k_merge_matches_by_index`] to sort by index.
-pub fn k_merge_matches(runs: Vec<Vec<Match>>) -> Vec<Match> {
-    k_merge_matches_by::<ByScoreThenIndex>(runs)
+/// Order by index (desc)
+pub struct ByIndexDesc;
+
+impl MergeOrder for ByIndexDesc {
+    #[inline(always)]
+    fn less(left: &Match, right: &Match) -> bool {
+        left.index > right.index
+    }
 }
 
-/// Merges multiple pre-sorted runs of `Match`es into a single sorted `Vec`.
+/// Merge by score (desc), tie-broken by index (asc)
 ///
-/// Uses a binary heap of cursors (one per run) to repeatedly emit the next
-/// globally best match in O(n log k) time, where `n` is the total number of
-/// matches and `k` is the number of runs.
+/// See [`k_merge_matches_by`] for docs.
+pub fn k_merge_matches_by_score_then_index_asc(runs: Vec<Vec<Match>>) -> Vec<Match> {
+    k_merge_matches_by::<ByScoreThenIndexAsc>(runs)
+}
+
+/// Merge by score (desc), tie-broken by index (desc)
 ///
-/// This uses [`ByIndex`] ordering. Use [`k_merge_matches_by`] to select a
-/// different ordering or use [`k_merge_matches`] to sort by
-/// score (desc), tie-broken by index (asc).
-pub fn k_merge_matches_by_index(runs: Vec<Vec<Match>>) -> Vec<Match> {
-    k_merge_matches_by::<ByIndex>(runs)
+/// See [`k_merge_matches_by`] for docs.
+pub fn k_merge_matches_by_score_then_index_desc(runs: Vec<Vec<Match>>) -> Vec<Match> {
+    k_merge_matches_by::<ByScoreThenIndexDesc>(runs)
+}
+
+/// Merge by index (asc)
+///
+/// See [`k_merge_matches_by`] for docs.
+pub fn k_merge_matches_by_index_asc(runs: Vec<Vec<Match>>) -> Vec<Match> {
+    k_merge_matches_by::<ByIndexAsc>(runs)
+}
+
+/// Merge by index (desc)
+///
+/// See [`k_merge_matches_by`] for docs.
+pub fn k_merge_matches_by_index_desc(runs: Vec<Vec<Match>>) -> Vec<Match> {
+    k_merge_matches_by::<ByIndexDesc>(runs)
 }
 
 /// Merges multiple pre-sorted runs of `Match`es into a single sorted `Vec`,
 /// using the ordering policy `O`.
 ///
 /// The input runs must already be sorted according to the same order `O`.
+///
+/// [`k_merge_matches_by_score_then_index_asc`] to sort by score (desc), tie-broken
+/// by index (asc)
+/// [`k_merge_matches_by_index_asc`] to sort by index
+/// [`k_merge_matches_by_score_then_index_desc`] to sort by score (desc)
 pub fn k_merge_matches_by<O: MergeOrder>(runs: Vec<Vec<Match>>) -> Vec<Match> {
     let total_matches = runs.iter().map(Vec::len).sum();
 
@@ -164,7 +191,7 @@ mod tests {
             vec![mtch(100, 0), mtch(90, 2), mtch(80, 5)],
         ];
 
-        let merged = k_merge_matches(runs);
+        let merged = k_merge_matches_by_score_then_index_asc(runs);
 
         assert_eq!(
             merged,
@@ -190,7 +217,7 @@ mod tests {
             vec![mtch(95, 1), mtch(80, 3)],
         ];
 
-        let merged = k_merge_matches(runs);
+        let merged = k_merge_matches_by_score_then_index_asc(runs);
 
         assert_eq!(
             merged,
@@ -212,7 +239,7 @@ mod tests {
             .rev()
             .collect::<Vec<_>>();
 
-        let merged = k_merge_matches(runs);
+        let merged = k_merge_matches_by_score_then_index_asc(runs);
 
         assert_eq!(
             merged,
@@ -230,7 +257,7 @@ mod tests {
             vec![mtch(100, 0), mtch(90, 2), mtch(80, 4)],
         ];
 
-        let merged = k_merge_matches_by::<ByIndex>(runs);
+        let merged = k_merge_matches_by::<ByIndexAsc>(runs);
 
         assert_eq!(
             merged.iter().map(|m| m.index).collect::<Vec<_>>(),

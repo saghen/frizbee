@@ -15,20 +15,19 @@ pub(crate) use backend::*;
 #[cfg(test)]
 mod tests {
     use crate::r#const::*;
-    use crate::{
-        CaseMatching, Config, Match, Matching, SortStrategy, match_list, match_list_indices,
-    };
+    use crate::{CaseMatching, Config, Match, Matcher, Matching, SortStrategy};
 
     const CHAR_SCORE: u16 = MATCH_SCORE + MATCHING_CASE_BONUS;
 
     fn config(matching: Matching) -> Config {
         Config::default()
             .matching(matching)
-            .sort(SortStrategy::Index)
+            .sort(SortStrategy::IndexAsc)
     }
 
     fn scores(matching: Matching, needle: &str, haystacks: &[&str]) -> Vec<(u32, u16, bool)> {
-        match_list(needle, haystacks, &config(matching))
+        Matcher::new(needle, &config(matching))
+            .match_list(haystacks)
             .iter()
             .map(|m: &Match| (m.index, m.score, m.exact))
             .collect()
@@ -45,8 +44,9 @@ mod tests {
         let config = Config::default()
             .matching(Matching::Substring)
             .casing(casing)
-            .sort(SortStrategy::Index);
-        match_list(needle, &[haystack], &config)
+            .sort(SortStrategy::IndexAsc);
+        Matcher::new(needle, &config)
+            .match_list(&[haystack])
             .first()
             .map(|m| m.score)
     }
@@ -100,16 +100,17 @@ mod tests {
             ("fooBar", "fooBarBaz"),
             ("a", "abc"),
         ] {
-            let fuzzy = match_list(needle, &[haystack], &Config::default())[0].score;
-            let prefix = match_list(needle, &[haystack], &config(Matching::Prefix))[0].score;
+            let fuzzy = Matcher::new(needle, &Config::default()).match_list(&[haystack])[0].score;
+            let prefix =
+                Matcher::new(needle, &config(Matching::Prefix)).match_list(&[haystack])[0].score;
             assert_eq!(
                 prefix, fuzzy,
                 "prefix vs fuzzy mismatch for {needle:?} on {haystack:?}"
             );
         }
 
-        let fuzzy = match_list("foo", &["foo"], &Config::default())[0].score;
-        let exact = match_list("foo", &["foo"], &config(Matching::Exact))[0].score;
+        let fuzzy = Matcher::new("foo", &Config::default()).match_list(&["foo"])[0].score;
+        let exact = Matcher::new("foo", &config(Matching::Exact)).match_list(&["foo"])[0].score;
         assert_eq!(exact, fuzzy);
     }
 
@@ -138,9 +139,10 @@ mod tests {
         let respect = Config::default()
             .matching(Matching::Prefix)
             .casing(CaseMatching::Respect)
-            .sort(SortStrategy::Index);
+            .sort(SortStrategy::IndexAsc);
         assert_eq!(
-            match_list("foo", &haystacks, &respect)
+            Matcher::new("foo", &respect)
+                .match_list(&haystacks)
                 .iter()
                 .map(|m| m.index)
                 .collect::<Vec<_>>(),
@@ -173,7 +175,8 @@ mod tests {
 
     #[test]
     fn indices_are_contiguous_reversed() {
-        let matches = match_list_indices("abc", &["xxabcxx"], &config(Matching::Substring));
+        let matches =
+            Matcher::new("abc", &config(Matching::Substring)).match_list_indices(&["xxabcxx"]);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].indices, vec![4, 3, 2]);
     }
@@ -349,7 +352,8 @@ mod tests {
     #[test]
     fn unicode_indices_span_whole_utf8_run() {
         // Matched indices are byte offsets covering the full UTF-8 run, reversed.
-        let matches = match_list_indices("é다", &["xxé다yy"], &config(Matching::Substring));
+        let matches =
+            Matcher::new("é다", &config(Matching::Substring)).match_list_indices(&["xxé다yy"]);
         assert_eq!(matches.len(), 1);
         // "xx" is two bytes; "é" occupies bytes 2..4, "다" bytes 4..7.
         assert_eq!(matches[0].indices, vec![6, 5, 4, 3, 2]);

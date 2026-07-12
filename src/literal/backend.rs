@@ -161,7 +161,7 @@ mod backend_parity {
             ] {
                 let config = Config::default()
                     .matching(matching)
-                    .sort(SortStrategy::Index);
+                    .sort(SortStrategy::IndexAsc);
                 let expected = unsafe { probe::<LiteralScalar>(needle, haystack, &config) };
 
                 #[cfg(target_arch = "x86_64")]
