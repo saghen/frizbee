@@ -507,6 +507,50 @@ fn unicode_matcher_indices_cover_gaps_and_chunk_boundaries() {
 }
 
 #[test]
+fn long_prefiltered_fallback_preserves_scores_and_original_byte_offsets() {
+    let haystack = format!("xa{}b", "_".repeat(1200));
+    let scoring = Scoring {
+        gap_open_penalty: 0,
+        gap_extend_penalty: 0,
+        capitalization_bonus: 0,
+        delimiter_bonus: 0,
+        ..Scoring::default()
+    };
+    let filtered_config = Config::default()
+        .scoring(scoring)
+        .sort(SortStrategy::IndexAsc);
+    let unfiltered_config = filtered_config.clone().max_typos(None);
+
+    let filtered = Matcher::new("ab", &filtered_config).match_list(&[&haystack]);
+    let unfiltered = Matcher::new("ab", &unfiltered_config).match_list(&[&haystack]);
+    assert_match_views_eq("long prefiltered fallback", &filtered, &unfiltered);
+
+    let filtered_indices = Matcher::new("ab", &filtered_config).match_list_indices(&[&haystack]);
+    let unfiltered_indices =
+        Matcher::new("ab", &unfiltered_config).match_list_indices(&[&haystack]);
+    assert_eq!(
+        indices_views(&filtered_indices),
+        indices_views(&unfiltered_indices)
+    );
+    assert_eq!(filtered_indices[0].indices, vec![1202, 1]);
+
+    let unicode_haystack = format!("xé{}b", "_".repeat(1200));
+    let filtered = Matcher::new("éb", &filtered_config).match_list(&[&unicode_haystack]);
+    let unfiltered = Matcher::new("éb", &unfiltered_config).match_list(&[&unicode_haystack]);
+    assert_match_views_eq("long Unicode prefiltered fallback", &filtered, &unfiltered);
+
+    let filtered_indices =
+        Matcher::new("éb", &filtered_config).match_list_indices(&[&unicode_haystack]);
+    let unfiltered_indices =
+        Matcher::new("éb", &unfiltered_config).match_list_indices(&[&unicode_haystack]);
+    assert_eq!(
+        indices_views(&filtered_indices),
+        indices_views(&unfiltered_indices)
+    );
+    assert_eq!(filtered_indices[0].indices, vec![1203, 2, 1]);
+}
+
+#[test]
 fn unicode_matcher_typo_prefilter_counts_scalar_values() {
     let haystacks = ["ن", "😀", "x"];
     let config = Config::default()

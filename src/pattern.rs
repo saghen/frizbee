@@ -72,7 +72,8 @@ impl Pattern {
         if let Some(rest) = needle.strip_prefix('!') {
             needle = rest;
             negated = true;
-        } else if needle.starts_with("\\!") {
+        }
+        if needle.starts_with("\\!") {
             needle = &needle[1..]; // drop the backslash, keep the literal char
         }
 
@@ -190,6 +191,7 @@ mod tests {
         assert_parse("\\!foo", "!foo", None, false);
         assert_parse("foo\\ bar", "foo bar", None, false);
         assert_parse("!\\^foo", "^foo", Some(Matching::Substring), true);
+        assert_parse("!\\!foo", "!foo", Some(Matching::Substring), true);
     }
 
     #[test]
