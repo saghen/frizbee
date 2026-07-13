@@ -223,12 +223,8 @@ fn match_list_parallel(
     max_typos: Option<u16>,
 ) -> Vec<frizbee::Match> {
     let config = Config::default().max_typos(max_typos);
-    frizbee::match_list_parallel(
-        black_box(needle),
-        black_box(haystack),
-        black_box(&config),
-        8,
-    )
+    let mut matcher = Matcher::new(black_box(needle), black_box(&config));
+    matcher.match_list_parallel(black_box(haystack), 8)
 }
 
 fn nucleo_parallel_worker(haystack: &[&str]) -> Nucleo<String> {
