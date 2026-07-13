@@ -14,6 +14,7 @@ impl<B: Backend> SmithWaterman<B> {
                 haystack,
                 &self.scoring,
                 self.case_sensitive,
+                include_prefix,
             )
             .map(|(score, _)| score)
             .unwrap_or(0);

@@ -58,8 +58,13 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
                 haystack,
                 &self.scoring,
                 self.case_sensitive,
+                haystack_start_pos == 0,
             )
             .map(|(score, mut indices)| {
+                for index in &mut indices {
+                    *index = u32::try_from(*index as usize + haystack_start_pos)
+                        .expect("haystack byte index will overflow u32");
+                }
                 indices.reverse();
                 (score, indices)
             });
@@ -110,8 +115,13 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
                 haystack,
                 &self.scoring,
                 self.case_sensitive,
+                haystack_start_pos == 0,
             )
             .map(|(score, mut indices)| {
+                for index in &mut indices {
+                    *index = u32::try_from(*index as usize + haystack_start_pos)
+                        .expect("haystack byte index will overflow u32");
+                }
                 indices.reverse();
                 (score, indices)
             });
@@ -173,6 +183,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
                 haystack,
                 &self.scoring,
                 self.case_sensitive,
+                true,
             )
             .and_then(|(_, indices)| indices.last().copied())
             .unwrap_or(0) as u16;

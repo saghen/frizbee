@@ -9,6 +9,7 @@ pub fn match_greedy(
     haystack: &[u8],
     scoring: &Scoring,
     case_sensitive: bool,
+    include_prefix: bool,
 ) -> Option<(u16, Vec<u32>)> {
     let needle = case_needle(needle, case_sensitive);
     if needle.len() > haystack.len() {
@@ -64,7 +65,7 @@ pub fn match_greedy(
             if haystack_is_upper && previous_haystack_is_lower {
                 score += scoring.capitalization_bonus;
             }
-            if haystack_idx == 0 {
+            if include_prefix && haystack_idx == 0 {
                 score += scoring.prefix_bonus;
             }
             if previous_haystack_is_delimiter && !haystack_is_delimiter {
@@ -99,6 +100,7 @@ mod tests {
             haystack.as_bytes(),
             &Scoring::default(),
             false,
+            true,
         )
         .map(|(score, _)| score)
         .unwrap_or_default()
