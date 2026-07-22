@@ -26,7 +26,9 @@ impl Backend for BackendSSE {
     type Score = SseScore;
 
     fn is_available() -> bool {
-        is_x86_feature_detected!("sse4.1")
+        is_x86_feature_detected!("sse2")
+            && is_x86_feature_detected!("ssse3")
+            && is_x86_feature_detected!("sse4.1")
     }
 
     #[inline(always)]
