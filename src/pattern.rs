@@ -125,7 +125,7 @@ impl Pattern {
     pub fn parse_query(query: &str) -> Vec<Pattern> {
         let mut patterns = vec![];
         let mut start: Option<usize> = None;
-        let mut prev = '\0';
+        let mut escaped = false;
 
         let mut push = |atom: &str| {
             let pattern = Self::parse(atom);
@@ -135,14 +135,19 @@ impl Pattern {
         };
 
         for (i, c) in query.char_indices() {
-            if c.is_whitespace() && prev != '\\' {
+            if escaped {
+                // Previous char was an escaping backslash; keep this char in the atom
+                escaped = false;
+            } else if c == '\\' {
+                start.get_or_insert(i);
+                escaped = true;
+            } else if c.is_whitespace() {
                 if let Some(s) = start.take() {
                     push(&query[s..i]);
                 }
             } else if start.is_none() {
                 start = Some(i);
             }
-            prev = c;
         }
         if let Some(s) = start {
             push(&query[s..]);
@@ -213,6 +218,15 @@ mod tests {
         assert_eq!(patterns.len(), 2);
         assert_eq!(patterns[0].needle, "foo bar");
         assert_eq!(patterns[1].needle, "baz");
+    }
+
+    #[test]
+    fn parse_query_escaped_backslash_before_space_splits() {
+        // The escaped backslash consumes the escape, so the space still separates atoms
+        let patterns = Pattern::parse_query("foo\\\\ bar");
+        assert_eq!(patterns.len(), 2);
+        assert_eq!(patterns[0].needle, "foo\\\\");
+        assert_eq!(patterns[1].needle, "bar");
     }
 
     #[test]
