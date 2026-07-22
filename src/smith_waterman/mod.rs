@@ -135,7 +135,7 @@ pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
     fn score_haystack(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16;
     fn score_haystack_unicode(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16;
     #[cfg(feature = "match_end_col")]
-    fn match_end_col(&self, haystack: &[u8]) -> u16;
+    fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16;
 }
 
 #[cfg(test)]
@@ -351,7 +351,23 @@ mod tests {
     fn get_end_col(needle: &str, haystack: &str) -> u16 {
         let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
         matcher.score_haystack(haystack.as_bytes(), true);
-        matcher.match_end_col(haystack.as_bytes())
+        matcher.match_end_col(haystack.as_bytes(), false)
+    }
+
+    #[cfg(feature = "match_end_col")]
+    fn get_end_col_unicode(needle: &str, haystack: &str) -> u16 {
+        let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
+        matcher.score_haystack_unicode(haystack.as_bytes(), true);
+        matcher.match_end_col(haystack.as_bytes(), true)
+    }
+
+    #[test]
+    #[cfg(feature = "match_end_col")]
+    fn test_end_col_unicode() {
+        // The match column is the scalar start of "é" (byte 2), not the unwritten
+        // byte-length row that previously returned 0
+        assert_eq!(get_end_col_unicode("é", "xxé"), 2);
+        assert_eq!(get_end_col_unicode("abc", "abcdef"), 2);
     }
 
     #[test]

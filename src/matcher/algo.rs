@@ -261,7 +261,7 @@ where
             #[cfg(feature = "match_end_col")]
             end_col: self
                 .smith_waterman
-                .match_end_col(haystack)
+                .match_end_col(haystack, UNICODE)
                 .saturating_add(haystack_start_pos.min(u16::MAX as usize) as u16),
         }
     }
