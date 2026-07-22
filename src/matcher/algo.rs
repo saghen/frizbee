@@ -320,7 +320,7 @@ where
             .delimiter_bonus
             .saturating_sub(scoring.gap_open_penalty)
             .max(scoring.capitalization_bonus.div_ceil(2))
-            + scoring.matching_case_bonus;
+            .saturating_add(scoring.matching_case_bonus);
         scoring.guard_against_score_overflow(self.needle.len(), max_bonus_per_char);
     }
 }
@@ -335,7 +335,44 @@ fn trim_haystack(haystack: &[u8], start_pos: usize, end_pos: usize) -> (&[u8], u
 
 #[cfg(test)]
 mod tests {
-    use crate::{Config, Matcher, SortStrategy};
+    use crate::{Config, Matcher, Scoring, SortStrategy};
+
+    #[test]
+    fn all_zero_scoring_does_not_divide_by_zero() {
+        let config = Config::default().scoring(Scoring {
+            match_score: 0,
+            mismatch_penalty: 0,
+            gap_open_penalty: 0,
+            gap_extend_penalty: 0,
+            prefix_bonus: 0,
+            capitalization_bonus: 0,
+            matching_case_bonus: 0,
+            exact_match_bonus: 0,
+            delimiter_bonus: 0,
+        });
+        Matcher::new("foo", &config).match_list(&["foobar"]);
+    }
+
+    #[test]
+    fn gap_open_below_gap_extend_does_not_underflow() {
+        let config = Config::default().scoring(Scoring {
+            gap_open_penalty: 1,
+            gap_extend_penalty: 5,
+            ..Scoring::default()
+        });
+        Matcher::new("foo", &config).match_list(&["foobar", "fabco"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "needle too long")]
+    fn huge_bonuses_report_descriptive_overflow_error() {
+        let config = Config::default().scoring(Scoring {
+            capitalization_bonus: 60000,
+            matching_case_bonus: 40000,
+            ..Scoring::default()
+        });
+        Matcher::new("f", &config);
+    }
 
     #[test]
     fn unsorted_output_preserves_candidate_order() {

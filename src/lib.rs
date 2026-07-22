@@ -462,8 +462,15 @@ impl Scoring {
     /// is the largest bonus a single matched character can add on top of `match_score`; it differs
     /// between the fuzzy and literal scorers, so each passes its own.
     pub(crate) fn guard_against_score_overflow(&self, needle_len: usize, max_bonus_per_char: u16) {
-        let max_per_char = self.match_score + max_bonus_per_char;
-        let max_needle_len = (u16::MAX - self.prefix_bonus - self.exact_match_bonus) / max_per_char;
+        let max_per_char = self.match_score.saturating_add(max_bonus_per_char);
+        // A zero per-char score can never overflow regardless of needle length
+        if max_per_char == 0 {
+            return;
+        }
+        let headroom = u16::MAX
+            .saturating_sub(self.prefix_bonus)
+            .saturating_sub(self.exact_match_bonus);
+        let max_needle_len = headroom / max_per_char;
         assert!(
             needle_len <= max_needle_len as usize,
             "needle too long and could overflow the u16 score: {needle_len} > {max_needle_len}"

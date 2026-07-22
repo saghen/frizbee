@@ -38,8 +38,11 @@ impl<B: Backend> SmithWaterman<B> {
         unsafe {
             // Constants
             let gap_extend_penalty = B::Score::splat(scoring.gap_extend_penalty);
-            let gap_open_penalty =
-                B::Score::splat(scoring.gap_open_penalty - scoring.gap_extend_penalty);
+            let gap_open_penalty = B::Score::splat(
+                scoring
+                    .gap_open_penalty
+                    .saturating_sub(scoring.gap_extend_penalty),
+            );
             let match_score = B::Score::splat(scoring.match_score + scoring.mismatch_penalty);
             let mismatch_penalty = B::Score::splat(scoring.mismatch_penalty);
             let matching_case_bonus = B::Score::splat(scoring.matching_case_bonus);

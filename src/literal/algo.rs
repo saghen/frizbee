@@ -316,8 +316,10 @@ impl<B: Backend> LiteralImpl<B> {
     fn guard_against_score_overflow(needle_len: usize, scoring: &Scoring) {
         // Without gaps, a matched character earns at most one of the capitalization or delimiter
         // bonuses, plus the case bonus, on top of `match_score`.
-        let max_bonus_per_char =
-            scoring.capitalization_bonus.max(scoring.delimiter_bonus) + scoring.matching_case_bonus;
+        let max_bonus_per_char = scoring
+            .capitalization_bonus
+            .max(scoring.delimiter_bonus)
+            .saturating_add(scoring.matching_case_bonus);
         scoring.guard_against_score_overflow(needle_len, max_bonus_per_char);
     }
 }
