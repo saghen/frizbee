@@ -112,13 +112,17 @@ impl<B: Backend> Prefilter<B> {
         let mut start = 0usize;
 
         while start + needle_char.len <= len {
-            let (chunk, mut chunk_mask) =
-                unsafe { load_window::<B>(haystack, start + needle_char.len - 1, len) };
+            // keep the subsequence mask (`available`) separate from the load's width-dependent
+            // bounds (`valid`) so a width change can reload without dropping consumed lanes
+            let mut char_len = needle_char.len;
+            let (mut chunk, mut valid) =
+                unsafe { load_window::<B>(haystack, start + char_len - 1, len) };
+            let mut available = B::Mask::all();
 
             loop {
-                // check the last byte first since it's the most discriminating
-                // since the prefix bytes identify the script/block, not the char
-                // and nearby chars are likely to be all in the same script/block
+                let chunk_mask = available.and(valid);
+                // check the last byte first since it's the most discriminating: the
+                // prefix bytes identify the script/block, not the char
                 let mut mask = unsafe { B::eq(chunk, last_needle_char_bytes.0) }.and(chunk_mask);
                 if mask.is_zero() {
                     // check the case flipped version
@@ -160,7 +164,7 @@ impl<B: Backend> Prefilter<B> {
                     }
                 }
 
-                chunk_mask = chunk_mask.clear_through_lowest(mask);
+                available = available.clear_through_lowest(mask);
                 if can_skip_chunks {
                     match_start_pos = start + mask.trailing_zeros();
                     can_skip_chunks = false;
@@ -174,6 +178,15 @@ impl<B: Backend> Prefilter<B> {
                             B::splat(needle_char.flipped_chars[needle_char.len - 1]),
                         )
                     };
+                    // reload the window when the char width changes to realign the lanes
+                    if needle_char.len != char_len {
+                        if start + needle_char.len > len {
+                            break;
+                        }
+                        char_len = needle_char.len;
+                        (chunk, valid) =
+                            unsafe { load_window::<B>(haystack, start + char_len - 1, len) };
+                    }
                 } else if start + needle_char.len - 1 + B::LANES >= len {
                     return (
                         true,

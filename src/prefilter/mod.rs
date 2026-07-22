@@ -509,6 +509,37 @@ mod tests {
         });
     }
 
+    #[test]
+    fn unicode_mixed_width_matches_oracle() {
+        // needles that mix char byte widths so a width change happens mid-scan, which
+        // previously misaligned the SIMD window on the 0-typo path
+        let needles = ["aé", "éa", "aébc", "é✓", "✓é", "a✓é", "é😀x", "aXé😀"];
+        let haystacks = [
+            "",
+            "aé",
+            "xaéy",
+            "aébc",
+            "é✓",
+            "a✓é",
+            "zzaé😀xx",
+            "éeé",
+            "aaébcbc",
+            "no match",
+            "aXé😀qw",
+        ];
+        for needle in needles {
+            for haystack in haystacks {
+                for max_typos in 0..=3 {
+                    assert_unicode_case_matches_oracle(&UnicodePrefilterCase {
+                        needle: needle.to_owned(),
+                        haystack: haystack.to_owned(),
+                        max_typos,
+                    });
+                }
+            }
+        }
+    }
+
     fn result_generic(needle: &str, haystack: &str, max_typos: u16) -> (bool, usize, usize) {
         let haystack = haystack.as_bytes();
         let scalar_result = kernel_result::<PrefilterScalar>(needle, haystack, max_typos, false);
@@ -693,7 +724,7 @@ mod tests {
                 test_bound(192, 48),
                 &[0, 1, 2, 3, 7, 8, 15, 16, 31, 32, 63, 64],
             );
-            let max_typos = (cursor.next() as u16 % 5) + 1;
+            let max_typos = cursor.next() as u16 % 6;
             let mut needle = cursor.unicode_string(needle_len);
             if needle.is_ascii() {
                 needle.push('é');
