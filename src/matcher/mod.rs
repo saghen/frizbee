@@ -597,6 +597,20 @@ mod tests {
     }
 
     #[test]
+    fn multibyte_needle_indices_with_unicode_ignored() {
+        let config = Config::default()
+            .unicode(crate::UnicodeMatching::Ignore)
+            .sort(SortStrategy::IndexAsc);
+
+        let matches = Matcher::new("é", &config).match_list_indices(&["xxé"]);
+        assert_eq!(matches.len(), 1);
+        let mut indices = matches[0].indices.clone();
+        indices.sort_unstable();
+        // "é" is two bytes (0xC3 0xA9) at byte offsets 2 and 3 of "xxé"
+        assert_eq!(indices, vec![2, 3]);
+    }
+
+    #[test]
     fn test_case_sensitive_matching() {
         let haystack = ["foo", "FOO", "fOo", "xxfooxx"];
         let config = Config::default().sort(SortStrategy::IndexAsc);

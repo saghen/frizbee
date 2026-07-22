@@ -85,12 +85,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         for pos in self.iter_alignment_path(needle_len, haystack_start_pos, None, score, max_typos)
         {
             match pos {
-                Some(Alignment::Match((needle_idx, haystack_idx))) => {
-                    let needle_char = self.needle.chars().nth(needle_idx).unwrap();
-                    for byte in 0..needle_char.len_utf8() {
-                        indices.push((haystack_idx - byte) as u32);
-                    }
-                }
+                Some(Alignment::Match((_, haystack_idx))) => indices.push(haystack_idx as u32),
                 Some(_) => {}
                 // TODO: it's possible for us to lose alignment due to score == 0
                 // but to stay consistent with results of `match_list`, we simply
