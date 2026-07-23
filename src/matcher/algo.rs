@@ -313,15 +313,12 @@ where
 
     #[inline(always)]
     fn guard_against_score_overflow(&self) {
-        // The largest bonus a matched character can earn on top of `match_score`: a gap-adjusted
-        // delimiter or half a capitalization bonus (whichever is larger), plus the case bonus.
         let scoring = &self.config.scoring;
-        let max_bonus_per_char = scoring
-            .delimiter_bonus
-            .saturating_sub(scoring.gap_open_penalty)
-            .max(scoring.capitalization_bonus.div_ceil(2))
-            .saturating_add(scoring.matching_case_bonus);
-        scoring.guard_against_score_overflow(self.needle.len(), max_bonus_per_char);
+        scoring.guard_against_score_overflow(
+            self.needle.len(),
+            scoring.max_per_char_bonus(),
+            scoring.max_one_time_bonus(),
+        );
     }
 }
 
@@ -372,6 +369,41 @@ mod tests {
             ..Scoring::default()
         });
         Matcher::new("f", &config);
+    }
+
+    #[test]
+    fn penalty_above_u8_range_is_not_truncated() {
+        // mismatch_penalty 260 previously wrapped to 4 in the u8 backend's splat,
+        // so raising the penalty raised the score
+        let score = |mismatch_penalty| {
+            let config = Config::default()
+                .max_typos(Some(1))
+                .scoring(Scoring {
+                    mismatch_penalty,
+                    ..Scoring::default()
+                });
+            Matcher::new("abc", &config).match_list(&["aXc"])[0].score
+        };
+        assert!(score(260) <= score(255));
+    }
+
+    #[test]
+    fn zero_gap_capitalization_scores_do_not_saturate_u8() {
+        // with no gap penalties, every matched char can earn the full capitalization
+        // bonus, so the u8 backend's 255 ceiling must not be selected
+        let config = Config::default().scoring(Scoring {
+            match_score: 40,
+            capitalization_bonus: 40,
+            mismatch_penalty: 0,
+            gap_open_penalty: 0,
+            gap_extend_penalty: 0,
+            prefix_bonus: 0,
+            matching_case_bonus: 0,
+            exact_match_bonus: 0,
+            delimiter_bonus: 0,
+        });
+        let matches = Matcher::new("BBBB", &config).match_list(&["aBaBaBaB"]);
+        assert_eq!(matches[0].score, 4 * (40 + 40));
     }
 
     #[test]

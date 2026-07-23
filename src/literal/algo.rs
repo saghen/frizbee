@@ -320,7 +320,7 @@ impl<B: Backend> LiteralImpl<B> {
             .capitalization_bonus
             .max(scoring.delimiter_bonus)
             .saturating_add(scoring.matching_case_bonus);
-        scoring.guard_against_score_overflow(needle_len, max_bonus_per_char);
+        scoring.guard_against_score_overflow(needle_len, max_bonus_per_char, 0);
     }
 }
 

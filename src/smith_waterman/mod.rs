@@ -85,20 +85,27 @@ pub type SmithWatermanNEONU8 = SmithWaterman<BackendNEONU8>;
 pub type SmithWatermanScalar = SmithWaterman<BackendScalar8>;
 pub type SmithWatermanScalarU8 = SmithWaterman<BackendScalar16U8>;
 
-/// Returns true if every possible Smith-Waterman matrix cell value for this
-/// needle length and scoring config fits in a u8. The u8 backends are
-/// otherwise identical to the u16 backends but with double the lane count
-/// (64 cells/chunk on AVX-512, 32 on AVX2, 16 on SSE/NEON).
+/// Returns true if every possible Smith-Waterman matrix cell value for this needle length and
+/// scoring config fits in a u8. The u8 backends are otherwise identical to the u16 backends but
+/// with double the lane count (64 cells/chunk on AVX-512, 32 on AVX2, 16 on SSE/NEON).
 #[inline]
 pub(crate) fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
-    let max_per_char = scoring.match_score as usize
-        + scoring.matching_case_bonus as usize
-        + scoring
-            .delimiter_bonus
-            .saturating_sub(scoring.gap_open_penalty)
-            .max(scoring.capitalization_bonus.div_ceil(2)) as usize;
-    let max_matrix_score = max_per_char * needle_len + scoring.prefix_bonus as usize;
-    max_matrix_score <= u8::MAX as usize
+    let max_constant = (scoring.match_score as usize + scoring.mismatch_penalty as usize)
+        .max(scoring.gap_open_penalty as usize)
+        .max(scoring.gap_extend_penalty as usize)
+        .max(scoring.matching_case_bonus as usize)
+        .max(scoring.capitalization_bonus as usize)
+        .max(scoring.delimiter_bonus as usize)
+        .max(scoring.prefix_bonus as usize);
+    if max_constant > u8::MAX as usize {
+        return false;
+    }
+
+    let max_per_char = scoring.match_score as usize + scoring.max_per_char_bonus() as usize;
+    let max_matrix_score = max_per_char * needle_len
+        + scoring.max_one_time_bonus() as usize
+        + scoring.prefix_bonus as usize;
+    max_matrix_score + scoring.mismatch_penalty as usize <= u8::MAX as usize
 }
 
 #[derive(Debug, Clone)]

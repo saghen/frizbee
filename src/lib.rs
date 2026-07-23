@@ -476,18 +476,42 @@ impl Default for Scoring {
 }
 
 impl Scoring {
-    /// Panics if a needle of `needle_len` bytes could overflow the `u16` score. `max_bonus_per_char`
-    /// is the largest bonus a single matched character can add on top of `match_score`; it differs
-    /// between the fuzzy and literal scorers, so each passes its own.
-    pub(crate) fn guard_against_score_overflow(&self, needle_len: usize, max_bonus_per_char: u16) {
+    /// Max additional score that a needle character can receive, aside from the match score
+    pub(crate) fn max_per_char_bonus(&self) -> u16 {
+        let bonus = self.delimiter_bonus.max(self.capitalization_bonus);
+        let amortized = bonus
+            .div_ceil(2)
+            .max(bonus.saturating_sub(self.gap_open_penalty));
+        amortized.saturating_add(self.matching_case_bonus)
+    }
+
+    /// Max bonus given to a score one time, aside from the prefix or exact bonuses
+    pub(crate) fn max_one_time_bonus(&self) -> u16 {
+        let bonus = self.delimiter_bonus.max(self.capitalization_bonus);
+        let amortized = bonus
+            .div_ceil(2)
+            .max(bonus.saturating_sub(self.gap_open_penalty));
+        bonus - amortized
+    }
+
+    /// Panics if a needle of `needle_len` bytes could overflow the `u16` score
+    pub(crate) fn guard_against_score_overflow(
+        &self,
+        needle_len: usize,
+        max_bonus_per_char: u16,
+        max_one_time_bonus: u16,
+    ) {
         let max_per_char = self.match_score.saturating_add(max_bonus_per_char);
         // A zero per-char score can never overflow regardless of needle length
         if max_per_char == 0 {
             return;
         }
+        // The diagonal transiently holds the score plus the mismatch penalty before subtracting it
         let headroom = u16::MAX
             .saturating_sub(self.prefix_bonus)
-            .saturating_sub(self.exact_match_bonus);
+            .saturating_sub(self.exact_match_bonus)
+            .saturating_sub(self.mismatch_penalty)
+            .saturating_sub(max_one_time_bonus);
         let max_needle_len = headroom / max_per_char;
         assert!(
             needle_len <= max_needle_len as usize,
