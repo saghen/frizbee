@@ -389,6 +389,13 @@ mod tests {
 
     #[test]
     #[cfg(feature = "match_end_col")]
+    fn huge_haystack_end_col_saturates() {
+        let haystack = format!("a{}bc", "x".repeat(70000));
+        assert_eq!(get_end_col("abc", &haystack), u16::MAX);
+    }
+
+    #[test]
+    #[cfg(feature = "match_end_col")]
     fn long_input_boundary_end_cols_cover_matrix_and_greedy() {
         for (prefix_len, want) in [(509usize, 511u16), (510, 512)] {
             let haystack = format!("{}abc", "x".repeat(prefix_len));

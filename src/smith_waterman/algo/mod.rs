@@ -181,7 +181,8 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
                 true,
             )
             .and_then(|(_, indices)| indices.last().copied())
-            .unwrap_or(0) as u16;
+            .unwrap_or(0)
+            .min(u16::MAX as u32) as u16;
         }
 
         // The unicode scorer walks one row per codepoint, the ASCII scorer one per byte

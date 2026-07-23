@@ -16,7 +16,7 @@ pub fn match_greedy(
         return None;
     }
 
-    let mut score = 0;
+    let mut score: u16 = 0;
     let mut indices = vec![];
     let mut haystack_idx = 0;
 
@@ -47,29 +47,32 @@ pub fn match_greedy(
             }
 
             // found a match, add the scores and continue the outer loop
-            score += scoring.match_score;
+            score = score.saturating_add(scoring.match_score);
 
             // gap penalty
             if haystack_idx != haystack_start_idx && needle_idx != 0 {
+                let gap_len = (haystack_idx - haystack_start_idx)
+                    .saturating_sub(1)
+                    .min(u16::MAX as usize) as u16;
                 score = score.saturating_sub(
-                    scoring.gap_open_penalty
-                        + scoring.gap_extend_penalty
-                            * (haystack_idx - haystack_start_idx).saturating_sub(1) as u16,
+                    scoring
+                        .gap_open_penalty
+                        .saturating_add(scoring.gap_extend_penalty.saturating_mul(gap_len)),
                 );
             }
 
             // bonuses (see constant documentation for details)
             if needle_char == haystack_char {
-                score += scoring.matching_case_bonus;
+                score = score.saturating_add(scoring.matching_case_bonus);
             }
             if haystack_is_upper && previous_haystack_is_lower {
-                score += scoring.capitalization_bonus;
+                score = score.saturating_add(scoring.capitalization_bonus);
             }
             if include_prefix && haystack_idx == 0 {
-                score += scoring.prefix_bonus;
+                score = score.saturating_add(scoring.prefix_bonus);
             }
             if previous_haystack_is_delimiter && !haystack_is_delimiter {
-                score += scoring.delimiter_bonus;
+                score = score.saturating_add(scoring.delimiter_bonus);
             }
 
             previous_haystack_is_delimiter = delimiter_bonus_enabled && haystack_is_delimiter;
@@ -148,6 +151,13 @@ mod tests {
         assert_eq!(get_score("-", "a-bc"), CHAR_SCORE);
         assert_eq!(get_score("-", "a--bc"), CHAR_SCORE);
         assert!(get_score("a_b", "a_bb") > get_score("a_b", "a__b"));
+    }
+
+    #[test]
+    fn huge_gap_saturates_instead_of_overflowing() {
+        // the gap penalty exceeds u16::MAX, so the score saturates to 0 before the case bonus
+        let haystack = format!("a{}b", "x".repeat(70000));
+        assert_eq!(get_score("ab", &haystack), MATCHING_CASE_BONUS);
     }
 
     #[test]

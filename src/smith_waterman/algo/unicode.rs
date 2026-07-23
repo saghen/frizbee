@@ -43,7 +43,8 @@ impl<B: Backend> SmithWaterman<B> {
                     .gap_open_penalty
                     .saturating_sub(scoring.gap_extend_penalty),
             );
-            let match_score = B::Score::splat(scoring.match_score + scoring.mismatch_penalty);
+            let match_score =
+                B::Score::splat(scoring.match_score.saturating_add(scoring.mismatch_penalty));
             let mismatch_penalty = B::Score::splat(scoring.mismatch_penalty);
             let matching_case_bonus = B::Score::splat(scoring.matching_case_bonus);
             let capitalization_bonus = B::Score::splat(scoring.capitalization_bonus);
