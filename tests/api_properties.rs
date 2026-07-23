@@ -3,7 +3,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use frizbee::k_merge::k_merge_matches_by_score_then_index_desc;
 use frizbee::{
-    CaseMatching, Config, Match, MatchIndices, Matcher, Matching, Pattern, Scoring, SortStrategy,
+    CaseMatching, Config, Match, MatchIndices, Matcher, Matching, Pattern, PatternConfig, Scoring,
+    SortStrategy,
 };
 
 // Did you know you could do this?? News to me
@@ -263,7 +264,11 @@ impl MultiPatternCase {
                 };
                 let negated = cursor.bool();
                 let needle_len = cursor.len(8, &[0, 1, 2, 3, 7, 8]);
-                Pattern::new(&cursor.string(needle_len), matching, negated)
+                Pattern::new(
+                    &cursor.string(needle_len),
+                    PatternConfig::default().matching(matching),
+                )
+                .negated(negated)
             })
             .collect();
 
@@ -322,7 +327,7 @@ fn reference_multi_pattern(case: &MultiPatternCase) -> Vec<Match> {
     let per_pattern = active
         .iter()
         .map(|pattern| {
-            let matching = pattern.matching.unwrap_or(case.config.matching);
+            let matching = pattern.config.matching.unwrap_or(case.config.matching);
             Matcher::new(&pattern.needle, &config.clone().matching(matching))
                 .match_list(&case.haystacks)
                 .into_iter()

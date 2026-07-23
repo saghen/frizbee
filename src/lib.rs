@@ -48,17 +48,35 @@
 //! let matches = matcher.match_list(&haystacks);
 //! ```
 //!
+//! `Pattern::parse_query` returns the parsed patterns, so per-pattern config can be applied
+//! before building the matcher. For example, setting the max typos based on needle length:
+//!
+//! ```rust
+//! use frizbee::{Config, Matcher, Pattern};
+//!
+//! let haystacks = ["foo", "barfoo", "foobar", "bar/foo"];
+//! let patterns = Pattern::parse_query("foo !^bar")
+//!     .into_iter()
+//!     .map(|pattern| {
+//!         let max_typos = (pattern.needle.len() / 4) as u16;
+//!         pattern.max_typos(Some(max_typos))
+//!     })
+//!     .collect::<Vec<_>>();
+//! let mut matcher = Matcher::from_patterns(&patterns, &Config::default());
+//! let matches = matcher.match_list(&haystacks);
+//! ```
+//!
 //! # Example: using explicit `Pattern`s
 //!
 //! If query syntax is not a good fit, build patterns directly and pass them to
 //! `Matcher::from_patterns` or `Matcher::new` (if you only have one pattern).
 //!
 //! ```rust
-//! use frizbee::{Config, Matcher, Matching, Pattern};
+//! use frizbee::{Config, Matcher, Matching, Pattern, PatternConfig};
 //!
 //! let patterns = [
-//!     Pattern::new("foo", None, false),
-//!     Pattern::new("bar", Some(Matching::Prefix), true),
+//!     Pattern::new("foo", PatternConfig::default()),
+//!     Pattern::new("bar", PatternConfig::default().matching(Some(Matching::Prefix))).negated(true),
 //! ];
 //! let haystacks = ["foo", "barfoo", "foobar"];
 //!
@@ -99,7 +117,7 @@ mod sort;
 use r#const::*;
 
 pub use matcher::Matcher;
-pub use pattern::Pattern;
+pub use pattern::{Pattern, PatternConfig};
 pub use sort::radix_sort_matches;
 
 /// Iterator extension for fuzzy matching

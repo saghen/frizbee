@@ -11,7 +11,7 @@ For commercial support, please [contact me](mailto:frizbee@liam.super.fish). I'd
 See [the docs](https://docs.rs/frizbee) for more usage examples.
 
 ```rust
-use frizbee::{Config, Matcher};
+use frizbee::{Config, Matcher, Pattern};
 
 let needle = "fBr";
 let haystacks = ["fooBar", "foo_bar", "barfoo", "prelude", "println!"];
@@ -26,6 +26,17 @@ let matches = matcher.match_list_parallel(&haystacks, 8);
 // fuzzy  substring  prefix    suffix    exact    negated (combines with others)
 // foo    'foo       ^foo      foo$      ^foo$    !foo
 let mut matcher = Matcher::from_query("foo !^bar", &Config::default());
+let matches = matcher.match_list(&haystacks);
+
+// or override config per-pattern (e.g. setting max typos based on needle length)
+let patterns = Pattern::parse_query("foo !^bar")
+    .into_iter()
+    .map(|pattern| {
+        let max_typos = (pattern.needle.len() / 4) as u16;
+        pattern.max_typos(Some(max_typos))
+    })
+    .collect::<Vec<_>>();
+let mut matcher = Matcher::from_patterns(&patterns, &Config::default());
 let matches = matcher.match_list(&haystacks);
 ```
 

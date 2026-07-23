@@ -22,20 +22,20 @@ impl CompiledPatterns {
 pub(super) struct CompiledPattern {
     pub(super) negated: bool,
     pub(super) needs_unicode: bool,
+    pub(super) max_typos: Option<u16>,
     pub(super) backend: MatcherBackend,
 }
 
 impl Matcher {
     pub(super) fn match_one_multi<S: AsRef<str>>(
         patterns: &mut [CompiledPattern],
-        max_typos: Option<u16>,
         haystack: S,
         index: u32,
     ) -> Option<Match> {
         let haystack = haystack.as_ref();
         let mut combined = Match::from_index(index as usize);
         for pattern in patterns {
-            let result = Self::dispatch_pattern_one(pattern, max_typos, haystack, index);
+            let result = Self::dispatch_pattern_one(pattern, haystack, index);
             if pattern.negated {
                 if result.is_some() {
                     return None;
@@ -55,7 +55,6 @@ impl Matcher {
 
     pub(super) fn match_one_indices_multi<S: AsRef<str>>(
         patterns: &mut [CompiledPattern],
-        max_typos: Option<u16>,
         haystack: S,
         index: u32,
     ) -> Option<MatchIndices> {
@@ -63,11 +62,11 @@ impl Matcher {
         let mut combined = MatchIndices::from_index(index as usize);
         for pattern in patterns {
             if pattern.negated {
-                if Self::dispatch_pattern_one(pattern, max_typos, haystack, index).is_some() {
+                if Self::dispatch_pattern_one(pattern, haystack, index).is_some() {
                     return None;
                 }
             } else {
-                let m = Self::dispatch_pattern_one_indices(pattern, max_typos, haystack, index)?;
+                let m = Self::dispatch_pattern_one_indices(pattern, haystack, index)?;
                 combined.score = combined.score.saturating_add(m.score);
                 combined.exact |= m.exact;
                 combined.indices.extend(m.indices);
@@ -84,7 +83,6 @@ impl Matcher {
     /// survived the previous patterns. Scores are summed across the non-negated patterns.
     pub(super) fn match_list_multi_into<S: AsRef<str>>(
         patterns: &mut [CompiledPattern],
-        max_typos: Option<u16>,
         haystacks: &[S],
         haystack_index_offset: u32,
         matches: &mut Vec<Match>,
@@ -94,7 +92,6 @@ impl Matcher {
         match base_pattern_idx {
             Some(i) => Self::dispatch_pattern_into(
                 &mut patterns[i],
-                max_typos,
                 haystacks,
                 haystack_index_offset,
                 &mut candidates,
@@ -116,7 +113,7 @@ impl Matcher {
                 .map(|m| haystacks[(m.index - haystack_index_offset) as usize].as_ref())
                 .collect::<Vec<&str>>();
             let mut hits = Vec::new();
-            Self::dispatch_pattern_into(pattern, max_typos, &gathered, 0, &mut hits);
+            Self::dispatch_pattern_into(pattern, &gathered, 0, &mut hits);
 
             // Backends emit matches in input order, so `hit.index` is the position of the
             // candidate it matched.
@@ -154,7 +151,7 @@ impl Matcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CaseMatching, Config, Matching, Pattern, SortStrategy};
+    use crate::{CaseMatching, Config, Matching, Pattern, PatternConfig, SortStrategy};
 
     fn multi(query: &str, config: &Config) -> Matcher {
         Matcher::from_patterns(&Pattern::parse_query(query), config)
@@ -286,7 +283,10 @@ mod tests {
         let config = Config::default().sort(SortStrategy::IndexAsc);
 
         let from_pattern = Matcher::from_patterns(
-            &[Pattern::new("foo", Some(Matching::Prefix), false)],
+            &[Pattern::new(
+                "foo",
+                PatternConfig::default().matching(Some(Matching::Prefix)),
+            )],
             &config,
         )
         .match_list(&haystacks);
@@ -326,6 +326,63 @@ mod tests {
         matcher.set_patterns(&["foo".into()]);
         matcher.set_pattern("foo");
         assert_eq!(matcher.match_list(&["foobar"]).len(), 1);
+    }
+
+    #[test]
+    fn pattern_max_typos_override_beats_config() {
+        // "helloz" has a 'z' absent from "hello", so it needs one typo to match. The config
+        // forbids typos, but the pattern raises the budget to one.
+        let haystacks = ["hello", "world"];
+        let config = Config::default()
+            .max_typos(Some(0))
+            .sort(SortStrategy::IndexAsc);
+
+        let strict = Matcher::from_patterns(&["helloz".into()], &config).match_list(&haystacks);
+        assert!(strict.is_empty());
+
+        let lenient = Matcher::from_patterns(
+            &[Pattern::new(
+                "helloz",
+                PatternConfig::default().max_typos(Some(1)),
+            )],
+            &config,
+        )
+        .match_list(&haystacks);
+        assert_eq!(lenient.iter().map(|m| m.index).collect::<Vec<_>>(), vec![0]);
+    }
+
+    #[test]
+    fn pattern_max_typos_override_applies_per_pattern() {
+        // "foo" inherits the config's zero-typo budget while "barz" (with its absent 'z')
+        // raises its own budget to one. So "foo" must match exactly but "bar" may be a typo off.
+        let haystacks = ["foo bar", "fox bar"];
+        let config = Config::default()
+            .max_typos(Some(0))
+            .sort(SortStrategy::IndexAsc);
+        let patterns = [
+            Pattern::new("foo", PatternConfig::default()),
+            Pattern::new("barz", PatternConfig::default().max_typos(Some(1))),
+        ];
+        let matches = Matcher::from_patterns(&patterns, &config).match_list(&haystacks);
+        // "fox bar" drops out: "foo" can't match "fox" within zero typos
+        assert_eq!(matches.iter().map(|m| m.index).collect::<Vec<_>>(), vec![0]);
+    }
+
+    #[test]
+    fn set_config_preserves_pattern_max_typos_override() {
+        let haystacks = ["helloz"];
+        let patterns = [Pattern::new(
+            "hellozz",
+            PatternConfig::default().max_typos(Some(1)),
+        )];
+        let mut matcher = Matcher::from_patterns(&patterns, &Config::default());
+        // Rebuild under a stricter config; the pattern override must still win
+        matcher.set_config(
+            Config::default()
+                .max_typos(Some(0))
+                .sort(SortStrategy::IndexAsc),
+        );
+        assert_eq!(matcher.match_list(&haystacks).len(), 1);
     }
 
     #[test]

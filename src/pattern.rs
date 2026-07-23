@@ -1,28 +1,27 @@
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
-use crate::Matching;
+use crate::{CaseMatching, Config, Matching, Scoring, UnicodeMatching};
 
 /// A single pattern to match, parsed from syntax like `!^foo`
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Pattern {
-    /// Matching mode from the atom syntax, where `None` defers to [`crate::Config::matching`]
-    /// when building the matcher
-    pub matching: Option<Matching>,
     /// Raw atom text, e.g. `!^foo`
     pub pattern: String,
     /// Haystacks matching this atom are excluded
     pub negated: bool,
     /// Text to match with the syntax stripped, e.g. `foo`
     pub needle: String,
+    /// Configuration for this pattern
+    pub config: PatternConfig,
 }
 
 /// Matches the needle literally, without parsing any syntax, using the matching
 /// mode from [`crate::Config::matching`]
 impl From<&str> for Pattern {
     fn from(needle: &str) -> Self {
-        Pattern::new(needle, None, false)
+        Pattern::new(needle, PatternConfig::default())
     }
 }
 
@@ -39,14 +38,51 @@ impl From<&String> for Pattern {
 }
 
 impl Pattern {
-    /// Creates a pattern that matches the needle literally, without parsing any syntax
-    pub fn new(needle: &str, matching: Option<Matching>, negated: bool) -> Self {
+    /// Creates a pattern that matches the needle literally, without parsing any syntax.
+    /// Use [`Pattern::negated`] to exclude matching haystacks.
+    pub fn new(needle: &str, config: PatternConfig) -> Self {
         Self {
-            matching,
             pattern: needle.to_string(),
-            negated,
+            negated: false,
             needle: needle.to_string(),
+            config,
         }
+    }
+
+    /// Sets whether haystacks matching this pattern are excluded
+    pub fn negated(mut self, negated: bool) -> Self {
+        self.negated = negated;
+        self
+    }
+
+    /// Overrides [`crate::Config::matching`] for this pattern (see [`PatternConfig::matching`])
+    pub fn matching(mut self, matching: Option<Matching>) -> Self {
+        self.config = self.config.matching(matching);
+        self
+    }
+
+    /// Overrides [`crate::Config::max_typos`] for this pattern (see [`PatternConfig::max_typos`])
+    pub fn max_typos(mut self, max_typos: Option<u16>) -> Self {
+        self.config = self.config.max_typos(max_typos);
+        self
+    }
+
+    /// Overrides [`crate::Config::casing`] for this pattern (see [`PatternConfig::casing`])
+    pub fn casing(mut self, casing: Option<CaseMatching>) -> Self {
+        self.config = self.config.casing(casing);
+        self
+    }
+
+    /// Overrides [`crate::Config::unicode`] for this pattern (see [`PatternConfig::unicode`])
+    pub fn unicode(mut self, unicode: Option<UnicodeMatching>) -> Self {
+        self.config = self.config.unicode(unicode);
+        self
+    }
+
+    /// Overrides [`crate::Config::scoring`] for this pattern (see [`PatternConfig::scoring`])
+    pub fn scoring(mut self, scoring: Option<Scoring>) -> Self {
+        self.config = self.config.scoring(scoring);
+        self
     }
 
     /// Parses a single query atom, where special syntax changes the matching mode:
@@ -111,10 +147,10 @@ impl Pattern {
         };
 
         Self {
-            matching,
             pattern: atom.to_string(),
             negated,
             needle,
+            config: PatternConfig::default().matching(matching),
         }
     }
 
@@ -122,6 +158,25 @@ impl Pattern {
     /// `foo !^bar` matches haystacks that fuzzy match `foo` and don't start with `bar`.
     /// Escape a literal space with a backslash, e.g. `foo\ bar` is a single atom.
     /// Atoms with an empty needle, e.g. `!` or `^$`, are dropped.
+    ///
+    /// The returned patterns carry only the [`Matching`] mode derived from the syntax. Any
+    /// other per-pattern override is left as `None` and inherits the matcher's [`Config`].
+    /// Set other [`PatternConfig`] fields on the results to override per-pattern.
+    /// For example, setting the max typos based on needle length:
+    ///
+    /// ```
+    /// use frizbee::{Config, Matcher, Pattern};
+    ///
+    /// let patterns = Pattern::parse_query("foo longerneedle")
+    ///     .into_iter()
+    ///     .map(|pattern| {
+    ///         let max_typos = (pattern.needle.len() / 4) as u16;
+    ///         pattern.max_typos(Some(max_typos))
+    ///     })
+    ///     .collect::<Vec<_>>();
+    ///
+    /// let mut matcher = Matcher::from_patterns(&patterns, &Config::default());
+    /// ```
     pub fn parse_query(query: &str) -> Vec<Pattern> {
         let mut patterns = vec![];
         let mut start: Option<usize> = None;
@@ -157,6 +212,76 @@ impl Pattern {
     }
 }
 
+/// Per-pattern overrides for the matcher's [`Config`]. Every field is optional and falls
+/// back to the matcher's [`Config`] when left as `None` (see [`PatternConfig::resolve`])
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(default))]
+pub struct PatternConfig {
+    /// Per-pattern override for [`crate::Config::max_typos`]; `None` inherits it.
+    ///
+    /// Because [`crate::Config::max_typos`] is itself `Option`, there is no way to request
+    /// unlimited typos for a single pattern while the matcher's config sets a limit.
+    pub max_typos: Option<u16>,
+    /// Per-pattern override for [`crate::Config::casing`]; `None` inherits it.
+    pub casing: Option<CaseMatching>,
+    /// Per-pattern override for [`crate::Config::unicode`]; `None` inherits it.
+    pub unicode: Option<UnicodeMatching>,
+    /// Per-pattern override for [`crate::Config::matching`]; `None` inherits it.
+    pub matching: Option<Matching>,
+    /// Per-pattern override for [`crate::Config::scoring`]; `None` inherits it.
+    pub scoring: Option<Scoring>,
+}
+
+impl PatternConfig {
+    /// Resolves this pattern's overrides against the matcher's [`Config`], using the
+    /// matcher's value for any field left as `None`. The returned config's `sort` is
+    /// always the matcher's, as result ordering isn't a per-pattern concern.
+    pub fn resolve(&self, config: &Config) -> Config {
+        Config {
+            max_typos: self.max_typos.or(config.max_typos),
+            casing: self.casing.unwrap_or(config.casing),
+            unicode: self.unicode.unwrap_or(config.unicode),
+            matching: self.matching.unwrap_or(config.matching),
+            scoring: self
+                .scoring
+                .clone()
+                .unwrap_or_else(|| config.scoring.clone()),
+            sort: config.sort,
+        }
+    }
+
+    /// Sets the matching mode
+    pub fn matching(mut self, matching: Option<Matching>) -> Self {
+        self.matching = matching;
+        self
+    }
+
+    /// Sets the maximum number of typos allowed
+    pub fn max_typos(mut self, max_typos: Option<u16>) -> Self {
+        self.max_typos = max_typos;
+        self
+    }
+
+    /// Sets the casing mode
+    pub fn casing(mut self, casing: Option<CaseMatching>) -> Self {
+        self.casing = casing;
+        self
+    }
+
+    /// Sets the unicode mode
+    pub fn unicode(mut self, unicode: Option<UnicodeMatching>) -> Self {
+        self.unicode = unicode;
+        self
+    }
+
+    /// Sets the scoring
+    pub fn scoring(mut self, scoring: Option<Scoring>) -> Self {
+        self.scoring = scoring;
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -165,7 +290,7 @@ mod tests {
         let pattern = Pattern::parse(atom);
         assert_eq!(pattern.pattern, atom);
         assert_eq!(pattern.needle, needle, "atom: {atom:?}");
-        assert_eq!(pattern.matching, matching, "atom: {atom:?}");
+        assert_eq!(pattern.config.matching, matching, "atom: {atom:?}");
         assert_eq!(pattern.negated, negated, "atom: {atom:?}");
     }
 

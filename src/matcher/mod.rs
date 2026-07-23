@@ -119,6 +119,24 @@ impl Matcher {
     /// let matches = matcher.match_list(&["foo", "barfoo", "foobar"]);
     /// assert_eq!(matches.len(), 2); // "barfoo" starts with "bar"
     /// ```
+    ///
+    /// To override config per-pattern, call [`Pattern::parse_query`] directly and adjust
+    /// each pattern's [`crate::PatternConfig`] before passing them to [`Matcher::from_patterns`].
+    /// For example, setting the max typos based on needle length:
+    ///
+    /// ```rust
+    /// use frizbee::{Config, Matcher, Pattern};
+    ///
+    /// let patterns = Pattern::parse_query("foo !^bar")
+    ///     .into_iter()
+    ///     .map(|pattern| {
+    ///         let max_typos = (pattern.needle.len() / 4) as u16;
+    ///         pattern.max_typos(Some(max_typos))
+    ///     })
+    ///     .collect::<Vec<_>>();
+    /// let mut matcher = Matcher::from_patterns(&patterns, &Config::default());
+    /// let matches = matcher.match_list(&["foo", "barfoo", "foobar"]);
+    /// ```
     pub fn from_query(query: &str, config: &Config) -> Self {
         Self::from_patterns(&Pattern::parse_query(query), config)
     }
@@ -169,17 +187,18 @@ impl Matcher {
         }
     }
 
-    /// Builds the backend for a pattern, resolving the matching mode from the config
-    /// when the pattern doesn't specify one. Returns `None` for empty needles.
+    /// Builds the backend for a pattern, resolving any per-pattern overrides against the
+    /// matcher's config (see [`crate::PatternConfig::resolve`]). Returns `None` for empty
+    /// needles.
     fn compile(source: &Pattern, config: &Config) -> Option<CompiledPattern> {
         if source.needle.is_empty() {
             return None;
         }
-        let matching = source.matching.unwrap_or(config.matching);
-        let config = config.clone().matching(matching);
+        let config = source.config.resolve(config);
         Some(CompiledPattern {
             negated: source.negated,
             needs_unicode: config.unicode.respects_unicode_for(&source.needle),
+            max_typos: config.max_typos,
             backend: Self::get_backend(&source.needle, &config),
         })
     }
@@ -214,7 +233,6 @@ impl Matcher {
     /// [`iter::FuzzyMatchExt`] API.
     pub fn match_list_indices<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<MatchIndices> {
         Self::guard_against_haystack_overflow(haystacks.len(), 0);
-        let max_typos = self.config.max_typos;
         let mut matches = match &mut self.patterns {
             CompiledPatterns::Empty => {
                 if self.config.sort.is_reversed() {
@@ -228,7 +246,7 @@ impl Matcher {
             }
             CompiledPatterns::Single(pattern) => {
                 dispatch!(&mut pattern.backend, matcher => {
-                    dispatch_typos!(max_typos, pattern.needs_unicode, |TYPOS, UNICODE| {
+                    dispatch_typos!(pattern.max_typos, pattern.needs_unicode, |TYPOS, UNICODE| {
                         unsafe { matcher.match_list_indices::<TYPOS, UNICODE, S>(haystacks) }
                     })
                 })
@@ -237,7 +255,7 @@ impl Matcher {
                 .iter()
                 .enumerate()
                 .filter_map(|(index, haystack)| {
-                    Self::match_one_indices_multi(patterns, max_typos, haystack, index as u32)
+                    Self::match_one_indices_multi(patterns, haystack, index as u32)
                 })
                 .collect(),
         };
@@ -323,11 +341,9 @@ impl Matcher {
         match &mut self.patterns {
             CompiledPatterns::Empty => Some(Match::from_index(index as usize)),
             CompiledPatterns::Single(pattern) => {
-                Self::dispatch_pattern_one(pattern, self.config.max_typos, haystack, index)
+                Self::dispatch_pattern_one(pattern, haystack, index)
             }
-            CompiledPatterns::Multi(patterns) => {
-                Self::match_one_multi(patterns, self.config.max_typos, haystack, index)
-            }
+            CompiledPatterns::Multi(patterns) => Self::match_one_multi(patterns, haystack, index),
         }
     }
 
@@ -346,10 +362,10 @@ impl Matcher {
         match &mut self.patterns {
             CompiledPatterns::Empty => Some(MatchIndices::from_index(index as usize)),
             CompiledPatterns::Single(pattern) => {
-                Self::dispatch_pattern_one_indices(pattern, self.config.max_typos, haystack, index)
+                Self::dispatch_pattern_one_indices(pattern, haystack, index)
             }
             CompiledPatterns::Multi(patterns) => {
-                Self::match_one_indices_multi(patterns, self.config.max_typos, haystack, index)
+                Self::match_one_indices_multi(patterns, haystack, index)
             }
         }
     }
@@ -366,32 +382,23 @@ impl Matcher {
                 let indices = (0..haystacks.len()).map(|i| i + haystack_index_offset as usize);
                 matches.extend(indices.map(Match::from_index));
             }
-            CompiledPatterns::Single(pattern) => Self::dispatch_pattern_into(
-                pattern,
-                self.config.max_typos,
-                haystacks,
-                haystack_index_offset,
-                matches,
-            ),
-            CompiledPatterns::Multi(patterns) => Self::match_list_multi_into(
-                patterns,
-                self.config.max_typos,
-                haystacks,
-                haystack_index_offset,
-                matches,
-            ),
+            CompiledPatterns::Single(pattern) => {
+                Self::dispatch_pattern_into(pattern, haystacks, haystack_index_offset, matches)
+            }
+            CompiledPatterns::Multi(patterns) => {
+                Self::match_list_multi_into(patterns, haystacks, haystack_index_offset, matches)
+            }
         }
     }
 
     fn dispatch_pattern_into<S: AsRef<str>>(
         pattern: &mut CompiledPattern,
-        max_typos: Option<u16>,
         haystacks: &[S],
         haystack_index_offset: u32,
         matches: &mut Vec<Match>,
     ) {
         dispatch!(&mut pattern.backend, matcher => {
-            dispatch_typos!(max_typos, pattern.needs_unicode, |TYPOS, UNICODE| {
+            dispatch_typos!(pattern.max_typos, pattern.needs_unicode, |TYPOS, UNICODE| {
                 unsafe {
                     matcher.match_list::<TYPOS, UNICODE, S>(
                         haystacks,
@@ -405,12 +412,11 @@ impl Matcher {
 
     fn dispatch_pattern_one<S: AsRef<str>>(
         pattern: &mut CompiledPattern,
-        max_typos: Option<u16>,
         haystack: S,
         index: u32,
     ) -> Option<Match> {
         dispatch!(&mut pattern.backend, matcher => {
-            dispatch_typos!(max_typos, pattern.needs_unicode, |TYPOS, UNICODE| {
+            dispatch_typos!(pattern.max_typos, pattern.needs_unicode, |TYPOS, UNICODE| {
                 unsafe { matcher.match_one::<TYPOS, UNICODE, S>(haystack, index) }
             })
         })
@@ -418,12 +424,11 @@ impl Matcher {
 
     fn dispatch_pattern_one_indices<S: AsRef<str>>(
         pattern: &mut CompiledPattern,
-        max_typos: Option<u16>,
         haystack: S,
         index: u32,
     ) -> Option<MatchIndices> {
         dispatch!(&mut pattern.backend, matcher => {
-            dispatch_typos!(max_typos, pattern.needs_unicode, |TYPOS, UNICODE| {
+            dispatch_typos!(pattern.max_typos, pattern.needs_unicode, |TYPOS, UNICODE| {
                 unsafe { matcher.match_one_indices::<TYPOS, UNICODE, S>(haystack, index) }
             })
         })
