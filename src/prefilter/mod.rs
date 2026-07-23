@@ -315,6 +315,15 @@ mod tests {
     }
 
     #[test]
+    fn unicode_prefilter_decoy_last_byte_does_not_hide_case_flipped_match() {
+        // '٩' (0xD9 0xA9) shares 'é''s (0xC3 0xA9) last byte, while 'É' only matches case flipped
+        assert_eq!("٩".as_bytes()[1], "é".as_bytes()[1]);
+        assert_eq!(unicode_result_generic("é", "٩É", false), (true, 2, 4));
+        assert!(!unicode_result_generic("é", "٩É", true).0);
+        assert!(unicode_result_generic_typos("éé", "٩É٩É٩É", 1, false).0);
+    }
+
+    #[test]
     fn unicode_prefilter_matches_across_chunk_boundaries() {
         for prefix_len in [0usize, 1, 7, 14, 15, 16, 31, 32, 63, 64] {
             let haystack = format!("{}إن", "x".repeat(prefix_len));

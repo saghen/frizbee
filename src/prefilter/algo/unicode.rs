@@ -51,6 +51,27 @@ impl<B: Backend> Prefilter<B> {
         }
     }
 
+    /// Occurrence mask for one case variant of a needle char: lanes where `last_byte` matches,
+    /// verified against the char's remaining UTF-8 bytes
+    #[inline(always)]
+    unsafe fn char_variant_mask(
+        (chunk, chunk_mask): (B::Chunk, B::Mask),
+        last_byte: B::Chunk,
+        start: usize,
+        len: usize,
+        haystack: &[u8],
+        char_len: usize,
+        chars: [u8; 4],
+    ) -> B::Mask {
+        let mut mask = unsafe { B::eq(chunk, last_byte) }.and(chunk_mask);
+        if !mask.is_zero() && char_len > 1 {
+            mask = mask.and(unsafe {
+                Self::match_unicode_char_prefix(start, len, haystack, char_len, chars)
+            });
+        }
+        mask
+    }
+
     #[inline(always)]
     pub(super) unsafe fn unicode_char_mask(
         start: usize,
@@ -65,30 +86,32 @@ impl<B: Backend> Prefilter<B> {
         }
 
         let (chunk, chunk_mask) = unsafe { load_window::<B>(haystack, start + char_len - 1, len) };
-        let mut mask =
-            unsafe { B::eq(chunk, B::splat(needle_char.chars[char_len - 1])) }.and(chunk_mask);
-        if mask.is_zero() {
-            // check the case flipped version
-            mask = unsafe { B::eq(chunk, B::splat(needle_char.flipped_chars[char_len - 1])) }
-                .and(chunk_mask);
 
-            // check that the rest of the bytes in the flipped case char match
-            if !mask.is_zero() && char_len > 1 {
-                mask = mask.and(unsafe {
-                    Self::match_unicode_char_prefix(
-                        start,
-                        len,
-                        haystack,
-                        char_len,
-                        needle_char.flipped_chars,
-                    )
-                });
-            }
-        } else if char_len > 1 {
-            mask = mask.and(unsafe {
-                Self::match_unicode_char_prefix(start, len, haystack, char_len, needle_char.chars)
-            });
-        }
+        // check the regular needle
+        let mut mask = unsafe {
+            Self::char_variant_mask(
+                (chunk, chunk_mask),
+                B::splat(needle_char.chars[char_len - 1]),
+                start,
+                len,
+                haystack,
+                char_len,
+                needle_char.chars,
+            )
+        };
+
+        // check the case flipped version
+        mask = mask.or(unsafe {
+            Self::char_variant_mask(
+                (chunk, chunk_mask),
+                B::splat(needle_char.flipped_chars[char_len - 1]),
+                start,
+                len,
+                haystack,
+                char_len,
+                needle_char.flipped_chars,
+            )
+        });
         mask
     }
 
@@ -121,47 +144,34 @@ impl<B: Backend> Prefilter<B> {
 
             loop {
                 let chunk_mask = available.and(valid);
-                // check the last byte first since it's the most discriminating: the
-                // prefix bytes identify the script/block, not the char
-                let mut mask = unsafe { B::eq(chunk, last_needle_char_bytes.0) }.and(chunk_mask);
+                // check the regular needle first
+                let mut mask = unsafe {
+                    Self::char_variant_mask(
+                        (chunk, chunk_mask),
+                        last_needle_char_bytes.0,
+                        start,
+                        len,
+                        haystack,
+                        needle_char.len,
+                        needle_char.chars,
+                    )
+                };
+
+                // check the case flipped version
+                mask = mask.or(unsafe {
+                    Self::char_variant_mask(
+                        (chunk, chunk_mask),
+                        last_needle_char_bytes.1,
+                        start,
+                        len,
+                        haystack,
+                        needle_char.len,
+                        needle_char.flipped_chars,
+                    )
+                });
+
                 if mask.is_zero() {
-                    // check the case flipped version
-                    mask = unsafe { B::eq(chunk, last_needle_char_bytes.1) }.and(chunk_mask);
-                    if mask.is_zero() {
-                        break;
-                    }
-
-                    // check that the rest of the bytes in the flipped case char match
-                    if needle_char.len > 1 {
-                        mask = mask.and(unsafe {
-                            Self::match_unicode_char_prefix(
-                                start,
-                                len,
-                                haystack,
-                                needle_char.len,
-                                needle_char.flipped_chars,
-                            )
-                        });
-                        if mask.is_zero() {
-                            break;
-                        }
-                    }
-                }
-
-                // check that the rest of the bytes in the char match
-                if needle_char.len > 1 {
-                    mask = mask.and(unsafe {
-                        Self::match_unicode_char_prefix(
-                            start,
-                            len,
-                            haystack,
-                            needle_char.len,
-                            needle_char.chars,
-                        )
-                    });
-                    if mask.is_zero() {
-                        break;
-                    }
+                    break;
                 }
 
                 available = available.clear_through_lowest(mask);
