@@ -161,13 +161,13 @@ where
 
         let (trimmed, start_pos) = trim_haystack(haystack, start_pos, end_pos);
         let include_exact = start_pos == 0 && end_pos == original_len;
-        self.smith_waterman_indices_one::<UNICODE>(
+        Some(self.smith_waterman_indices_one::<UNICODE>(
             trimmed,
             start_pos,
             index,
             include_exact,
             max_typos_opt,
-        )
+        ))
     }
 
     #[inline(always)]
@@ -215,15 +215,13 @@ where
                 if matched {
                     let (trimmed, start_pos) = trim_haystack(haystack, start_pos, end_pos);
                     let include_exact = start_pos == 0 && end_pos == original_len;
-                    if let Some(match_) = self.smith_waterman_indices_one::<UNICODE>(
+                    matches.push(self.smith_waterman_indices_one::<UNICODE>(
                         trimmed,
                         start_pos,
                         index as u32,
                         include_exact,
                         max_typos_opt,
-                    ) {
-                        matches.push(match_);
-                    }
+                    ));
                 }
             }
         }
@@ -274,16 +272,16 @@ where
         index: u32,
         include_exact: bool,
         max_typos: Option<u16>,
-    ) -> Option<MatchIndices> {
+    ) -> MatchIndices {
         let (mut score, indices) = if UNICODE {
             self.smith_waterman.score_haystack_unicode_indices(
                 haystack,
                 haystack_start_pos,
                 max_typos,
-            )?
+            )
         } else {
             self.smith_waterman
-                .score_haystack_indices(haystack, haystack_start_pos, max_typos)?
+                .score_haystack_indices(haystack, haystack_start_pos, max_typos)
         };
 
         let exact = include_exact && self.needle.as_bytes() == haystack;
@@ -291,12 +289,12 @@ where
             score += self.config.scoring.exact_match_bonus;
         }
 
-        Some(MatchIndices {
+        MatchIndices {
             index,
             score,
             exact,
             indices,
-        })
+        }
     }
 
     /// The runtime typo budget for a `TYPOS` specialization: 0/1/2 encode the
@@ -372,16 +370,29 @@ mod tests {
     }
 
     #[test]
+    fn greedy_fallback_membership_agrees_between_match_list_and_indices() {
+        // the match window exceeds MAX_HAYSTACK_LEN so the greedy fallback runs, and it
+        // can't find 'c': both APIs must still return the prefiltered haystack, with
+        // score 0 and no indices
+        let haystack = format!("a{}b", "z".repeat(1100));
+        let config = Config::default().max_typos(Some(1));
+        let matches = Matcher::new("abc", &config).match_list(&[haystack.as_str()]);
+        let indices = Matcher::new("abc", &config).match_list_indices(&[haystack.as_str()]);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(indices.len(), 1);
+        assert_eq!(matches[0].score, indices[0].score);
+        assert!(indices[0].indices.is_empty());
+    }
+
+    #[test]
     fn penalty_above_u8_range_is_not_truncated() {
         // mismatch_penalty 260 previously wrapped to 4 in the u8 backend's splat,
         // so raising the penalty raised the score
         let score = |mismatch_penalty| {
-            let config = Config::default()
-                .max_typos(Some(1))
-                .scoring(Scoring {
-                    mismatch_penalty,
-                    ..Scoring::default()
-                });
+            let config = Config::default().max_typos(Some(1)).scoring(Scoring {
+                mismatch_penalty,
+                ..Scoring::default()
+            });
             Matcher::new("abc", &config).match_list(&["aXc"])[0].score
         };
         assert!(score(260) <= score(255));

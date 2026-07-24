@@ -128,11 +128,11 @@ fn score_with<B: Backend>(needle: &str, haystack: &str) -> u16 {
     matcher.score_haystack(haystack.as_bytes(), true)
 }
 
-fn indices_with<B: Backend>(needle: &str, haystack: &str) -> Option<Vec<u32>> {
+fn indices_with<B: Backend>(needle: &str, haystack: &str) -> Vec<u32> {
     let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), false);
     matcher
         .score_haystack_indices(haystack.as_bytes(), 0, None)
-        .map(|(_, indices)| indices)
+        .1
 }
 
 fn assert_score_backend<B: Backend>(label: &str, needle: &str, haystack: &str, want: u16) {
@@ -145,12 +145,7 @@ fn assert_score_backend<B: Backend>(label: &str, needle: &str, haystack: &str, w
     }
 }
 
-fn assert_indices_backend<B: Backend>(
-    label: &str,
-    needle: &str,
-    haystack: &str,
-    want: Option<Vec<u32>>,
-) {
+fn assert_indices_backend<B: Backend>(label: &str, needle: &str, haystack: &str, want: Vec<u32>) {
     if B::is_available() {
         let got = indices_with::<B>(needle, haystack);
         assert_eq!(
@@ -218,7 +213,7 @@ fn indices_bytes_with<B: Backend>(
     haystack: &[u8],
     max_typos: Option<u16>,
     case_sensitive: bool,
-) -> Option<(u16, Vec<u32>)> {
+) -> (u16, Vec<u32>) {
     let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), case_sensitive);
     matcher.score_haystack_indices(haystack, 0, max_typos)
 }
@@ -230,7 +225,7 @@ fn assert_backend<B: Backend>(
     max_typos: Option<u16>,
     case_sensitive: bool,
     want_score: u16,
-    want_indices_score: Option<u16>,
+    want_indices_score: u16,
 ) {
     if B::is_available() {
         assert_eq!(
@@ -239,16 +234,15 @@ fn assert_backend<B: Backend>(
             "{label} score mismatch for needle={needle:?} haystack_len={}",
             haystack.len()
         );
-        let indices = indices_bytes_with::<B>(needle, haystack, max_typos, case_sensitive);
+        let (indices_score, indices) =
+            indices_bytes_with::<B>(needle, haystack, max_typos, case_sensitive);
         assert_eq!(
-            indices.as_ref().map(|(score, _)| *score),
+            indices_score,
             want_indices_score,
             "{label} indexed score mismatch for needle={needle:?} haystack_len={}",
             haystack.len()
         );
-        if let Some((_, indices)) = indices {
-            assert_indices_valid(label, needle, haystack, &indices);
-        }
+        assert_indices_valid(label, needle, haystack, &indices);
     }
 }
 
@@ -262,9 +256,7 @@ fn assert_backend_matches_reference<B: Backend, R: Backend>(
     if B::is_available() {
         let want_score = score_bytes_with::<R>(needle, haystack, case_sensitive);
         let want_indices_score =
-            indices_bytes_with::<R>(needle, haystack, max_typos, case_sensitive)
-                .as_ref()
-                .map(|(score, _)| *score);
+            indices_bytes_with::<R>(needle, haystack, max_typos, case_sensitive).0;
         assert_backend::<B>(
             label,
             needle,

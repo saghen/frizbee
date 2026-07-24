@@ -132,13 +132,13 @@ pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
         haystack: &[u8],
         haystack_start_pos: usize,
         max_typos: Option<u16>,
-    ) -> Option<(u16, Vec<u32>)>;
+    ) -> (u16, Vec<u32>);
     fn score_haystack_unicode_indices(
         &mut self,
         haystack: &[u8],
         haystack_start_pos: usize,
         max_typos: Option<u16>,
-    ) -> Option<(u16, Vec<u32>)>;
+    ) -> (u16, Vec<u32>);
     fn score_haystack(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16;
     fn score_haystack_unicode(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16;
     #[cfg(feature = "match_end_col")]
@@ -182,20 +182,20 @@ mod tests {
             .then_some(score)
     }
 
-    fn get_indices(needle: &str, haystack: &str) -> Option<Vec<u32>> {
+    fn get_indices(needle: &str, haystack: &str) -> Vec<u32> {
         let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
 
         matcher
             .score_haystack_indices(haystack.as_bytes(), 0, None)
-            .map(|(_, indices)| indices)
+            .1
     }
 
-    fn get_unicode_indices(needle: &str, haystack: &str) -> Option<Vec<u32>> {
+    fn get_unicode_indices(needle: &str, haystack: &str) -> Vec<u32> {
         let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
 
         matcher
             .score_haystack_unicode_indices(haystack.as_bytes(), 0, None)
-            .map(|(_, indices)| indices)
+            .1
     }
 
     #[test]
@@ -313,9 +313,9 @@ mod tests {
 
     #[test]
     fn tie_prone_alignment_indices_are_stable() {
-        assert_eq!(get_indices("aa", "aaa"), Some(vec![1, 0]));
-        assert_eq!(get_indices("ab", "abab"), Some(vec![1, 0]));
-        assert_eq!(get_indices("abc", "xabcabc"), Some(vec![3, 2, 1]));
+        assert_eq!(get_indices("aa", "aaa"), vec![1, 0]);
+        assert_eq!(get_indices("ab", "abab"), vec![1, 0]);
+        assert_eq!(get_indices("abc", "xabcabc"), vec![3, 2, 1]);
     }
 
     #[test]
@@ -434,19 +434,19 @@ mod tests {
 
     #[test]
     fn test_indices_basic() {
-        assert_eq!(get_indices("_", "abc"), Some(vec![]));
-        assert_eq!(get_indices("a", "abc"), Some(vec![0]));
-        assert_eq!(get_indices("b", "abc"), Some(vec![1]));
-        assert_eq!(get_indices("c", "abc"), Some(vec![2]));
-        assert_eq!(get_indices("ac", "________________abc"), Some(vec![18, 16]));
-        assert_eq!(get_indices("foo", "Uf"), Some(vec![1]));
+        assert_eq!(get_indices("_", "abc"), vec![]);
+        assert_eq!(get_indices("a", "abc"), vec![0]);
+        assert_eq!(get_indices("b", "abc"), vec![1]);
+        assert_eq!(get_indices("c", "abc"), vec![2]);
+        assert_eq!(get_indices("ac", "________________abc"), vec![18, 16]);
+        assert_eq!(get_indices("foo", "Uf"), vec![1]);
     }
 
     #[test]
     fn unicode_indices_expand_multibyte_scalars() {
-        assert_eq!(get_unicode_indices("é", "é"), Some(vec![1, 0]));
-        assert_eq!(get_unicode_indices("😀", "😀"), Some(vec![3, 2, 1, 0]));
-        assert_eq!(get_unicode_indices("aé", "aé"), Some(vec![2, 1, 0]));
+        assert_eq!(get_unicode_indices("é", "é"), vec![1, 0]);
+        assert_eq!(get_unicode_indices("😀", "😀"), vec![3, 2, 1, 0]);
+        assert_eq!(get_unicode_indices("aé", "aé"), vec![2, 1, 0]);
     }
 
     #[test]
@@ -456,8 +456,8 @@ mod tests {
         assert_eq!(
             matcher
                 .score_haystack_unicode_indices("é".as_bytes(), 3, None)
-                .map(|(_, indices)| indices),
-            Some(vec![4, 3])
+                .1,
+            vec![4, 3]
         );
     }
 
@@ -468,24 +468,24 @@ mod tests {
         assert_eq!(
             matcher
                 .score_haystack_unicode_indices("é😀x".as_bytes(), 3, None)
-                .map(|(_, indices)| indices),
-            Some(vec![9, 4, 3])
+                .1,
+            vec![9, 4, 3]
         );
     }
 
     #[test]
     fn unicode_indices_trace_through_multibyte_haystack_gaps() {
-        assert_eq!(get_unicode_indices("ab", "aéb"), Some(vec![3, 0]));
-        assert_eq!(get_unicode_indices("ab", "aé😀b"), Some(vec![7, 0]));
-        assert_eq!(get_unicode_indices("éx", "é😀x"), Some(vec![6, 1, 0]));
+        assert_eq!(get_unicode_indices("ab", "aéb"), vec![3, 0]);
+        assert_eq!(get_unicode_indices("ab", "aé😀b"), vec![7, 0]);
+        assert_eq!(get_unicode_indices("éx", "é😀x"), vec![6, 1, 0]);
     }
 
     #[test]
     fn unicode_indices_handle_repeated_scalars_and_chunk_boundaries() {
-        assert_eq!(get_unicode_indices("éé", "ééé"), Some(vec![3, 2, 1, 0]));
+        assert_eq!(get_unicode_indices("éé", "ééé"), vec![3, 2, 1, 0]);
         assert_eq!(
             get_unicode_indices("😀x", "_______😀x"),
-            Some(vec![11, 10, 9, 8, 7])
+            vec![11, 10, 9, 8, 7]
         );
     }
 
@@ -493,13 +493,10 @@ mod tests {
     fn unicode_indices_do_not_split_multibyte_scalars_in_traceback() {
         // ensures that when we do traceback, we match all indices of multi-byte
         // unicode chars when they match
-        assert_eq!(get_unicode_indices("😀.a", "..😀a"), Some(vec![6, 1]));
-        assert_eq!(get_unicode_indices("😀.é", "..😀é"), Some(vec![7, 6, 1]));
-        assert_eq!(get_unicode_indices("😀 a", "  😀a"), Some(vec![6, 1]));
-        assert_eq!(
-            get_unicode_indices("😀é", "..😀é"),
-            Some(vec![7, 6, 5, 4, 3, 2])
-        );
+        assert_eq!(get_unicode_indices("😀.a", "..😀a"), vec![6, 1]);
+        assert_eq!(get_unicode_indices("😀.é", "..😀é"), vec![7, 6, 1]);
+        assert_eq!(get_unicode_indices("😀 a", "  😀a"), vec![6, 1]);
+        assert_eq!(get_unicode_indices("😀é", "..😀é"), vec![7, 6, 5, 4, 3, 2]);
     }
 
     #[test]
@@ -509,7 +506,7 @@ mod tests {
             assert_eq!(get_score("abc", &haystack), 3 * CHAR_SCORE, "len={len}");
             assert_eq!(
                 get_indices("abc", &haystack),
-                Some(vec![len - 1, len - 2, len - 3]),
+                vec![len - 1, len - 2, len - 3],
                 "len={len}"
             );
         }

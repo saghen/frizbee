@@ -51,7 +51,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         haystack: &[u8],
         haystack_start_pos: usize,
         max_typos: Option<u16>,
-    ) -> Option<(u16, Vec<u32>)> {
+    ) -> (u16, Vec<u32>) {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(
                 self.needle.as_bytes(),
@@ -67,17 +67,13 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
                 }
                 indices.reverse();
                 (score, indices)
-            });
+            })
+            .unwrap_or_else(|| (0, vec![]));
         }
 
         let score = self.score_haystack(haystack, haystack_start_pos == 0);
         if score == 0 {
-            if let Some(max_typos) = max_typos
-                && self.needle.len() > max_typos as usize
-            {
-                return None;
-            }
-            return Some((score, Vec::new()));
+            return (score, Vec::new());
         }
 
         let needle_len = self.needle.len();
@@ -94,7 +90,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             }
         }
 
-        Some((score, indices))
+        (score, indices)
     }
 
     #[inline(always)]
@@ -103,7 +99,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         haystack: &[u8],
         haystack_start_pos: usize,
         max_typos: Option<u16>,
-    ) -> Option<(u16, Vec<u32>)> {
+    ) -> (u16, Vec<u32>) {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(
                 self.needle.as_bytes(),
@@ -119,17 +115,13 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
                 }
                 indices.reverse();
                 (score, indices)
-            });
+            })
+            .unwrap_or_else(|| (0, vec![]));
         }
 
         let score = self.score_haystack_unicode(haystack, haystack_start_pos == 0);
         if score == 0 {
-            if let Some(max_typos) = max_typos
-                && self.needle_unicode.len() > max_typos as usize
-            {
-                return None;
-            }
-            return Some((score, Vec::new()));
+            return (score, Vec::new());
         }
 
         let mut indices = Vec::with_capacity(self.needle.len());
@@ -157,7 +149,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             }
         }
 
-        Some((score, indices))
+        (score, indices)
     }
 
     #[inline(always)]
