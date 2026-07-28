@@ -27,6 +27,23 @@ jobs:
       - name: Run tests
         run: cargo test --verbose
 
+  msrv:
+    runs-on: ubuntu-latest
+    name: MSRV (${{ matrix.msrv }})
+
+    strategy:
+      matrix:
+        msrv: ["1.89.0"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ${{ matrix.msrv }}
+        run: rustup toolchain install ${{ matrix.msrv }}
+
+      - name: cargo +${{ matrix.msrv }} check
+        run: cargo +${{ matrix.msrv }} check --all-targets --all-features
+
   clippy:
     runs-on: ubuntu-latest
 
