@@ -264,7 +264,7 @@ impl ScoreVec for AvxScore {
         unsafe {
             // Lane 0 = value, lanes 1..16 = 0. Insert into low 128.
             let lo = _mm_cvtsi32_si128(value as i32);
-            Self(_mm256_castsi128_si256(lo))
+            Self(_mm256_zextsi128_si256(lo))
         }
     }
     #[inline(always)]
@@ -539,7 +539,7 @@ impl ScoreVec for AvxU8Score {
     unsafe fn first_lane(value: u16) -> Self {
         unsafe {
             let lo = _mm_cvtsi32_si128((value & 0xFF) as i32);
-            Self(_mm256_castsi128_si256(lo))
+            Self(_mm256_zextsi128_si256(lo))
         }
     }
     #[inline(always)]

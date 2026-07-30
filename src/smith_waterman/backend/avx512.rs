@@ -380,7 +380,7 @@ impl ScoreVec for Avx512Score {
     unsafe fn first_lane(value: u16) -> Self {
         unsafe {
             let lo = _mm_cvtsi32_si128(value as i32);
-            Self(_mm512_castsi128_si512(lo))
+            Self(_mm512_zextsi128_si512(lo))
         }
     }
     #[inline(always)]
@@ -453,7 +453,7 @@ impl ScoreVec for Avx512U8Score {
     unsafe fn first_lane(value: u16) -> Self {
         unsafe {
             let lo = _mm_cvtsi32_si128((value & 0xFF) as i32);
-            Self(_mm512_castsi128_si512(lo))
+            Self(_mm512_zextsi128_si512(lo))
         }
     }
     #[inline(always)]
