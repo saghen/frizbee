@@ -310,8 +310,15 @@ where
     #[inline(always)]
     fn guard_against_score_overflow(&self) {
         let scoring = &self.config.scoring;
+        // The unicode path accumulates one score row per char while the ascii path
+        // accumulates one per byte, so bound by the row count the needle actually uses
+        let needle_len = if self.config.unicode.respects_unicode_for(&self.needle) {
+            self.needle.chars().count()
+        } else {
+            self.needle.len()
+        };
         scoring.guard_against_score_overflow(
-            self.needle.len(),
+            needle_len,
             scoring.max_per_char_bonus(),
             scoring.max_one_time_bonus(),
         );
@@ -369,6 +376,20 @@ mod tests {
             ..Scoring::default()
         });
         Matcher::new("f", &config);
+    }
+
+    #[test]
+    fn overflow_guard_uses_char_count_for_unicode_needles() {
+        // 8 three-byte chars: the unicode path accumulates one score row per char, so
+        // the guard must use the char count (8), not the byte length (24), which would
+        // exceed this scoring config's max needle length (~16) and panic spuriously
+        let needle = "一二三四五六七八";
+        let config = Config::default().scoring(Scoring {
+            capitalization_bonus: 4000,
+            ..Scoring::default()
+        });
+        let matches = Matcher::new(needle, &config).match_list(&[needle]);
+        assert_eq!(matches.len(), 1);
     }
 
     #[test]
