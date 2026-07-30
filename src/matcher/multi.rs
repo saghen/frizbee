@@ -103,16 +103,20 @@ impl Matcher {
             }
         }
 
+        let mut gathered: Vec<&str> = Vec::new();
+        let mut hits: Vec<Match> = Vec::new();
         for (pattern_idx, pattern) in patterns.iter_mut().enumerate() {
             if Some(pattern_idx) == base_pattern_idx || candidates.is_empty() {
                 continue;
             }
 
-            let gathered = candidates
-                .iter()
-                .map(|m| haystacks[(m.index - haystack_index_offset) as usize].as_ref())
-                .collect::<Vec<&str>>();
-            let mut hits = Vec::new();
+            gathered.clear();
+            gathered.extend(
+                candidates
+                    .iter()
+                    .map(|m| haystacks[(m.index - haystack_index_offset) as usize].as_ref()),
+            );
+            hits.clear();
             Self::dispatch_pattern_into(pattern, &gathered, 0, &mut hits);
 
             // Backends emit matches in input order, so `hit.index` is the position of the
@@ -128,7 +132,7 @@ impl Matcher {
                 });
             } else {
                 candidates = hits
-                    .into_iter()
+                    .drain(..)
                     .map(|mut hit| {
                         let candidate = candidates[hit.index as usize];
                         hit.index = candidate.index;
