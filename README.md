@@ -53,6 +53,8 @@ let mut matches: Vec<_> = haystacks
 radix_sort_matches(&mut matches);
 ```
 
+Note that Frizbee will panic if you provide a needle longer than `config.scoring.max_needle_len()`. With the default configuration, the needle must not be longer than 10922 characters.
+
 ## Benchmarks
 
 See [BENCHMARKS.md](./BENCHMARKS.md)

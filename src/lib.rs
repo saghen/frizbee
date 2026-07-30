@@ -30,6 +30,8 @@
 //! let matches = matcher.match_list_parallel(&haystacks, 8);
 //! ```
 //!
+//! Note that Frizbee will panic if you provide a needle longer than `config.scoring.max_needle_len()`. With the default configuration, the needle must not be longer than 10922 characters.
+//!
 //! # Example: using multi-pattern queries
 //!
 //! `Matcher::from_query` parses whitespace-separated atoms. Atom syntax can
@@ -476,6 +478,12 @@ impl Default for Scoring {
 }
 
 impl Scoring {
+    /// Max needle length that can be matched with the scoring config. Using a needle length greater
+    /// than this will panic.
+    pub fn max_needle_len(&self) -> usize {
+        ((u16::MAX.saturating_sub(self.max_one_time_bonus())) / self.max_per_char_bonus()) as usize
+    }
+
     /// Max additional score that a needle character can receive, aside from the match score
     pub(crate) fn max_per_char_bonus(&self) -> u16 {
         let bonus = self.delimiter_bonus.max(self.capitalization_bonus);
@@ -526,5 +534,15 @@ impl Scoring {
             "gap penalties too large and could overflow the u16 score: {max_gap_penalty} > {}",
             u16::MAX
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn max_needle_len() {
+        assert_eq!(Scoring::default().max_needle_len(), 10922);
     }
 }
