@@ -101,7 +101,7 @@ mask: [FF, 00, FF, FF] // needle.0 == haystack | needle.1 == haystack
 bitmask: 0b1101 & haystack_mask // movemask(mask)
 bitmask: 0b1100
 min_bit: 2 // bitmask.trailing_zeros()
-haystack_mask: 0b0111 // !1u32 << min_bit
+haystack_mask: 0b1000 // !1u32 << min_bit
 
 // third iter
 needle: ([o, o, o, o], [O, O, O, O])
@@ -109,7 +109,7 @@ mask: [FF, 00, FF, FF] // needle.0 == haystack | needle.1 == haystack
 bitmask: 0b1101 & haystack_mask // movemask(mask)
 bitmask: 0b1000
 min_bit: 3 // bitmask.trailing_zeros()
-haystack_mask: 0b1111 // !1u32 << min_bit
+haystack_mask: 0b0000 // !1u32 << min_bit
 
 // in reality, if we're not on the last chunk, we search for
 // the last occurrence of the last needle char separately
