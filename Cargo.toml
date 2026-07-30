@@ -7,6 +7,7 @@ edition = "2024"
 repository = "https://github.com/saghen/frizbee"
 keywords = ["fuzzy-search", "fuzzy-matching", "string-matching", "simd", "smith-waterman"]
 categories = ["algorithms", "text-processing"]
+rust-version = "1.89.0" # Changing this? Remember to update CI to test the new msrv!
 
 [profile.release]
 lto = true
