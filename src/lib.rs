@@ -261,7 +261,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             max_typos: Some(0),
-            casing: CaseMatching::Ignore,
+            casing: CaseMatching::Smart,
             unicode: UnicodeMatching::Smart,
             matching: Matching::Fuzzy,
             sort: SortStrategy::ScoreThenIndexAsc,
@@ -357,9 +357,9 @@ impl SortStrategy {
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CaseMatching {
     /// Ignore case while matching.
-    #[default]
     Ignore,
     /// Ignore case unless the needle contains uppercase
+    #[default]
     Smart,
     /// Require matching bytes to have the same case
     Respect,
