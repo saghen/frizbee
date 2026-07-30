@@ -98,42 +98,52 @@ impl Pattern {
     /// `foo\$` or `\'foo` match the literal leading/trailing character, and `foo\ bar`
     /// matches the literal space.
     pub fn parse(atom: &str) -> Self {
-        let mut needle = atom;
-        let mut negated = false;
-        let mut prefix = false;
-        let mut suffix = false;
-        let mut substring = false;
-
-        // Negation
-        if let Some(rest) = needle.strip_prefix('!') {
-            needle = rest;
-            negated = true;
-        }
-        if needle.starts_with("\\!") {
-            needle = &needle[1..]; // drop the backslash, keep the literal char
+        // Tokenize chars, marking whether they're esacped or not
+        let mut tokens: Vec<(char, bool)> = Vec::with_capacity(atom.len());
+        let mut chars = atom.chars();
+        while let Some(c) = chars.next() {
+            match if c == '\\' { chars.next() } else { None } {
+                Some(escaped) => tokens.push((escaped, true)),
+                None => tokens.push((c, false)),
+            }
         }
 
-        // Leading
-        if let Some(rest) = needle.strip_prefix('^') {
-            needle = rest;
-            prefix = true;
-        } else if let Some(rest) = needle.strip_prefix('\'') {
-            needle = rest;
-            substring = true;
-        } else if needle.starts_with("\\^") || needle.starts_with("\\'") {
-            needle = &needle[1..]; // drop the backslash, keep the literal char
+        // Pops the first/last token if it's the unescaped operator `op`
+        fn strip_first(tokens: &mut &[(char, bool)], op: char) -> bool {
+            if let Some((&(c, false), rest)) = tokens.split_first()
+                && c == op
+            {
+                *tokens = rest;
+                return true;
+            }
+            false
+        }
+        fn strip_last(tokens: &mut &[(char, bool)], op: char) -> bool {
+            if let Some((&(c, false), rest)) = tokens.split_last()
+                && c == op
+            {
+                *tokens = rest;
+                return true;
+            }
+            false
         }
 
-        // Trailing
-        let needle = if let Some(head) = needle.strip_suffix("\\$") {
-            format!("{head}$") // drop the backslash, keep the literal `$`
-        } else if let Some(head) = needle.strip_suffix('$') {
-            suffix = true;
-            head.to_string()
-        } else {
-            needle.to_string()
-        };
-        let needle = needle.replace("\\ ", " ");
+        let mut rest = tokens.as_slice();
+        let negated = strip_first(&mut rest, '!');
+        let prefix = strip_first(&mut rest, '^');
+        let substring = !prefix && strip_first(&mut rest, '\'');
+        let suffix = strip_last(&mut rest, '$');
+
+        // Escaped special characters collapse to the literal character; the backslash is
+        // kept before anything else (including another backslash)
+        let is_special = |c: char| matches!(c, '!' | '^' | '\'' | '$') || c.is_whitespace();
+        let mut needle = String::with_capacity(atom.len());
+        for &(c, escaped) in rest {
+            if escaped && !is_special(c) {
+                needle.push('\\');
+            }
+            needle.push(c);
+        }
 
         let matching = match (prefix, suffix, substring) {
             (true, true, _) => Some(Matching::Exact),
@@ -322,6 +332,16 @@ mod tests {
         assert_parse("foo\\ bar", "foo bar", None, false);
         assert_parse("!\\^foo", "^foo", Some(Matching::Substring), true);
         assert_parse("!\\!foo", "!foo", Some(Matching::Substring), true);
+    }
+
+    #[test]
+    fn parse_escaped_backslash_before_operator() {
+        assert_parse("foo\\\\$", "foo\\\\", Some(Matching::Suffix), false);
+        // Backslashes before non-special characters are literal
+        assert_parse("foo\\bar", "foo\\bar", None, false);
+        assert_parse("foo\\", "foo\\", None, false);
+        // The first two backslashes pair up, the third escapes the space
+        assert_parse("a\\\\\\ b", "a\\\\ b", None, false);
     }
 
     #[test]
