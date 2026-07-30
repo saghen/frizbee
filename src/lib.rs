@@ -517,5 +517,14 @@ impl Scoring {
             needle_len <= max_needle_len as usize,
             "needle too long and could overflow the u16 score: {needle_len} > {max_needle_len}"
         );
+
+        // Gap propagation multiplies the gap extend penalty by up to 32x (AVX-512, u16 scoring)
+        let max_gap_penalty =
+            32 * self.gap_extend_penalty as usize + self.gap_open_penalty as usize;
+        assert!(
+            max_gap_penalty <= u16::MAX as usize,
+            "gap penalties too large and could overflow the u16 score: {max_gap_penalty} > {}",
+            u16::MAX
+        );
     }
 }

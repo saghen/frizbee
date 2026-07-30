@@ -101,6 +101,13 @@ pub(crate) fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
         return false;
     }
 
+    // Gap propagation multiplies the gap extend penalty by up to 64x (AVX-512)
+    let max_gap_penalty =
+        64 * scoring.gap_extend_penalty as usize + scoring.gap_open_penalty as usize;
+    if max_gap_penalty > u8::MAX as usize {
+        return false;
+    }
+
     let max_per_char = scoring.match_score as usize + scoring.max_per_char_bonus() as usize;
     let max_matrix_score = max_per_char * needle_len
         + scoring.max_one_time_bonus() as usize
@@ -510,5 +517,17 @@ mod tests {
                 "len={len}"
             );
         }
+    }
+
+    #[test]
+    fn score_fits_in_u8_bounds_gap_extend_doubling() {
+        assert!(score_fits_in_u8(4, &Scoring::default()));
+        // The gap propagators scale the gap extend penalty by up to 64x on the widest
+        // u8 backend, so 8 * 64 = 512 would wrap the u8 gap penalty
+        let scoring = Scoring {
+            gap_extend_penalty: 8,
+            ..Scoring::default()
+        };
+        assert!(!score_fits_in_u8(4, &scoring));
     }
 }
