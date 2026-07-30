@@ -89,8 +89,8 @@ where
                 let (matched, start_pos, end_pos) =
                     self.prefilter_haystack::<TYPOS, UNICODE>(haystack, max_typos);
                 if matched {
-                    let (trimmed, start_pos) = trim_haystack(haystack, start_pos, end_pos);
-                    let include_exact = start_pos == 0 && end_pos == original_len;
+                    let (trimmed, start_pos, include_exact) =
+                        trim_haystack(haystack, start_pos, end_pos);
                     matches.push(self.smith_waterman_one::<UNICODE>(
                         trimmed,
                         index,
@@ -126,8 +126,7 @@ where
             return None;
         }
 
-        let (trimmed, start_pos) = trim_haystack(haystack, start_pos, end_pos);
-        let include_exact = start_pos == 0 && end_pos == original_len;
+        let (trimmed, start_pos, include_exact) = trim_haystack(haystack, start_pos, end_pos);
         Some(self.smith_waterman_one::<UNICODE>(trimmed, index, start_pos, include_exact))
     }
 
@@ -159,8 +158,7 @@ where
             return None;
         }
 
-        let (trimmed, start_pos) = trim_haystack(haystack, start_pos, end_pos);
-        let include_exact = start_pos == 0 && end_pos == original_len;
+        let (trimmed, start_pos, include_exact) = trim_haystack(haystack, start_pos, end_pos);
         Some(self.smith_waterman_indices_one::<UNICODE>(
             trimmed,
             start_pos,
@@ -213,8 +211,8 @@ where
                 let (matched, start_pos, end_pos) =
                     self.prefilter_haystack::<TYPOS, UNICODE>(haystack, max_typos);
                 if matched {
-                    let (trimmed, start_pos) = trim_haystack(haystack, start_pos, end_pos);
-                    let include_exact = start_pos == 0 && end_pos == original_len;
+                    let (trimmed, start_pos, include_exact) =
+                        trim_haystack(haystack, start_pos, end_pos);
                     matches.push(self.smith_waterman_indices_one::<UNICODE>(
                         trimmed,
                         start_pos,
@@ -320,12 +318,16 @@ where
     }
 }
 
+/// Trims the haystack to the prefilter's window, returning the trimmed slice, the trimmed
+/// start position, and whether the window covers the full haystack (making it eligible for
+/// the exact match bonus)
 #[inline(always)]
-fn trim_haystack(haystack: &[u8], start_pos: usize, end_pos: usize) -> (&[u8], usize) {
+fn trim_haystack(haystack: &[u8], start_pos: usize, end_pos: usize) -> (&[u8], usize, bool) {
     // substract 1 so that we add the delimiter bonus from the first char
     // otherwise, we would never see it in the smith waterman
     let start_pos = start_pos.saturating_sub(1);
-    (&haystack[start_pos..end_pos], start_pos)
+    let include_exact = start_pos == 0 && end_pos == haystack.len();
+    (&haystack[start_pos..end_pos], start_pos, include_exact)
 }
 
 #[cfg(test)]
