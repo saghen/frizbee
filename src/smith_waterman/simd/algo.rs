@@ -26,7 +26,6 @@ pub struct SmithWatermanMatcherInternal<Simd128: Vector128Expansion<Simd256>, Si
     pub score_matrix: Matrix<Simd256>,
     pub match_masks: Matrix<Simd256>,
     /// Actual haystack chunks for the most recent score_haystack call.
-    /// The matrix stride is always MAX_HAYSTACK_CHUNKS for zero-free reuse.
     pub haystack_chunks: usize,
     phantom: PhantomData<Simd256>,
 }
@@ -39,11 +38,18 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
             needle: String::from_utf8_lossy(needle).to_string(),
             needle_simd: Self::broadcast_needle(needle),
             scoring: *scoring,
-            score_matrix: Matrix::new(needle.len(), MAX_HAYSTACK_LEN),
-            match_masks: Matrix::new(needle.len(), MAX_HAYSTACK_LEN),
+            score_matrix: Matrix::new(needle.len(), 0),
+            match_masks: Matrix::new(needle.len(), 0),
             haystack_chunks: 0,
             phantom: PhantomData,
         }
+    }
+
+    #[inline]
+    pub fn reserve_haystack_len(&mut self, haystack_len: usize) {
+        let haystack_len = haystack_len.min(MAX_HAYSTACK_LEN);
+        self.score_matrix.reserve_haystack_len(haystack_len);
+        self.match_masks.reserve_haystack_len(haystack_len);
     }
 
     fn broadcast_needle(needle: &[u8]) -> Vec<(Simd128, Simd128)> {
@@ -97,11 +103,11 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
     /// Must be called after `score_haystack` which populates the matrix.
     #[cfg(feature = "match_end_col")]
     #[inline(always)]
-    fn get_match_end_col(&self, score: u16) -> u16 {
+    pub fn get_match_end_col(&self, max_score: u16) -> u16 {
         let needle_len = self.needle.len();
         for chunk_idx in 1..self.haystack_chunks {
             let chunk = self.score_matrix.get(needle_len, chunk_idx);
-            let idx = unsafe { chunk.idx_u16(score) };
+            let idx = unsafe { chunk.idx_u16(max_score) };
             if idx != 16 {
                 return ((chunk_idx - 1) * 16 + idx) as u16;
             }
@@ -142,19 +148,20 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
 
     #[inline(always)]
     pub fn score_haystack(&mut self, haystack: &[u8]) -> u16 {
+        if haystack.is_empty() {
+            return 0;
+        }
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(self.needle.as_bytes(), haystack, &self.scoring)
                 .map(|(score, _)| score)
                 .unwrap_or(0);
         }
 
+        self.reserve_haystack_len(haystack.len());
         let scoring = &self.scoring;
         let haystack_chunks = haystack.len().div_ceil(16) + 1;
         self.haystack_chunks = haystack_chunks;
 
-        // Matrix stride is fixed at MAX_HAYSTACK_CHUNKS from construction.
-        // Row 0 and column 0 are always zero (never written by the inner loop),
-        // so no re-zeroing is needed between calls.
         let score_matrix = &mut self.score_matrix;
         let match_masks = &mut self.match_masks;
 
@@ -170,14 +177,12 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
             let delimiter_bonus = Simd256::splat_u16(scoring.delimiter_bonus);
 
             // State
-            // TODO: have prefix bonus scale based on distance
             let mut prefix_bonus_masked =
                 Simd256::splat_u16(scoring.prefix_bonus).and(Simd256::load_unaligned(PREFIX_MASK));
             let mut prev_chunk_char_is_delimiter_mask = Simd128::zero();
             let mut prev_chunk_is_lower_mask = Simd128::zero();
             let mut max_scores = Simd256::zero();
 
-            // TODO: try doing N needle chars per haystack chunk for better cache locality
             for (col_idx, haystack) in (0..(haystack_chunks - 1)).map(|col_idx| {
                 let haystack =
                     Simd128::load_partial(haystack.as_ptr(), col_idx * 16, haystack.len());
@@ -205,8 +210,6 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
                 prev_chunk_is_lower_mask = is_lower_mask;
 
                 // Bonus for matching after a delimiter character
-                // We consider anything that isn't a digit or a letter, and within ASCII range, to
-                // be a delimiter
                 let is_digit_mask = Simd128::and(
                     haystack.gt_u8(Simd128::splat_u8(b'0' - 1)),
                     haystack.lt_u8(Simd128::splat_u8(b'9' + 1)),
@@ -233,10 +236,72 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
                 let mut prev_row_scores = Simd256::zero();
                 let mut row_scores = Simd256::zero();
 
-                for (row_idx, (needle_char, flipped_case_needle_char)) in
-                    self.needle_simd.iter().enumerate().map(|(i, c)| (i + 1, c))
-                {
-                    // Match needle chars against the haystack (case insensitive)
+                let needle_chunks = self.needle_simd.chunks_exact(2);
+                let needle_rem = needle_chunks.remainder();
+                let mut row_idx = 1;
+
+                for pair in needle_chunks {
+                    let (n0, fn0) = &pair[0];
+                    let (n1, fn1) = &pair[1];
+
+                    let exact0 = n0.eq_u8(haystack);
+                    let flipped0 = fn0.eq_u8(haystack);
+                    let exact1 = n1.eq_u8(haystack);
+                    let flipped1 = fn1.eq_u8(haystack);
+
+                    let match_mask0 = exact0.or(flipped0).cast_i8_to_i16();
+                    let exact0_cast = exact0.cast_i8_to_i16();
+                    let match_mask1 = exact1.or(flipped1).cast_i8_to_i16();
+                    let exact1_cast = exact1.cast_i8_to_i16();
+
+                    let diag0 = prev_row_scores
+                        .shift_right_padded_u16::<1>(score_matrix.get(row_idx - 1, col_idx - 1))
+                        .add_u16(match_mask0.and(match_and_masked_bonuses))
+                        .subs_u16(mismatch_penalty)
+                        .add_u16(exact0_cast.and(matching_case_bonus));
+
+                    let up0 = prev_row_scores
+                        .subs_u16(gap_extend_penalty)
+                        .subs_u16(up_gap_mask.and(gap_open_penalty));
+
+                    let r0_scores = propagate_horizontal_gaps::<Simd256>(
+                        diag0.max_u16(up0),
+                        score_matrix.get(row_idx, col_idx - 1),
+                        match_mask0,
+                        match_masks.get(row_idx, col_idx - 1),
+                        gap_open_penalty,
+                        gap_extend_penalty,
+                    );
+                    score_matrix.set(row_idx, col_idx, r0_scores);
+                    match_masks.set(row_idx, col_idx, match_mask0);
+
+                    let diag1 = r0_scores
+                        .shift_right_padded_u16::<1>(score_matrix.get(row_idx, col_idx - 1))
+                        .add_u16(match_mask1.and(match_and_masked_bonuses))
+                        .subs_u16(mismatch_penalty)
+                        .add_u16(exact1_cast.and(matching_case_bonus));
+
+                    let up1 = r0_scores
+                        .subs_u16(gap_extend_penalty)
+                        .subs_u16(match_mask0.and(gap_open_penalty));
+
+                    row_scores = propagate_horizontal_gaps::<Simd256>(
+                        diag1.max_u16(up1),
+                        score_matrix.get(row_idx + 1, col_idx - 1),
+                        match_mask1,
+                        match_masks.get(row_idx + 1, col_idx - 1),
+                        gap_open_penalty,
+                        gap_extend_penalty,
+                    );
+                    score_matrix.set(row_idx + 1, col_idx, row_scores);
+                    match_masks.set(row_idx + 1, col_idx, match_mask1);
+
+                    prev_row_scores = row_scores;
+                    up_gap_mask = match_mask1;
+                    row_idx += 2;
+                }
+
+                for (needle_char, flipped_case_needle_char) in needle_rem {
                     let exact_case_match_mask = (*needle_char).eq_u8(haystack);
                     let flipped_case_match_mask = (*flipped_case_needle_char).eq_u8(haystack);
                     let match_mask = exact_case_match_mask
@@ -244,44 +309,30 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
                         .cast_i8_to_i16();
                     let exact_case_match_mask = exact_case_match_mask.cast_i8_to_i16();
 
-                    // Diagonal - typical match/mismatch, moving along one haystack and needle char
-                    let diag_scores = {
-                        let diag = prev_row_scores.shift_right_padded_u16::<1>(
-                            score_matrix.get(row_idx - 1, col_idx - 1),
-                        );
+                    let diag_scores = prev_row_scores
+                        .shift_right_padded_u16::<1>(score_matrix.get(row_idx - 1, col_idx - 1))
+                        .add_u16(match_mask.and(match_and_masked_bonuses))
+                        .subs_u16(mismatch_penalty)
+                        .add_u16(exact_case_match_mask.and(matching_case_bonus));
 
-                        // Add match score (+ mismatch penalty) with bonuses for matches, avoiding blendv
-                        // Bonuses are delimiter, capitalization and prefix
-                        let diag = diag.add_u16(match_mask.and(match_and_masked_bonuses));
-                        // Always add mismatch penalty
-                        let diag = diag.subs_u16(mismatch_penalty);
-                        // Add matching case bonus
-                        diag.add_u16(exact_case_match_mask.and(matching_case_bonus))
-                    };
+                    let up_scores = prev_row_scores
+                        .subs_u16(gap_extend_penalty)
+                        .subs_u16(up_gap_mask.and(gap_open_penalty));
 
-                    // Up - skipping char in needle
-                    let up_scores = {
-                        // Always apply gap extend penalty
-                        let score_after_gap_extend = prev_row_scores.subs_u16(gap_extend_penalty);
-                        // Apply gap open penalty - gap extend penalty for opened gaps, avoiding blendv
-                        score_after_gap_extend.subs_u16(up_gap_mask.and(gap_open_penalty))
-                    };
-
-                    // Max of diagonal, up and left (after gap extension)
                     row_scores = propagate_horizontal_gaps::<Simd256>(
-                        diag_scores.max_u16(up_scores),         // Current
-                        score_matrix.get(row_idx, col_idx - 1), // Left
-                        match_mask,                             // Current
-                        match_masks.get(row_idx, col_idx - 1),  // Left
+                        diag_scores.max_u16(up_scores),
+                        score_matrix.get(row_idx, col_idx - 1),
+                        match_mask,
+                        match_masks.get(row_idx, col_idx - 1),
                         gap_open_penalty,
                         gap_extend_penalty,
                     );
 
-                    // Store results
                     score_matrix.set(row_idx, col_idx, row_scores);
                     match_masks.set(row_idx, col_idx, match_mask);
                     prev_row_scores = row_scores;
                     up_gap_mask = match_mask;
+                    row_idx += 1;
                 }
 
                 // because we do this after the loop, we're guaranteed to be on the last row
@@ -314,6 +365,7 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
                 .unwrap_or(0);
         }
 
+        self.reserve_haystack_len(total_len);
         let scoring = &self.scoring;
         let haystack_chunks = total_len.div_ceil(16) + 1;
         self.haystack_chunks = haystack_chunks;
@@ -386,9 +438,72 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
                 let mut prev_row_scores = Simd256::zero();
                 let mut row_scores = Simd256::zero();
 
-                for (row_idx, (needle_char, flipped_case_needle_char)) in
-                    self.needle_simd.iter().enumerate().map(|(i, c)| (i + 1, c))
-                {
+                let needle_chunks = self.needle_simd.chunks_exact(2);
+                let needle_rem = needle_chunks.remainder();
+                let mut row_idx = 1;
+
+                for pair in needle_chunks {
+                    let (n0, fn0) = &pair[0];
+                    let (n1, fn1) = &pair[1];
+
+                    let exact0 = n0.eq_u8(haystack);
+                    let flipped0 = fn0.eq_u8(haystack);
+                    let exact1 = n1.eq_u8(haystack);
+                    let flipped1 = fn1.eq_u8(haystack);
+
+                    let match_mask0 = exact0.or(flipped0).cast_i8_to_i16();
+                    let exact0_cast = exact0.cast_i8_to_i16();
+                    let match_mask1 = exact1.or(flipped1).cast_i8_to_i16();
+                    let exact1_cast = exact1.cast_i8_to_i16();
+
+                    let diag0 = prev_row_scores
+                        .shift_right_padded_u16::<1>(score_matrix.get(row_idx - 1, col_idx - 1))
+                        .add_u16(match_mask0.and(match_and_masked_bonuses))
+                        .subs_u16(mismatch_penalty)
+                        .add_u16(exact0_cast.and(matching_case_bonus));
+
+                    let up0 = prev_row_scores
+                        .subs_u16(gap_extend_penalty)
+                        .subs_u16(up_gap_mask.and(gap_open_penalty));
+
+                    let r0_scores = propagate_horizontal_gaps::<Simd256>(
+                        diag0.max_u16(up0),
+                        score_matrix.get(row_idx, col_idx - 1),
+                        match_mask0,
+                        match_masks.get(row_idx, col_idx - 1),
+                        gap_open_penalty,
+                        gap_extend_penalty,
+                    );
+                    score_matrix.set(row_idx, col_idx, r0_scores);
+                    match_masks.set(row_idx, col_idx, match_mask0);
+
+                    let diag1 = r0_scores
+                        .shift_right_padded_u16::<1>(score_matrix.get(row_idx, col_idx - 1))
+                        .add_u16(match_mask1.and(match_and_masked_bonuses))
+                        .subs_u16(mismatch_penalty)
+                        .add_u16(exact1_cast.and(matching_case_bonus));
+
+                    let up1 = r0_scores
+                        .subs_u16(gap_extend_penalty)
+                        .subs_u16(match_mask0.and(gap_open_penalty));
+
+                    row_scores = propagate_horizontal_gaps::<Simd256>(
+                        diag1.max_u16(up1),
+                        score_matrix.get(row_idx + 1, col_idx - 1),
+                        match_mask1,
+                        match_masks.get(row_idx + 1, col_idx - 1),
+                        gap_open_penalty,
+                        gap_extend_penalty,
+                    );
+                    score_matrix.set(row_idx + 1, col_idx, row_scores);
+                    match_masks.set(row_idx + 1, col_idx, match_mask1);
+
+                    prev_row_scores = row_scores;
+                    up_gap_mask = match_mask1;
+                    row_idx += 2;
+                }
+
+                for (needle_char, flipped_case_needle_char) in needle_rem {
                     let exact_case_match_mask = (*needle_char).eq_u8(haystack);
                     let flipped_case_match_mask = (*flipped_case_needle_char).eq_u8(haystack);
                     let match_mask = exact_case_match_mask
@@ -396,19 +511,15 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
                         .cast_i8_to_i16();
                     let exact_case_match_mask = exact_case_match_mask.cast_i8_to_i16();
 
-                    let diag_scores = {
-                        let diag = prev_row_scores.shift_right_padded_u16::<1>(
-                            score_matrix.get(row_idx - 1, col_idx - 1),
-                        );
-                        let diag = diag.add_u16(match_mask.and(match_and_masked_bonuses));
-                        let diag = diag.subs_u16(mismatch_penalty);
-                        diag.add_u16(exact_case_match_mask.and(matching_case_bonus))
-                    };
+                    let diag_scores = prev_row_scores
+                        .shift_right_padded_u16::<1>(score_matrix.get(row_idx - 1, col_idx - 1))
+                        .add_u16(match_mask.and(match_and_masked_bonuses))
+                        .subs_u16(mismatch_penalty)
+                        .add_u16(exact_case_match_mask.and(matching_case_bonus));
 
-                    let up_scores = {
-                        let score_after_gap_extend = prev_row_scores.subs_u16(gap_extend_penalty);
-                        score_after_gap_extend.subs_u16(up_gap_mask.and(gap_open_penalty))
-                    };
+                    let up_scores = prev_row_scores
+                        .subs_u16(gap_extend_penalty)
+                        .subs_u16(up_gap_mask.and(gap_open_penalty));
 
                     row_scores = propagate_horizontal_gaps::<Simd256>(
                         diag_scores.max_u16(up_scores),
@@ -423,6 +534,7 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
                     match_masks.set(row_idx, col_idx, match_mask);
                     prev_row_scores = row_scores;
                     up_gap_mask = match_mask;
+                    row_idx += 1;
                 }
 
                 max_scores = max_scores.max_u16(row_scores);
@@ -524,8 +636,6 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
     #[cfg(test)]
     pub fn print_score_matrix(&self, haystack: &str) {
         let haystack_chunks = haystack.len().div_ceil(16) + 1;
-        let stride = self.score_matrix.haystack_chunks;
-        let score_matrix = self.score_matrix.as_slice();
 
         print!("     ");
         for char in haystack.chars() {
@@ -533,15 +643,12 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
         }
         println!();
 
-        for (i, row) in score_matrix
-            .chunks_exact(stride)
-            .enumerate()
-            .skip(1)
-            .take(self.needle.len())
-        {
-            print!("{:<4} ", self.needle.chars().nth(i - 1).unwrap_or(' '));
-            for col in row.iter().take(haystack_chunks).skip(1).flatten() {
-                print!("{:<4} ", col);
+        for row in 1..=self.needle.len() {
+            print!("{:<4} ", self.needle.chars().nth(row - 1).unwrap_or(' '));
+            for col in 1..haystack_chunks {
+                for value in self.score_matrix.get(row, col).to_array_256_u16() {
+                    print!("{:<4} ", value);
+                }
             }
             println!();
         }

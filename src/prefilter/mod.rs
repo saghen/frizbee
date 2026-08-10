@@ -54,6 +54,74 @@ pub(crate) fn case_needle(needle: &[u8]) -> Vec<(u8, u8)> {
         .collect()
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct LcsPrefilter {
+    masks: std::sync::Arc<[u64; 256]>,
+    needle_len: usize,
+}
+
+impl LcsPrefilter {
+    pub(crate) fn new(needle: &[u8]) -> Self {
+        let mut masks = [0; 256];
+        if needle.len() <= u64::BITS as usize {
+            for (index, byte) in needle.iter().copied().enumerate() {
+                masks[byte.to_ascii_lowercase() as usize] |= 1_u64 << index;
+            }
+        }
+        Self {
+            masks: std::sync::Arc::new(masks),
+            needle_len: needle.len(),
+        }
+    }
+
+    #[inline]
+    fn update(&self, state: u64, byte: u8) -> u64 {
+        let matches = self.masks[byte.to_ascii_lowercase() as usize];
+        let combined = state | matches;
+        combined & !(combined.wrapping_sub((state << 1) | 1))
+    }
+
+    #[inline]
+    pub(crate) fn matches(&self, haystack: &[u8], max_typos: u16) -> bool {
+        let required = self.needle_len.saturating_sub(max_typos as usize);
+        if required == 0 || self.needle_len > u64::BITS as usize {
+            return true;
+        }
+        let state = haystack
+            .iter()
+            .copied()
+            .fold(0, |state, byte| self.update(state, byte));
+        state.count_ones() as usize >= required
+    }
+
+    #[inline]
+    pub(crate) fn matches_chunked(
+        &self,
+        chunk_ptrs: &[*const u8],
+        byte_len: u16,
+        max_typos: u16,
+    ) -> bool {
+        let required = self.needle_len.saturating_sub(max_typos as usize);
+        if required == 0 || self.needle_len > u64::BITS as usize {
+            return true;
+        }
+
+        let mut state = 0;
+        let total_len = byte_len as usize;
+        for (chunk_idx, &ptr) in chunk_ptrs.iter().enumerate() {
+            let start = chunk_idx * 16;
+            if start >= total_len {
+                break;
+            }
+            let bytes = unsafe { core::slice::from_raw_parts(ptr, 16.min(total_len - start)) };
+            for byte in bytes.iter().copied() {
+                state = self.update(state, byte);
+            }
+        }
+        state.count_ones() as usize >= required
+    }
+}
+
 /// SIMD unordered prefiltering algorithm which allows for false positives.
 /// Chooses the fastest algorithm via runtime feature detection.
 #[derive(Debug, Clone)]
@@ -70,12 +138,32 @@ pub enum Prefilter {
 impl Prefilter {
     pub fn new(needle: &[u8]) -> Self {
         #[cfg(target_arch = "x86_64")]
-        if x86_64::PrefilterAVX::is_available() {
-            return Prefilter::AVX(unsafe { x86_64::PrefilterAVX::new(needle) });
-        }
-        #[cfg(target_arch = "x86_64")]
-        if x86_64::PrefilterSSE::is_available() {
-            return Prefilter::SSE(unsafe { x86_64::PrefilterSSE::new(needle) });
+        {
+            use std::sync::OnceLock;
+            #[derive(Clone, Copy)]
+            enum Backend {
+                Avx2,
+                Sse,
+                Scalar,
+            }
+            static BACKEND: OnceLock<Backend> = OnceLock::new();
+            match *BACKEND.get_or_init(|| {
+                if x86_64::PrefilterAVX::is_available() {
+                    Backend::Avx2
+                } else if x86_64::PrefilterSSE::is_available() {
+                    Backend::Sse
+                } else {
+                    Backend::Scalar
+                }
+            }) {
+                Backend::Avx2 => {
+                    return Prefilter::AVX(unsafe { x86_64::PrefilterAVX::new(needle) });
+                }
+                Backend::Sse => {
+                    return Prefilter::SSE(unsafe { x86_64::PrefilterSSE::new(needle) });
+                }
+                Backend::Scalar => {}
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -84,7 +172,6 @@ impl Prefilter {
         #[cfg(not(target_arch = "aarch64"))]
         Prefilter::Scalar(scalar::PrefilterScalar::new(needle))
     }
-
 
     /// Checks if the needle is wholly contained in the haystack, ignoring the exact order of the
     /// bytes. For example, if the needle is "test", the haystack "tset" will return true. However,
@@ -154,6 +241,62 @@ impl Prefilter {
 
 #[cfg(test)]
 mod tests {
+    use super::LcsPrefilter;
+
+    fn strings(max_len: usize) -> Vec<Vec<u8>> {
+        let mut values = vec![Vec::new()];
+        for _ in 0..max_len {
+            let previous = values.clone();
+            for prefix in previous {
+                if prefix.len() == max_len {
+                    continue;
+                }
+                for byte in [b'a', b'B', b'c'] {
+                    let mut value = prefix.clone();
+                    value.push(byte);
+                    values.push(value);
+                }
+            }
+        }
+        values.sort();
+        values.dedup();
+        values
+    }
+
+    fn lcs_len(needle: &[u8], haystack: &[u8]) -> usize {
+        let mut row = vec![0; haystack.len() + 1];
+        for needle_byte in needle.iter().copied() {
+            let mut diagonal = 0;
+            for (index, haystack_byte) in haystack.iter().copied().enumerate() {
+                let above = row[index + 1];
+                row[index + 1] = if needle_byte.eq_ignore_ascii_case(&haystack_byte) {
+                    diagonal + 1
+                } else {
+                    row[index].max(above)
+                };
+                diagonal = above;
+            }
+        }
+        row[haystack.len()]
+    }
+
+    #[test]
+    fn bit_lcs_matches_reference() {
+        let values = strings(5);
+        for needle in &values {
+            let filter = LcsPrefilter::new(needle);
+            for haystack in &values {
+                for typos in 0..=needle.len() as u16 {
+                    assert_eq!(
+                        filter.matches(haystack, typos),
+                        lcs_len(needle, haystack) >= needle.len().saturating_sub(typos as usize),
+                        "needle={needle:?} haystack={haystack:?} typos={typos}"
+                    );
+                }
+            }
+        }
+    }
+
     fn match_haystack(needle: &str, haystack: &str) -> bool {
         match_haystack_generic(needle, haystack, 0)
     }

@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
@@ -49,7 +48,7 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: Matchable + Sync>(
         let handles: Vec<_> = (0..threads)
             .map(|_| {
                 s.spawn(|| {
-                    let mut local_matches = Vec::new();
+                    let mut local_chunks = Vec::new();
                     let mut matcher = matcher.clone();
 
                     loop {
@@ -63,31 +62,28 @@ pub fn match_list_parallel<S1: AsRef<str>, S2: Matchable + Sync>(
                         let end = (start + chunk_size).min(haystacks.len());
                         let haystacks_chunk = &haystacks[start..end];
 
-                        matcher.match_list_into(haystacks_chunk, start as u32, &mut local_matches);
+                        let mut chunk_matches = Vec::new();
+                        matcher.match_list_into(haystacks_chunk, start as u32, &mut chunk_matches);
+                        local_chunks.push((chunk_idx, chunk_matches));
                     }
-
-                    // Each thread sorts so that we can perform k-way merge
-                    if config.sort {
-                        radix_sort_matches(&mut local_matches);
-                    }
-
-                    local_matches
+                    local_chunks
                 })
             })
             .collect();
 
+        let mut chunks: Vec<_> = handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap())
+            .collect();
+        chunks.sort_unstable_by_key(|(index, _)| *index);
+        let mut matches: Vec<_> = chunks
+            .into_iter()
+            .flat_map(|(_, matches)| matches)
+            .collect();
         if config.sort {
-            handles
-                .into_iter()
-                .map(|h| h.join().unwrap())
-                .kmerge()
-                .collect()
-        } else {
-            handles
-                .into_iter()
-                .flat_map(|h| h.join().unwrap())
-                .collect()
+            radix_sort_matches(&mut matches);
         }
+        matches
     })
 }
 
@@ -143,7 +139,7 @@ pub fn match_list_parallel_resolved<
         let handles: Vec<_> = (0..threads)
             .map(|_| {
                 s.spawn(|| {
-                    let mut local_matches = Vec::new();
+                    let mut local_chunks = Vec::new();
                     let mut matcher = matcher.clone();
 
                     loop {
@@ -156,35 +152,33 @@ pub fn match_list_parallel_resolved<
                         let end = (start + chunk_size).min(items.len());
                         let items_chunk = &items[start..end];
 
+                        let mut chunk_matches = Vec::new();
                         matcher.match_list_resolved_into(
                             items_chunk,
                             start as u32,
                             resolve,
-                            &mut local_matches,
+                            &mut chunk_matches,
                         );
+                        local_chunks.push((chunk_idx, chunk_matches));
                     }
-
-                    if config.sort {
-                        radix_sort_matches(&mut local_matches);
-                    }
-
-                    local_matches
+                    local_chunks
                 })
             })
             .collect();
 
+        let mut chunks: Vec<_> = handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap())
+            .collect();
+        chunks.sort_unstable_by_key(|(index, _)| *index);
+        let mut matches: Vec<_> = chunks
+            .into_iter()
+            .flat_map(|(_, matches)| matches)
+            .collect();
         if config.sort {
-            handles
-                .into_iter()
-                .map(|h| h.join().unwrap())
-                .kmerge()
-                .collect()
-        } else {
-            handles
-                .into_iter()
-                .flat_map(|h| h.join().unwrap())
-                .collect()
+            radix_sort_matches(&mut matches);
         }
+        matches
     })
 }
 
@@ -233,7 +227,7 @@ where
         let handles: Vec<_> = (0..threads)
             .map(|_| {
                 s.spawn(|| {
-                    let mut local_matches = Vec::new();
+                    let mut local_chunks = Vec::new();
                     let mut matcher = matcher.clone();
 
                     loop {
@@ -246,34 +240,63 @@ where
                         let end = (start + chunk_size).min(haystacks.len());
                         let haystacks_chunk = &haystacks[start..end];
 
+                        let mut chunk_matches = Vec::new();
                         matcher.match_list_chunked_into(
                             haystacks_chunk,
                             ctx,
                             start as u32,
-                            &mut local_matches,
+                            &mut chunk_matches,
                         );
+                        local_chunks.push((chunk_idx, chunk_matches));
                     }
-
-                    if config.sort {
-                        radix_sort_matches(&mut local_matches);
-                    }
-
-                    local_matches
+                    local_chunks
                 })
             })
             .collect();
 
+        let mut chunks: Vec<_> = handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap())
+            .collect();
+        chunks.sort_unstable_by_key(|(index, _)| *index);
+        let mut matches: Vec<_> = chunks
+            .into_iter()
+            .flat_map(|(_, matches)| matches)
+            .collect();
         if config.sort {
-            handles
-                .into_iter()
-                .map(|h| h.join().unwrap())
-                .kmerge()
-                .collect()
-        } else {
-            handles
-                .into_iter()
-                .flat_map(|h| h.join().unwrap())
-                .collect()
+            radix_sort_matches(&mut matches);
         }
+        matches
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn signature(matches: Vec<Match>) -> Vec<(u32, u16, bool)> {
+        matches
+            .into_iter()
+            .map(|matched| (matched.index, matched.score, matched.exact))
+            .collect()
+    }
+
+    #[test]
+    fn unsorted_parallel_results_follow_input_order() {
+        let haystacks: Vec<String> = (0..4096)
+            .map(|index| format!("src/module_{index}/file_picker_{index}.rs"))
+            .collect();
+        let config = Config {
+            max_typos: Some(3),
+            sort: false,
+            ..Config::default()
+        };
+        let sequential = signature(match_list_parallel("file_picker_", &haystacks, &config, 1));
+        for _ in 0..16 {
+            assert_eq!(
+                signature(match_list_parallel("file_picker_", &haystacks, &config, 4)),
+                sequential
+            );
+        }
+    }
 }

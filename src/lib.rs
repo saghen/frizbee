@@ -164,7 +164,6 @@ pub trait MatchableChunked {
     fn load_chunk<'a>(&self, ctx: &'a Self::Ctx, index: usize) -> &'a [u8; SIMD_CHUNK_BYTES];
 }
 
-
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Match {

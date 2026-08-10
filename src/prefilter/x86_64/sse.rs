@@ -1,12 +1,13 @@
 use std::arch::x86_64::*;
 
 use super::overlapping_load;
-use crate::prefilter::{case_needle, scalar};
+use crate::prefilter::{LcsPrefilter, case_needle, scalar};
 
 #[derive(Debug, Clone)]
 pub struct PrefilterSSE {
     needle_scalar: Vec<(u8, u8)>,
     needle_simd: Vec<(__m128i, __m128i)>,
+    lcs: LcsPrefilter,
 }
 
 impl PrefilterSSE {
@@ -24,6 +25,7 @@ impl PrefilterSSE {
         Self {
             needle_scalar,
             needle_simd,
+            lcs: LcsPrefilter::new(needle),
         }
     }
 
@@ -110,6 +112,10 @@ impl PrefilterSSE {
             }
             _ => {}
         };
+
+        if max_typos >= 3 {
+            return (self.lcs.matches(haystack, max_typos), 0);
+        }
 
         let mut needle_iter = self.needle_simd.iter();
         let mut needle_char = *needle_iter.next().unwrap();
@@ -215,7 +221,7 @@ impl PrefilterSSE {
             }
 
             if max_typos >= 3 {
-                return (true, 0);
+                return (self.lcs.matches_chunked(chunk_ptrs, byte_len, max_typos), 0);
             }
 
             let mut needle_iter = self.needle_simd.iter();

@@ -4,6 +4,8 @@ use crate::simd::{AVXVector, SSE256Vector, SSEVector};
 use crate::simd::{NEON256Vector, NEONVector};
 use crate::simd::{Scalar128Vector, Scalar256Vector};
 use crate::{Scoring, simd::Vector};
+#[cfg(target_arch = "x86_64")]
+use std::sync::OnceLock;
 
 mod algo;
 mod alignment;
@@ -30,12 +32,31 @@ pub enum SmithWatermanMatcher {
 impl SmithWatermanMatcher {
     pub fn new(needle: &[u8], scoring: &Scoring) -> Self {
         #[cfg(target_arch = "x86_64")]
-        if SmithWatermanMatcherAVX2::is_available() {
-            return Self::AVX2(unsafe { SmithWatermanMatcherAVX2::new(needle, scoring) });
-        }
-        #[cfg(target_arch = "x86_64")]
-        if SmithWatermanMatcherSSE::is_available() {
-            return Self::SSE(unsafe { SmithWatermanMatcherSSE::new(needle, scoring) });
+        {
+            #[derive(Clone, Copy)]
+            enum Backend {
+                Avx2,
+                Sse,
+                Scalar,
+            }
+            static BACKEND: OnceLock<Backend> = OnceLock::new();
+            match *BACKEND.get_or_init(|| {
+                if SmithWatermanMatcherAVX2::is_available() {
+                    Backend::Avx2
+                } else if SmithWatermanMatcherSSE::is_available() {
+                    Backend::Sse
+                } else {
+                    Backend::Scalar
+                }
+            }) {
+                Backend::Avx2 => {
+                    return Self::AVX2(unsafe { SmithWatermanMatcherAVX2::new(needle, scoring) });
+                }
+                Backend::Sse => {
+                    return Self::SSE(unsafe { SmithWatermanMatcherSSE::new(needle, scoring) });
+                }
+                Backend::Scalar => {}
+            }
         }
 
         #[cfg(target_arch = "aarch64")]
@@ -43,6 +64,18 @@ impl SmithWatermanMatcher {
 
         #[cfg(not(target_arch = "aarch64"))]
         Self::Scalar(SmithWatermanMatcherScalar::new(needle, scoring))
+    }
+
+    pub fn reserve_haystack_len(&mut self, haystack_len: usize) {
+        match self {
+            #[cfg(target_arch = "x86_64")]
+            Self::AVX2(matcher) => matcher.0.reserve_haystack_len(haystack_len),
+            #[cfg(target_arch = "x86_64")]
+            Self::SSE(matcher) => matcher.0.reserve_haystack_len(haystack_len),
+            #[cfg(target_arch = "aarch64")]
+            Self::NEON(matcher) => matcher.0.reserve_haystack_len(haystack_len),
+            Self::Scalar(matcher) => matcher.0.reserve_haystack_len(haystack_len),
+        }
     }
 
     pub fn match_haystack(&mut self, haystack: &[u8], max_typos: Option<u16>) -> Option<u16> {

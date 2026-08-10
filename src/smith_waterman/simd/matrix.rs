@@ -21,12 +21,25 @@ impl<Simd256: Vector256> Matrix<Simd256> {
         }
     }
 
+    #[inline]
+    pub fn reserve_haystack_len(&mut self, haystack_len: usize) {
+        let haystack_chunks = haystack_len.div_ceil(16) + 1;
+        if haystack_chunks <= self.haystack_chunks {
+            return;
+        }
+
+        self.matrix = (0..((self.needle_len + 1) * haystack_chunks))
+            .map(|_| unsafe { Simd256::splat_u16(0) })
+            .collect();
+        self.haystack_chunks = haystack_chunks;
+    }
+
     #[inline(always)]
     pub fn get(&self, needle_idx: usize, haystack_idx: usize) -> Simd256 {
         unsafe {
             *self
                 .matrix
-                .get_unchecked(needle_idx * self.haystack_chunks + haystack_idx)
+                .get_unchecked(haystack_idx * (self.needle_len + 1) + needle_idx)
         }
     }
 
@@ -35,7 +48,7 @@ impl<Simd256: Vector256> Matrix<Simd256> {
         unsafe {
             *self
                 .matrix
-                .get_unchecked_mut(needle_idx * self.haystack_chunks + haystack_idx) = value;
+                .get_unchecked_mut(haystack_idx * (self.needle_len + 1) + needle_idx) = value;
         }
     }
 

@@ -26,6 +26,9 @@ impl<Simd128: Vector128Expansion<Simd256>, Simd256: Vector256>
 
     #[inline(always)]
     pub fn has_alignment_path(&self, score: u16, max_typos: u16) -> bool {
+        if score == 0 {
+            return self.needle.len() <= max_typos as usize;
+        }
         let iter = AlignmentPathIter::new(
             &self.score_matrix,
             &self.match_masks,

@@ -38,6 +38,10 @@ impl Matcher {
         self.guard_against_score_overflow();
     }
 
+    pub fn reserve_haystack_len(&mut self, haystack_len: usize) {
+        self.smith_waterman.reserve_haystack_len(haystack_len);
+    }
+
     pub fn match_list<S: Matchable>(&mut self, haystacks: &[S]) -> Vec<Match> {
         Matcher::guard_against_haystack_overflow(haystacks.len(), 0);
 
@@ -502,8 +506,8 @@ impl Matcher {
             .map(|max| needle.len().saturating_sub(max as usize))
             .unwrap_or(0);
 
+        let mut ptrs_buf = [core::ptr::null::<u8>(); N];
         for (index, item) in items.iter().enumerate() {
-            let mut ptrs_buf = [core::ptr::null::<u8>(); N];
             let Some((chunk_count, byte_len)) = resolve(item, &mut ptrs_buf) else {
                 continue;
             };

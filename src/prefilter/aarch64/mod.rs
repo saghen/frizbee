@@ -1,6 +1,6 @@
 use std::arch::aarch64::*;
 
-use crate::prefilter::{case_needle, scalar};
+use crate::prefilter::{LcsPrefilter, case_needle, scalar};
 
 /// Loads a chunk of 16 bytes from the haystack, with overlap when remaining bytes < 16,
 /// since it's dramatically faster than a memcpy.
@@ -41,6 +41,7 @@ unsafe fn overlapping_load(haystack: &[u8], start: usize, len: usize) -> uint8x1
 #[derive(Debug, Clone)]
 pub struct PrefilterNEON {
     pub(crate) needle: Vec<(u8, u8)>,
+    lcs: LcsPrefilter,
 }
 
 impl PrefilterNEON {
@@ -48,6 +49,7 @@ impl PrefilterNEON {
     pub fn new(needle: &[u8]) -> Self {
         Self {
             needle: case_needle(needle),
+            lcs: LcsPrefilter::new(needle),
         }
     }
 
@@ -129,7 +131,7 @@ impl PrefilterNEON {
         };
 
         if max_typos >= 3 {
-            return (true, 0);
+            return (self.lcs.matches(haystack, max_typos), 0);
         }
 
         let mut needle_iter = self
@@ -246,7 +248,7 @@ impl PrefilterNEON {
             }
 
             if max_typos >= 3 {
-                return (true, 0);
+                return (self.lcs.matches_chunked(chunk_ptrs, byte_len, max_typos), 0);
             }
 
             let mut needle_iter = self

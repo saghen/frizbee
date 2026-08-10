@@ -38,7 +38,7 @@ impl Alignment {
 pub struct AlignmentPathIter<'a> {
     score_matrix: &'a [[u16; 16]],
     match_masks: &'a [[u16; 16]],
-    haystack_chunks: usize,
+    needle_rows: usize,
     row_idx: usize,
     col_idx: usize,
     skipped_chunks: usize,
@@ -64,7 +64,7 @@ impl<'a> AlignmentPathIter<'a> {
         Self {
             score_matrix: score_matrix.as_slice(),
             match_masks: match_masks.as_slice(),
-            haystack_chunks: score_matrix.haystack_chunks,
+            needle_rows: score_matrix.needle_len + 1,
             row_idx: needle_len,
             col_idx,
             skipped_chunks,
@@ -94,12 +94,12 @@ impl<'a> AlignmentPathIter<'a> {
 
     #[inline(always)]
     fn get_score(&self, row: usize, col: usize) -> u16 {
-        self.score_matrix[row * self.haystack_chunks + col / 16][col % 16]
+        self.score_matrix[(col / 16) * self.needle_rows + row][col % 16]
     }
 
     #[inline(always)]
     fn get_is_match(&self, row: usize, col: usize) -> bool {
-        self.match_masks[row * self.haystack_chunks + col / 16][col % 16] != 0
+        self.match_masks[(col / 16) * self.needle_rows + row][col % 16] != 0
     }
 }
 

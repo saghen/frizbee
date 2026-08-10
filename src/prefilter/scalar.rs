@@ -1,4 +1,4 @@
-use super::case_needle;
+use super::{LcsPrefilter, case_needle};
 
 #[inline(always)]
 pub fn match_haystack(needle: &[(u8, u8)], haystack: &[u8]) -> bool {
@@ -52,12 +52,14 @@ pub fn match_haystack_typos(needle: &[(u8, u8)], haystack: &[u8], max_typos: u16
 #[derive(Debug, Clone)]
 pub struct PrefilterScalar {
     pub(crate) needle: Vec<(u8, u8)>,
+    lcs: LcsPrefilter,
 }
 
 impl PrefilterScalar {
     pub fn new(needle: &[u8]) -> Self {
         Self {
             needle: case_needle(needle),
+            lcs: LcsPrefilter::new(needle),
         }
     }
 
@@ -125,7 +127,7 @@ impl PrefilterScalar {
         }
 
         if max_typos >= 3 {
-            return (true, 0);
+            return (self.lcs.matches(haystack, max_typos), 0);
         }
 
         let mut needle_idx = 0;
@@ -208,7 +210,7 @@ impl PrefilterScalar {
         }
 
         if max_typos >= 3 {
-            return (true, 0);
+            return (self.lcs.matches_chunked(chunk_ptrs, byte_len, max_typos), 0);
         }
 
         let total_len = byte_len as usize;

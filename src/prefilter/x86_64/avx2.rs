@@ -1,4 +1,4 @@
-use crate::prefilter::{case_needle, scalar};
+use crate::prefilter::{LcsPrefilter, case_needle, scalar};
 
 use super::overlapping_load;
 use std::arch::x86_64::*;
@@ -8,6 +8,7 @@ pub struct PrefilterAVX {
     needle_scalar: Vec<(u8, u8)>,
     /// Lowercase in low 128-bits, uppercase in high 128-bits
     needle_simd: Vec<__m256i>,
+    lcs: LcsPrefilter,
 }
 
 impl PrefilterAVX {
@@ -21,6 +22,7 @@ impl PrefilterAVX {
         Self {
             needle_scalar,
             needle_simd,
+            lcs: LcsPrefilter::new(needle),
         }
     }
 
@@ -105,7 +107,7 @@ impl PrefilterAVX {
         };
 
         if max_typos >= 3 {
-            return (true, 0);
+            return (self.lcs.matches(haystack, max_typos), 0);
         }
 
         let mut needle_iter = self.needle_simd.iter();
@@ -208,7 +210,7 @@ impl PrefilterAVX {
             }
 
             if max_typos >= 3 {
-                return (true, 0);
+                return (self.lcs.matches_chunked(chunk_ptrs, byte_len, max_typos), 0);
             }
 
             let mut needle_iter = self.needle_simd.iter();
