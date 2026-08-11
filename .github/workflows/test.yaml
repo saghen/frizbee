@@ -27,6 +27,31 @@ jobs:
       - name: Run tests
         run: cargo test --verbose
 
+  wasm:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install wasm targets
+        run: rustup target add wasm32-wasip1 wasm32-unknown-unknown
+
+      - name: Install wasmtime
+        run: |
+          curl https://wasmtime.dev/install.sh -sSf | bash
+          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+
+      # .cargo/config.toml enables +simd128 and sets wasmtime as the runner
+      # --lib because criterion's bench harness doesn't build on wasm
+      - name: Run tests (SIMD)
+        run: cargo test --verbose --target wasm32-wasip1 --lib
+
+      - name: Run tests (scalar)
+        run: RUSTFLAGS='' cargo test --verbose --target wasm32-wasip1 --lib
+
+      - name: Check browser target
+        run: cargo check --verbose --target wasm32-unknown-unknown
+
   msrv:
     runs-on: ubuntu-latest
     name: MSRV (${{ matrix.msrv }})
