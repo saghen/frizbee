@@ -2,6 +2,7 @@
 //! using the k-way merge algorithm specialized for [`crate::Match`]es.
 
 use crate::Match;
+use alloc::vec::Vec;
 
 /// Ordering policy for merging. Implementations must define a total order
 /// consistent with the pre-sorted runs.

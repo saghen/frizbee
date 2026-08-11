@@ -102,12 +102,22 @@
 //! radix_sort_matches(&mut matches);
 //! ```
 
-use std::cmp::Ordering;
+#![cfg_attr(not(feature = "std"), no_std)]
+
+extern crate alloc;
+
+#[cfg(all(test, not(feature = "std")))]
+compile_error!("frizbee's tests require the `std` feature");
+
+use alloc::{vec, vec::Vec};
+use core::cmp::Ordering;
 
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
 mod r#const;
+#[cfg(target_arch = "x86_64")]
+mod cpuid;
 pub mod k_merge;
 mod literal;
 mod matcher;
@@ -166,7 +176,7 @@ impl Match {
 
 impl PartialOrd for Match {
     fn partial_cmp(&self, other: &Match) -> Option<Ordering> {
-        Some(std::cmp::Ord::cmp(self, other))
+        Some(core::cmp::Ord::cmp(self, other))
     }
 }
 impl Ord for Match {
@@ -212,7 +222,7 @@ impl MatchIndices {
 
 impl PartialOrd for MatchIndices {
     fn partial_cmp(&self, other: &MatchIndices) -> Option<Ordering> {
-        Some(std::cmp::Ord::cmp(self, other))
+        Some(core::cmp::Ord::cmp(self, other))
     }
 }
 impl Ord for MatchIndices {

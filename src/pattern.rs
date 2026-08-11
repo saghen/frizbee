@@ -1,3 +1,9 @@
+use alloc::{
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
+
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 

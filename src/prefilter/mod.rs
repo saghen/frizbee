@@ -16,6 +16,7 @@ pub(crate) mod algo;
 pub(crate) mod backend;
 
 use algo::Prefilter;
+use alloc::vec::Vec;
 use backend::Backend;
 
 #[derive(Debug, Clone, Copy)]
@@ -98,7 +99,7 @@ pub(crate) fn case_needle_unicode(needle: &str, case_sensitive: bool) -> Vec<Uni
 pub(crate) type Window = (bool, usize, usize);
 
 /// Ordered prefiltering kernel which allows score-level false positives.
-pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
+pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
     fn new(needle: &str, case_sensitive: bool) -> Self;
     fn is_available() -> bool;
 
@@ -1079,7 +1080,7 @@ mod tests {
                     previous[idx + 1].max(current[idx])
                 };
             }
-            std::mem::swap(&mut previous, &mut current);
+            core::mem::swap(&mut previous, &mut current);
         }
 
         previous[haystack.len()]
@@ -1116,7 +1117,7 @@ mod tests {
                     previous[idx + 1].max(current[idx])
                 };
             }
-            std::mem::swap(&mut previous, &mut current);
+            core::mem::swap(&mut previous, &mut current);
         }
 
         previous[haystack.len()]

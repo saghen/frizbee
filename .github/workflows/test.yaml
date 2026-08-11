@@ -52,6 +52,30 @@ jobs:
       - name: Check browser target
         run: cargo check --verbose --target wasm32-unknown-unknown
 
+  no-std:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # wasm32v1-none has no std at all, so this proves the crate is no_std
+      - name: Install wasm32v1-none target
+        run: rustup target add wasm32v1-none
+
+      # .cargo/config.toml enables +simd128
+      - name: Check no_std (SIMD)
+        run: cargo check --verbose --no-default-features --target wasm32v1-none
+
+      - name: Check no_std (scalar)
+        run: RUSTFLAGS='' cargo check --verbose --no-default-features --target wasm32v1-none
+
+      - name: Check no_std with serde
+        run: cargo check --verbose --no-default-features --features serde --target wasm32v1-none
+
+      # Runtime SIMD feature detection (cpuid) path on x86_64
+      - name: Check no_std on host
+        run: cargo check --verbose --no-default-features
+
   msrv:
     runs-on: ubuntu-latest
     name: MSRV (${{ matrix.msrv }})

@@ -280,8 +280,8 @@ pub(super) fn rare_byte_offsets(needle: &[u8]) -> (usize, usize) {
     let (mut rare1, mut offset1) = (needle[0], 0usize);
     let (mut rare2, mut offset2) = (needle[1], 1usize);
     if rank(rare2) < rank(rare1) {
-        std::mem::swap(&mut rare1, &mut rare2);
-        std::mem::swap(&mut offset1, &mut offset2);
+        core::mem::swap(&mut rare1, &mut rare2);
+        core::mem::swap(&mut offset1, &mut offset2);
     }
 
     for (offset, &byte) in needle.iter().enumerate().skip(2) {

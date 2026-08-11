@@ -36,9 +36,12 @@ harness = false
 bench = false
 
 [dependencies]
-serde = { version = "1.0", features = ["derive"], optional = true }
+serde = { version = "1.0", default-features = false, features = ["derive", "alloc"], optional = true }
 
 [features]
+default = ["std"]
+# required for `Matcher::match_list_parallel`
+std = ["serde?/std"]
 serde = ["dep:serde"]
 match_end_col = []
 safe_read = []

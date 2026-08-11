@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use core::fmt::Debug;
 
 use super::algo::Prefilter;
 
@@ -172,7 +172,7 @@ pub(crate) trait Backend: Sized + Debug + Clone + 'static {
 unsafe fn load_partial_copy<B: Backend>(ptr: *const u8, remaining: usize) -> B::Chunk {
     unsafe {
         let mut data = [0u8; 64];
-        std::ptr::copy_nonoverlapping(ptr, data.as_mut_ptr(), remaining);
+        core::ptr::copy_nonoverlapping(ptr, data.as_mut_ptr(), remaining);
         B::load(data.as_ptr())
     }
 }

@@ -11,6 +11,9 @@ rustdocflags = [
 [target.wasm32-unknown-unknown]
 rustflags = ["-C", "target-feature=+simd128"]
 
+[target.wasm32v1-none]
+rustflags = ["-C", "target-feature=+simd128"]
+
 [target.wasm32-wasip1]
 runner = "wasmtime"
 rustflags = ["-C", "target-feature=+simd128"]

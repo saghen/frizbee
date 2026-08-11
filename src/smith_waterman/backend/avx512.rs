@@ -1,4 +1,4 @@
-use std::arch::x86_64::*;
+use core::arch::x86_64::*;
 
 use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
 
@@ -42,7 +42,8 @@ impl Backend for BackendAVX512 {
     type Score = Avx512Score;
 
     fn is_available() -> bool {
-        is_x86_feature_detected!("avx512f") && is_x86_feature_detected!("avx512bw")
+        let features = crate::cpuid::detect();
+        features.avx512f && features.avx512bw
     }
 
     #[inline(always)]
@@ -110,9 +111,8 @@ impl Backend for BackendAVX512U8 {
     type Score = Avx512U8Score;
 
     fn is_available() -> bool {
-        is_x86_feature_detected!("avx512f")
-            && is_x86_feature_detected!("avx512bw")
-            && is_x86_feature_detected!("avx512vbmi")
+        let features = crate::cpuid::detect();
+        features.avx512f && features.avx512bw && features.avx512vbmi
     }
 
     #[inline(always)]
@@ -539,12 +539,12 @@ unsafe fn shift_right_u16_lanes<const L: i32>(prev: __m512i, cur: __m512i) -> __
             _mm512_storeu_si512(prev_arr.as_mut_ptr() as *mut __m512i, prev);
 
             let mut shifted = [0u16; 32];
-            std::ptr::copy_nonoverlapping(
+            core::ptr::copy_nonoverlapping(
                 cur_arr.as_ptr(),
                 shifted.as_mut_ptr().add(L as usize),
                 32 - L as usize,
             );
-            std::ptr::copy_nonoverlapping(
+            core::ptr::copy_nonoverlapping(
                 prev_arr.as_ptr().add(32 - L as usize),
                 shifted.as_mut_ptr(),
                 L as usize,
@@ -591,12 +591,12 @@ unsafe fn shift_right_lanes<const L: i32>(prev: __m512i, cur: __m512i) -> __m512
             _mm512_storeu_si512(prev_arr.as_mut_ptr() as *mut __m512i, prev);
 
             let mut shifted = [0u8; 64];
-            std::ptr::copy_nonoverlapping(
+            core::ptr::copy_nonoverlapping(
                 cur_arr.as_ptr(),
                 shifted.as_mut_ptr().add(L as usize),
                 64 - L as usize,
             );
-            std::ptr::copy_nonoverlapping(
+            core::ptr::copy_nonoverlapping(
                 prev_arr.as_ptr().add(64 - L as usize),
                 shifted.as_mut_ptr(),
                 L as usize,

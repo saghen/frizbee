@@ -1,4 +1,4 @@
-use std::arch::wasm32::*;
+use core::arch::wasm32::*;
 
 use super::Backend;
 

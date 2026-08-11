@@ -1,6 +1,7 @@
 use crate::smith_waterman::score_fits_in_u8;
 use crate::sort::radix_sort_matches;
 use crate::{Config, Match, MatchIndices, Pattern};
+use alloc::{vec, vec::Vec};
 
 #[cfg(target_arch = "aarch64")]
 use crate::literal::LiteralNEON;
@@ -13,8 +14,8 @@ use crate::literal::{LiteralAVX, LiteralAVX512, LiteralSSE};
 pub(crate) mod algo;
 mod backend;
 mod iter;
-// WASM does not support threading
-#[cfg(not(target_family = "wasm"))]
+// Threading requires `std`, and WASM does not support it at all
+#[cfg(all(feature = "std", not(target_family = "wasm")))]
 mod parallel;
 use algo::{MANY_TYPOS, NO_PREFILTER, Specialized};
 use backend::*;
@@ -274,7 +275,7 @@ impl Matcher {
             matches.reverse();
         }
         if self.config.sort.is_by_score() {
-            matches.sort_by_key(|m| std::cmp::Reverse(m.score));
+            matches.sort_by_key(|m| core::cmp::Reverse(m.score));
         }
         matches
     }

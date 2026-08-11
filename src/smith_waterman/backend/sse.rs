@@ -1,4 +1,4 @@
-use std::arch::x86_64::*;
+use core::arch::x86_64::*;
 
 use crate::prefilter::algo::can_overread;
 use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
@@ -26,9 +26,8 @@ impl Backend for BackendSSE {
     type Score = SseScore;
 
     fn is_available() -> bool {
-        is_x86_feature_detected!("sse2")
-            && is_x86_feature_detected!("ssse3")
-            && is_x86_feature_detected!("sse4.1")
+        let features = crate::cpuid::detect();
+        features.sse2 && features.ssse3 && features.sse41
     }
 
     #[inline(always)]
@@ -119,7 +118,7 @@ impl SseBytes {
                     let hi = *ptr.add(6) as u64;
                     lo | (mid << 32) | (hi << 48)
                 }
-                _ => std::hint::unreachable_unchecked(),
+                _ => core::hint::unreachable_unchecked(),
             };
             _mm_cvtsi64_si128(val as i64)
         }
@@ -300,7 +299,7 @@ impl ScoreVec for SseScore {
                 6 => _mm_alignr_epi8::<4>(self.0, prev.0),
                 7 => _mm_alignr_epi8::<2>(self.0, prev.0),
                 8 => prev.0,
-                _ => std::hint::unreachable_unchecked(),
+                _ => core::hint::unreachable_unchecked(),
             })
         }
     }
@@ -559,7 +558,7 @@ impl ScoreVec for SseU8Score {
                 14 => _mm_alignr_epi8::<2>(self.0, prev.0),
                 15 => _mm_alignr_epi8::<1>(self.0, prev.0),
                 16 => prev.0,
-                _ => std::hint::unreachable_unchecked(),
+                _ => core::hint::unreachable_unchecked(),
             })
         }
     }

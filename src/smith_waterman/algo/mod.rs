@@ -4,6 +4,7 @@ use crate::{
     prefilter::{case_needle, case_needle_unicode},
     smith_waterman::greedy::match_greedy,
 };
+use alloc::{string::ToString, vec, vec::Vec};
 
 use super::SmithWaterman;
 use super::alignment_iter::Alignment;

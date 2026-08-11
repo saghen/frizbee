@@ -1,6 +1,7 @@
 use super::Matcher;
 use super::backend::MatcherBackend;
 use crate::{Match, MatchIndices};
+use alloc::vec::Vec;
 
 /// Patterns matched independently, where a haystack matches when all of the
 /// non-negated patterns match and none of the negated patterns match.

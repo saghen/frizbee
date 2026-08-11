@@ -1,6 +1,6 @@
 use crate::prefilter::algo::can_overread;
 use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
-use std::arch::aarch64::*;
+use core::arch::aarch64::*;
 
 use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
@@ -112,7 +112,7 @@ impl NeonBytes {
                     let hi = *ptr.add(6) as u64;
                     lo | (mid << 32) | (hi << 48)
                 }
-                _ => std::hint::unreachable_unchecked(),
+                _ => core::hint::unreachable_unchecked(),
             };
             vreinterpret_u8_u64(vdup_n_u64(val))
         }
@@ -278,7 +278,7 @@ impl ScoreVec for NeonScore {
                 6 => vextq_u16::<2>(prev.0, self.0),
                 7 => vextq_u16::<1>(prev.0, self.0),
                 8 => prev.0,
-                _ => std::hint::unreachable_unchecked(),
+                _ => core::hint::unreachable_unchecked(),
             })
         }
     }
@@ -589,7 +589,7 @@ impl ScoreVec for NeonU8Score {
                 14 => vextq_u8::<2>(prev.0, self.0),
                 15 => vextq_u8::<1>(prev.0, self.0),
                 16 => prev.0,
-                _ => std::hint::unreachable_unchecked(),
+                _ => core::hint::unreachable_unchecked(),
             })
         }
     }

@@ -5,6 +5,7 @@
 use super::algo::LiteralImpl;
 use crate::matcher::algo::Specialized;
 use crate::{Config, Match, MatchIndices};
+use alloc::vec::Vec;
 
 #[cfg(target_arch = "aarch64")]
 use crate::prefilter::backend::PrefilterNEONBackend;

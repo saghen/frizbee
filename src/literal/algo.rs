@@ -3,6 +3,7 @@ use crate::prefilter::algo::load_window;
 use crate::prefilter::backend::{Backend, BitMaskOps};
 use crate::prefilter::{UnicodeChar, case_needle, case_needle_unicode};
 use crate::{Config, Match, MatchIndices, Matching, Scoring};
+use alloc::{vec, vec::Vec};
 
 /// Literal matching: exact / prefix / suffix / substring
 /// Specialized for one SIMD [`crate::prefilter::backend::Backend`] supporting both ASCII and Unicode

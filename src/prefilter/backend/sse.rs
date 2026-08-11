@@ -1,4 +1,4 @@
-use std::arch::x86_64::*;
+use core::arch::x86_64::*;
 
 use super::Backend;
 
@@ -12,7 +12,7 @@ impl Backend for PrefilterSSEBackend {
     type Mask = u16;
 
     fn is_available() -> bool {
-        is_x86_feature_detected!("sse2")
+        crate::cpuid::detect().sse2
     }
 
     #[inline(always)]

@@ -9,6 +9,7 @@ pub(crate) use ascii::find_last_char_pos;
 pub(crate) use load::{can_overread, load_window};
 
 use super::{UnicodeChar, backend::Backend, case_needle, case_needle_unicode};
+use alloc::vec::Vec;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PathState<M> {

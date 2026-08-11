@@ -1,4 +1,5 @@
 use super::backend::{Backend, ScoreVec};
+use alloc::vec::Vec;
 
 #[derive(Debug, Clone)]
 pub(crate) struct Matrix<B: Backend> {

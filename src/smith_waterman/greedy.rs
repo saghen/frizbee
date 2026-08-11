@@ -3,6 +3,7 @@
 //! would balloon in size (due to being N * M)
 
 use crate::{Scoring, prefilter::case_needle};
+use alloc::{vec, vec::Vec};
 
 pub fn match_greedy(
     needle: &[u8],

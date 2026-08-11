@@ -1,4 +1,4 @@
-use std::arch::x86_64::*;
+use core::arch::x86_64::*;
 
 use crate::prefilter::algo::can_overread;
 use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
@@ -23,7 +23,7 @@ impl Backend for BackendAVX {
     type Score = AvxScore;
 
     fn is_available() -> bool {
-        is_x86_feature_detected!("avx2")
+        crate::cpuid::detect().avx2
     }
 
     #[inline(always)]
@@ -114,7 +114,7 @@ unsafe fn load_partial_safe(ptr: *const u8, len: usize) -> __m128i {
                 let hi = *ptr.add(6) as u64;
                 lo | (mid << 32) | (hi << 48)
             }
-            _ => std::hint::unreachable_unchecked(),
+            _ => core::hint::unreachable_unchecked(),
         };
         _mm_cvtsi64_si128(val as i64)
     }
@@ -151,7 +151,7 @@ pub(crate) unsafe fn load_partial_m128i(data: *const u8, start: usize, len: usiz
                     5 => _mm_srli_si128::<5>(hi),
                     6 => _mm_srli_si128::<6>(hi),
                     7 => _mm_srli_si128::<7>(hi),
-                    _ => std::hint::unreachable_unchecked(),
+                    _ => core::hint::unreachable_unchecked(),
                 };
                 _mm_unpacklo_epi64(lo, hi)
             }
@@ -313,7 +313,7 @@ impl ScoreVec for AvxScore {
                 6 => _mm256_alignr_epi8::<4>(self.0, permuted),
                 7 => _mm256_alignr_epi8::<2>(self.0, permuted),
                 8 => permuted,
-                _ => std::hint::unreachable_unchecked(),
+                _ => core::hint::unreachable_unchecked(),
             })
         }
     }
@@ -599,7 +599,7 @@ impl ScoreVec for AvxU8Score {
                 14 => _mm256_alignr_epi8::<2>(self.0, permuted),
                 15 => _mm256_alignr_epi8::<1>(self.0, permuted),
                 16 => permuted,
-                _ => std::hint::unreachable_unchecked(),
+                _ => core::hint::unreachable_unchecked(),
             })
         }
     }

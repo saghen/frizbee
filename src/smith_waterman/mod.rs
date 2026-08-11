@@ -49,6 +49,7 @@
 //! Frizbee previously used inter-sequence parallelism (one needle, $LANES haystacks) but this performed about the same as sequential layout due to requiring interleaving the haystacks and bucketing based on haystack length, while performing worse in parallel due to the required bucketing.
 
 use crate::{Scoring, prefilter::UnicodeChar};
+use alloc::{string::String, vec::Vec};
 use backend::Backend;
 #[cfg(target_arch = "x86_64")]
 use backend::{BackendAVX, BackendAVX512, BackendAVX512U8, BackendAVXU8, BackendSSE, BackendSSEU8};
@@ -137,7 +138,7 @@ pub(crate) struct SmithWaterman<B: Backend> {
     haystack_chunks: usize,
 }
 
-pub(crate) trait Kernel: Clone + std::fmt::Debug + 'static {
+pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
     fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self;
     fn is_available() -> bool;
     fn score_haystack_indices(

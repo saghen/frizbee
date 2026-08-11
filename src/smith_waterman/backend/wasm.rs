@@ -1,4 +1,4 @@
-use std::arch::wasm32::*;
+use core::arch::wasm32::*;
 
 use crate::prefilter::algo::can_overread;
 use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
@@ -40,7 +40,7 @@ unsafe fn load_u64_partial_safe(ptr: *const u8, len: usize) -> u64 {
                 let hi = *ptr.add(6) as u64;
                 lo | (mid << 32) | (hi << 48)
             }
-            _ => std::hint::unreachable_unchecked(),
+            _ => core::hint::unreachable_unchecked(),
         }
     }
 }
@@ -296,7 +296,7 @@ impl ScoreVec for WasmScore {
                 6 => u16x8_shuffle::<2, 3, 4, 5, 6, 7, 8, 9>(prev.0, self.0),
                 7 => u16x8_shuffle::<1, 2, 3, 4, 5, 6, 7, 8>(prev.0, self.0),
                 8 => prev.0,
-                _ => std::hint::unreachable_unchecked(),
+                _ => core::hint::unreachable_unchecked(),
             })
         }
     }
@@ -632,7 +632,7 @@ impl ScoreVec for WasmU8Score {
                     prev.0, self.0,
                 ),
                 16 => prev.0,
-                _ => std::hint::unreachable_unchecked(),
+                _ => core::hint::unreachable_unchecked(),
             })
         }
     }

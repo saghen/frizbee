@@ -1,4 +1,5 @@
 use crate::Match;
+use alloc::vec;
 
 /// Sorts a slice of [`Match`] values in-place by descending `score` using a
 /// stable radix sort. This assumes that the matches are already sorted by index.

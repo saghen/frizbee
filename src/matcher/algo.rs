@@ -1,6 +1,11 @@
 use crate::prefilter::{Kernel as PrefilterKernel, Window};
 use crate::smith_waterman::Kernel as SmithWatermanKernel;
 use crate::{Config, Match, MatchIndices};
+use alloc::{
+    string::{String, ToString},
+    vec,
+    vec::Vec,
+};
 
 /// Magic numbers for `TYPOS` specialization keys beyond the literal counts 0/1/2
 pub(super) const MANY_TYPOS: u16 = u16::MAX;

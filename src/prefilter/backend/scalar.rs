@@ -33,7 +33,7 @@ impl Backend for PrefilterScalarBackend {
     unsafe fn load(ptr: *const u8) -> Self::Chunk {
         unsafe {
             let mut chunk = [0u8; 16];
-            std::ptr::copy_nonoverlapping(ptr, chunk.as_mut_ptr(), 16);
+            core::ptr::copy_nonoverlapping(ptr, chunk.as_mut_ptr(), 16);
             chunk
         }
     }
@@ -42,7 +42,7 @@ impl Backend for PrefilterScalarBackend {
     unsafe fn load_partial(ptr: *const u8, remaining: usize, _mask: Self::Mask) -> Self::Chunk {
         unsafe {
             let mut chunk = [0u8; 16];
-            std::ptr::copy_nonoverlapping(ptr, chunk.as_mut_ptr(), remaining);
+            core::ptr::copy_nonoverlapping(ptr, chunk.as_mut_ptr(), remaining);
             chunk
         }
     }

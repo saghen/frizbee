@@ -235,9 +235,17 @@ Unlike FZF, Frizbee will not match `a` against `á`.
 
 ## WebAssembly
 
-Frizbee builds for WASM without `std`. **Include `RUSTFLAGS='-C target-feature=+simd128'` while building your project**, otherwise Frizbee will fallback to the scalar path. See `.cargo/config.toml` for how you can do this automatically in your repo.
+Frizbee builds for WASM, optionally without `std` (see below) to reduce binary size. **Include `RUSTFLAGS='-C target-feature=+simd128'` while building your project**, otherwise Frizbee will fallback to the scalar path. See `.cargo/config.toml` for how you can do this automatically in your repo.
 
 For development, you can run tests via `cargo test --target wasm32-wasip1 --lib` with `wasmtime` available on the `PATH` (available automatically in `nix develop`).
+
+## `no_std`
+
+Frizbee supports `no_std` (requires `alloc`) by disabling the default `std` feature, in which case `Matcher::match_list_parallel` is unavailable.
+
+```toml
+frizbee = { version = "...", default-features = false }
+```
 
 ## Safety
 

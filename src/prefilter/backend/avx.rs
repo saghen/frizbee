@@ -1,4 +1,5 @@
-use std::arch::x86_64::*;
+use alloc::vec::Vec;
+use core::arch::x86_64::*;
 
 use crate::prefilter::{
     Kernel, Window,
@@ -213,7 +214,7 @@ impl Backend for PrefilterAVXBackend {
     type Mask = u32;
 
     fn is_available() -> bool {
-        is_x86_feature_detected!("avx2")
+        crate::cpuid::detect().avx2
     }
 
     #[inline(always)]

@@ -1,4 +1,4 @@
-use std::arch::x86_64::*;
+use core::arch::x86_64::*;
 
 use super::Backend;
 
@@ -12,10 +12,8 @@ impl Backend for PrefilterAVX512Backend {
     type Mask = u64;
 
     fn is_available() -> bool {
-        is_x86_feature_detected!("avx512f")
-            && is_x86_feature_detected!("avx512bw")
-            && is_x86_feature_detected!("bmi1")
-            && is_x86_feature_detected!("bmi2")
+        let features = crate::cpuid::detect();
+        features.avx512f && features.avx512bw && features.bmi1 && features.bmi2
     }
 
     #[inline(always)]
