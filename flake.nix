@@ -1,8 +1,18 @@
 {
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      fenix,
+    }:
     let
       systems = [
         "x86_64-linux"
@@ -15,13 +25,24 @@
     {
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
-          packages = with pkgs; [
-            rustc
-            cargo
-            clippy
-            rustfmt
-            rust-analyzer
-          ];
+          packages =
+            let
+              fx = fenix.packages.${pkgs.system};
+              toolchain = fx.combine [
+                fx.stable.rustc
+                fx.stable.cargo
+                fx.stable.clippy
+                fx.stable.rustfmt
+                fx.stable.rust-src
+                fx.rust-analyzer
+                fx.targets.wasm32-unknown-unknown.stable.rust-std
+                fx.targets.wasm32-wasip1.stable.rust-std
+              ];
+            in
+            [
+              toolchain
+              pkgs.wasmtime
+            ];
         };
       });
     };

@@ -233,6 +233,12 @@ For case-insensitive matching, the case flipped version will be skipped if it's 
 
 Unlike FZF, Frizbee will not match `a` against `á`.
 
+## WebAssembly
+
+Frizbee builds for WASM without `std`. **Include `RUSTFLAGS='-C target-feature=+simd128'` while building your project**, otherwise Frizbee will fallback to the scalar path. See `.cargo/config.toml` for how you can do this automatically in your repo.
+
+For development, you can run tests via `cargo test --target wasm32-wasip1 --lib` with `wasmtime` available on the `PATH` (available automatically in `nix develop`).
+
 ## Safety
 
 On stable Rust, it's only possible to use SIMD via intrinsics ([portable-simd](https://github.com/rust-lang/portable-simd) is nightly-only). Many existing crates for safe SIMD abstractions do not currently support AVX512, or left performance on the table. The codebase isolates the vast majority of the unsafe code to SIMD "Backend"s ([prefilter](src/prefilter/backend) and [smith waterman](src/smith_waterman/backend)) which contain many unit/property tests, checked through Miri.

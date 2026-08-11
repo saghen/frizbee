@@ -293,3 +293,7 @@ backend_contract_tests!(
 backend_contract_tests!(neon, super::super::BackendNEON);
 #[cfg(target_arch = "aarch64")]
 backend_contract_tests!(neon_u8, super::super::BackendNEONU8);
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+backend_contract_tests!(wasm, super::super::BackendWasm);
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+backend_contract_tests!(wasm_u8, super::super::BackendWasmU8);

@@ -582,6 +582,14 @@ mod tests {
             assert_same_result(neon_result, scalar_result, "NEON mismatch");
         }
 
+        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            use crate::prefilter::backend::PrefilterWasm;
+
+            let wasm_result = kernel_result::<PrefilterWasm>(needle, haystack, max_typos, false);
+            assert_same_result(wasm_result, scalar_result, "WASM mismatch");
+        }
+
         scalar_result
     }
 
@@ -650,6 +658,21 @@ mod tests {
                     case_sensitive,
                 );
                 assert_same_result(neon_result, scalar_result, "NEON unicode mismatch");
+            }
+        }
+
+        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            use crate::prefilter::backend::PrefilterWasm;
+
+            if PrefilterWasm::is_available() {
+                let wasm_result = kernel_result_unicode::<PrefilterWasm>(
+                    needle,
+                    haystack,
+                    max_typos,
+                    case_sensitive,
+                );
+                assert_same_result(wasm_result, scalar_result, "WASM unicode mismatch");
             }
         }
 
@@ -981,6 +1004,22 @@ mod tests {
                 );
                 assert_same_case_result(result, scalar_result, "NEON", case);
                 assert_valid_window(result, &case.haystack, "NEON", case);
+            }
+        }
+
+        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            use crate::prefilter::backend::PrefilterWasm;
+
+            if PrefilterWasm::is_available() {
+                let result = kernel_result::<PrefilterWasm>(
+                    &case.needle,
+                    &case.haystack,
+                    case.max_typos,
+                    case.case_sensitive,
+                );
+                assert_same_case_result(result, scalar_result, "WASM", case);
+                assert_valid_window(result, &case.haystack, "WASM", case);
             }
         }
     }

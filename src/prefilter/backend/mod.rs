@@ -11,6 +11,8 @@ mod neon;
 mod scalar;
 #[cfg(target_arch = "x86_64")]
 mod sse;
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+mod wasm;
 
 #[cfg(target_arch = "x86_64")]
 pub use avx::PrefilterAVX;
@@ -26,6 +28,8 @@ pub(crate) use neon::PrefilterNEONBackend;
 pub(crate) use scalar::PrefilterScalarBackend;
 #[cfg(target_arch = "x86_64")]
 pub(crate) use sse::PrefilterSSEBackend;
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+pub(crate) use wasm::PrefilterWasmBackend;
 
 #[cfg(target_arch = "x86_64")]
 pub type PrefilterAVX512 = Prefilter<avx512::PrefilterAVX512Backend>;
@@ -34,6 +38,8 @@ pub type PrefilterNEON = Prefilter<neon::PrefilterNEONBackend>;
 pub type PrefilterScalar = Prefilter<scalar::PrefilterScalarBackend>;
 #[cfg(target_arch = "x86_64")]
 pub type PrefilterSSE = Prefilter<sse::PrefilterSSEBackend>;
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+pub type PrefilterWasm = Prefilter<wasm::PrefilterWasmBackend>;
 
 pub(crate) trait Mask:
     Copy + Debug + PartialOrd + BitMaskOps + Send + Sync + 'static

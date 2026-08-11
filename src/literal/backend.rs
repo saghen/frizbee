@@ -9,6 +9,8 @@ use crate::{Config, Match, MatchIndices};
 #[cfg(target_arch = "aarch64")]
 use crate::prefilter::backend::PrefilterNEONBackend;
 use crate::prefilter::backend::PrefilterScalarBackend;
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+use crate::prefilter::backend::PrefilterWasmBackend;
 #[cfg(target_arch = "x86_64")]
 use crate::prefilter::backend::{PrefilterAVX512Backend, PrefilterAVXBackend, PrefilterSSEBackend};
 
@@ -20,6 +22,8 @@ pub(crate) type LiteralAVX = LiteralImpl<PrefilterAVXBackend>;
 pub(crate) type LiteralSSE = LiteralImpl<PrefilterSSEBackend>;
 #[cfg(target_arch = "aarch64")]
 pub(crate) type LiteralNEON = LiteralImpl<PrefilterNEONBackend>;
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+pub(crate) type LiteralWasm = LiteralImpl<PrefilterWasmBackend>;
 pub(crate) type LiteralScalar = LiteralImpl<PrefilterScalarBackend>;
 
 /// Implements [`Specialized`] for one literal backend. `TYPOS` is ignored (literal matching has no
@@ -85,6 +89,8 @@ impl_specialized_literal!(PrefilterAVXBackend, target_feature = "avx2");
 impl_specialized_literal!(PrefilterSSEBackend, target_feature = "sse2");
 #[cfg(target_arch = "aarch64")]
 impl_specialized_literal!(PrefilterNEONBackend, target_feature = "neon");
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+impl_specialized_literal!(PrefilterWasmBackend, target_feature = "simd128");
 impl_specialized_literal!(PrefilterScalarBackend);
 
 #[cfg(test)]
@@ -198,6 +204,18 @@ mod backend_parity {
                             unsafe { probe::<LiteralNEON>(needle, haystack, &config) },
                             expected,
                             "NEON mismatch: needle={needle:?} haystack={haystack:?} {matching:?}"
+                        );
+                    }
+                }
+
+                #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+                {
+                    use crate::literal::LiteralWasm;
+                    if LiteralWasm::is_available() {
+                        assert_eq!(
+                            unsafe { probe::<LiteralWasm>(needle, haystack, &config) },
+                            expected,
+                            "WASM mismatch: needle={needle:?} haystack={haystack:?} {matching:?}"
                         );
                     }
                 }

@@ -6,12 +6,16 @@ use crate::{Config, Match, MatchIndices};
 #[cfg(target_arch = "aarch64")]
 use crate::literal::LiteralNEON;
 use crate::literal::LiteralScalar;
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+use crate::literal::LiteralWasm;
 #[cfg(target_arch = "x86_64")]
 use crate::literal::{LiteralAVX, LiteralAVX512, LiteralSSE};
 
 #[cfg(target_arch = "aarch64")]
 use crate::prefilter::backend::PrefilterNEON;
 use crate::prefilter::backend::PrefilterScalar;
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+use crate::prefilter::backend::PrefilterWasm;
 #[cfg(target_arch = "x86_64")]
 use crate::prefilter::backend::{PrefilterAVX, PrefilterAVX512, PrefilterSSE};
 #[cfg(target_arch = "x86_64")]
@@ -22,6 +26,8 @@ use crate::smith_waterman::{
 #[cfg(target_arch = "aarch64")]
 use crate::smith_waterman::{SmithWatermanNEON, SmithWatermanNEONU8};
 use crate::smith_waterman::{SmithWatermanScalar, SmithWatermanScalarU8};
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+use crate::smith_waterman::{SmithWatermanWasm, SmithWatermanWasmU8};
 
 #[cfg(target_arch = "x86_64")]
 pub type MatcherAVX512U8 = MatcherImpl<PrefilterAVX512, SmithWatermanAVX512U8>;
@@ -39,6 +45,10 @@ pub type MatcherSSE = MatcherImpl<PrefilterSSE, SmithWatermanSSE>;
 pub type MatcherNEONU8 = MatcherImpl<PrefilterNEON, SmithWatermanNEONU8>;
 #[cfg(target_arch = "aarch64")]
 pub type MatcherNEON = MatcherImpl<PrefilterNEON, SmithWatermanNEON>;
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+pub type MatcherWasmU8 = MatcherImpl<PrefilterWasm, SmithWatermanWasmU8>;
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+pub type MatcherWasm = MatcherImpl<PrefilterWasm, SmithWatermanWasm>;
 pub type MatcherScalar = MatcherImpl<PrefilterScalar, SmithWatermanScalar>;
 pub type MatcherScalarU8 = MatcherImpl<PrefilterScalar, SmithWatermanScalarU8>;
 
@@ -62,6 +72,10 @@ pub enum MatcherBackend {
     NEONU8(MatcherNEONU8),
     #[cfg(target_arch = "aarch64")]
     NEON(MatcherNEON),
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    WasmU8(MatcherWasmU8),
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    Wasm(MatcherWasm),
     ScalarU8(MatcherScalarU8),
     Scalar(MatcherScalar),
 
@@ -75,6 +89,8 @@ pub enum MatcherBackend {
     LiteralSSE(LiteralSSE),
     #[cfg(target_arch = "aarch64")]
     LiteralNEON(LiteralNEON),
+    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+    LiteralWasm(LiteralWasm),
     LiteralScalar(LiteralScalar),
 }
 
@@ -167,5 +183,13 @@ impl_specialized!(
 impl_specialized!(PrefilterNEON, SmithWatermanNEONU8, target_feature = "neon");
 #[cfg(target_arch = "aarch64")]
 impl_specialized!(PrefilterNEON, SmithWatermanNEON, target_feature = "neon");
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+impl_specialized!(
+    PrefilterWasm,
+    SmithWatermanWasmU8,
+    target_feature = "simd128"
+);
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+impl_specialized!(PrefilterWasm, SmithWatermanWasm, target_feature = "simd128");
 impl_specialized!(PrefilterScalar, SmithWatermanScalarU8);
 impl_specialized!(PrefilterScalar, SmithWatermanScalar);

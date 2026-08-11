@@ -55,6 +55,8 @@ use backend::{BackendAVX, BackendAVX512, BackendAVX512U8, BackendAVXU8, BackendS
 #[cfg(target_arch = "aarch64")]
 use backend::{BackendNEON, BackendNEONU8};
 use backend::{BackendScalar8, BackendScalar16U8};
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+use backend::{BackendWasm, BackendWasmU8};
 use matrix::Matrix;
 
 mod algo;
@@ -82,6 +84,10 @@ pub type SmithWatermanAVXU8 = SmithWaterman<BackendAVXU8>;
 pub type SmithWatermanNEON = SmithWaterman<BackendNEON>;
 #[cfg(target_arch = "aarch64")]
 pub type SmithWatermanNEONU8 = SmithWaterman<BackendNEONU8>;
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+pub type SmithWatermanWasm = SmithWaterman<BackendWasm>;
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+pub type SmithWatermanWasmU8 = SmithWaterman<BackendWasmU8>;
 pub type SmithWatermanScalar = SmithWaterman<BackendScalar8>;
 pub type SmithWatermanScalarU8 = SmithWaterman<BackendScalar16U8>;
 

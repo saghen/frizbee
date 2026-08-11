@@ -17,6 +17,7 @@
 //!   - AVX2:    LANES = 16/32 (scoring u16 x 16 = 256-bit or u8 x 32 = 256-bit)
 //!   - SSE:     LANES = 8/16  (scoring u16 x 8 = 128-bit or u8 x 16 = 128-bit)
 //!   - NEON:    LANES = 8/16  (scoring u16 x 8 = 128-bit or u8 x 16 = 128-bit)
+//!   - WASM:    LANES = 8/16  (scoring u16 x 8 = 128-bit or u8 x 16 = 128-bit)
 //!   - Scalar:  LANES = 8/16 (fallback for non-SIMD systems)
 
 #[cfg(target_arch = "x86_64")]
@@ -28,6 +29,8 @@ mod neon;
 mod scalar;
 #[cfg(target_arch = "x86_64")]
 mod sse;
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+mod wasm;
 
 #[cfg(target_arch = "x86_64")]
 pub use avx::{BackendAVX, BackendAVXU8};
@@ -38,6 +41,8 @@ pub use neon::{BackendNEON, BackendNEONU8};
 pub use scalar::{BackendScalar8, BackendScalar16U8};
 #[cfg(target_arch = "x86_64")]
 pub use sse::{BackendSSE, BackendSSEU8};
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+pub use wasm::{BackendWasm, BackendWasmU8};
 
 /// A SIMD backend for Smith-Waterman matching that supports variable-width
 /// lanes (8, 16, 32, 64) and score primitives (u8, u16).

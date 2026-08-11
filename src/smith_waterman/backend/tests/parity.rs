@@ -85,6 +85,11 @@ macro_rules! for_each_backend {
             super::super::BackendNEON, BackendScalar8, false);
         $callback!($($ctx)* ; target_arch = "aarch64", "NEON-u8",
             super::super::BackendNEONU8, BackendScalar16U8, true);
+
+        $callback!($($ctx)* ; all(target_arch = "wasm32", target_feature = "simd128"), "WASM-u16",
+            super::super::BackendWasm, BackendScalar8, false);
+        $callback!($($ctx)* ; all(target_arch = "wasm32", target_feature = "simd128"), "WASM-u8",
+            super::super::BackendWasmU8, BackendScalar16U8, true);
     };
 }
 

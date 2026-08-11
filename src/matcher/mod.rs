@@ -5,12 +5,16 @@ use crate::{Config, Match, MatchIndices, Pattern};
 #[cfg(target_arch = "aarch64")]
 use crate::literal::LiteralNEON;
 use crate::literal::LiteralScalar;
+#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+use crate::literal::LiteralWasm;
 #[cfg(target_arch = "x86_64")]
 use crate::literal::{LiteralAVX, LiteralAVX512, LiteralSSE};
 
 pub(crate) mod algo;
 mod backend;
 mod iter;
+// WASM does not support threading
+#[cfg(not(target_family = "wasm"))]
 mod parallel;
 use algo::{MANY_TYPOS, NO_PREFILTER, Specialized};
 use backend::*;
@@ -36,6 +40,10 @@ macro_rules! dispatch {
             MatcherBackend::NEONU8($m) => $body,
             #[cfg(target_arch = "aarch64")]
             MatcherBackend::NEON($m) => $body,
+            #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+            MatcherBackend::WasmU8($m) => $body,
+            #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+            MatcherBackend::Wasm($m) => $body,
             MatcherBackend::ScalarU8($m) => $body,
             MatcherBackend::Scalar($m) => $body,
             #[cfg(target_arch = "x86_64")]
@@ -46,6 +54,8 @@ macro_rules! dispatch {
             MatcherBackend::LiteralSSE($m) => $body,
             #[cfg(target_arch = "aarch64")]
             MatcherBackend::LiteralNEON($m) => $body,
+            #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+            MatcherBackend::LiteralWasm($m) => $body,
             MatcherBackend::LiteralScalar($m) => $body,
         }
     };
@@ -490,6 +500,17 @@ impl Matcher {
             }
         }
 
+        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            if use_u8 {
+                if MatcherWasmU8::is_available() {
+                    return MatcherBackend::WasmU8(unsafe { MatcherWasmU8::build(needle, config) });
+                }
+            } else if MatcherWasm::is_available() {
+                return MatcherBackend::Wasm(unsafe { MatcherWasm::build(needle, config) });
+            }
+        }
+
         if use_u8 {
             MatcherBackend::ScalarU8(unsafe { MatcherScalarU8::build(needle, config) })
         } else {
@@ -517,6 +538,13 @@ impl Matcher {
         {
             if LiteralNEON::is_available() {
                 return MatcherBackend::LiteralNEON(unsafe { LiteralNEON::build(needle, config) });
+            }
+        }
+
+        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            if LiteralWasm::is_available() {
+                return MatcherBackend::LiteralWasm(unsafe { LiteralWasm::build(needle, config) });
             }
         }
 
@@ -761,6 +789,8 @@ mod tests {
             }
             #[cfg(target_arch = "aarch64")]
             MatcherBackend::NEONU8(_) => true,
+            #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+            MatcherBackend::WasmU8(_) => true,
             MatcherBackend::ScalarU8(_) => true,
             _ => false,
         };
@@ -778,6 +808,8 @@ mod tests {
             MatcherBackend::AVX512(_) | MatcherBackend::AVX(_) | MatcherBackend::SSE(_) => true,
             #[cfg(target_arch = "aarch64")]
             MatcherBackend::NEON(_) => true,
+            #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+            MatcherBackend::Wasm(_) => true,
             MatcherBackend::Scalar(_) => true,
             _ => false,
         };
