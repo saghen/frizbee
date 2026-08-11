@@ -481,7 +481,20 @@ impl Scoring {
     /// Max needle length that can be matched with the scoring config. Using a needle length greater
     /// than this will panic.
     pub fn max_needle_len(&self) -> usize {
-        ((u16::MAX.saturating_sub(self.max_one_time_bonus())) / self.max_per_char_bonus()) as usize
+        let max_per_char = self.match_score.saturating_add(self.max_per_char_bonus());
+        // A zero per-char score can never overflow regardless of needle length
+        if max_per_char == 0 {
+            return usize::MAX;
+        }
+
+        // The diagonal transiently holds the score plus the mismatch penalty before subtracting it
+        let headroom = u16::MAX
+            .saturating_sub(self.max_one_time_bonus())
+            .saturating_sub(self.prefix_bonus)
+            .saturating_sub(self.exact_match_bonus)
+            .saturating_sub(self.mismatch_penalty);
+        let max_needle_len = headroom / max_per_char;
+        max_needle_len as usize
     }
 
     /// Max additional score that a needle character can receive, aside from the match score
@@ -526,7 +539,7 @@ impl Scoring {
             "needle too long and could overflow the u16 score: {needle_len} > {max_needle_len}"
         );
 
-        // Gap propagation multiplies the gap extend penalty by up to 32x (AVX-512, u16 scoring)
+        // Gap propagation multiplies the gap extend penalty by up to 32x (AVX-512, u8 scoring)
         let max_gap_penalty =
             32 * self.gap_extend_penalty as usize + self.gap_open_penalty as usize;
         assert!(
@@ -542,7 +555,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn max_needle_len() {
-        assert_eq!(Scoring::default().max_needle_len(), 10922);
+    fn max_needle_len_matches_guard() {
+        let scoring = Scoring::default();
+        assert_eq!(scoring.max_needle_len(), 3639);
+
+        scoring.guard_against_score_overflow(
+            3639,
+            scoring.max_per_char_bonus(),
+            scoring.max_one_time_bonus(),
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn max_needle_len_guard_panics_for_needle_too_long() {
+        let scoring = Scoring::default();
+        scoring.guard_against_score_overflow(
+            3640,
+            scoring.max_per_char_bonus(),
+            scoring.max_one_time_bonus(),
+        );
     }
 }
