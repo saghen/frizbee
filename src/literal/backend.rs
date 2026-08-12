@@ -9,6 +9,7 @@ use alloc::vec::Vec;
 
 #[cfg(target_arch = "aarch64")]
 use crate::prefilter::backend::PrefilterNEONBackend;
+#[cfg(any(test, not(all(target_arch = "wasm32", target_feature = "simd128"))))]
 use crate::prefilter::backend::PrefilterScalarBackend;
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 use crate::prefilter::backend::PrefilterWasmBackend;
@@ -25,6 +26,7 @@ pub(crate) type LiteralSSE = LiteralImpl<PrefilterSSEBackend>;
 pub(crate) type LiteralNEON = LiteralImpl<PrefilterNEONBackend>;
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 pub(crate) type LiteralWasm = LiteralImpl<PrefilterWasmBackend>;
+#[cfg(any(test, not(all(target_arch = "wasm32", target_feature = "simd128"))))]
 pub(crate) type LiteralScalar = LiteralImpl<PrefilterScalarBackend>;
 
 /// Implements [`Specialized`] for one literal backend. `TYPOS` is ignored (literal matching has no
@@ -92,6 +94,7 @@ impl_specialized_literal!(PrefilterSSEBackend, target_feature = "sse2");
 impl_specialized_literal!(PrefilterNEONBackend, target_feature = "neon");
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 impl_specialized_literal!(PrefilterWasmBackend, target_feature = "simd128");
+#[cfg(any(test, not(all(target_arch = "wasm32", target_feature = "simd128"))))]
 impl_specialized_literal!(PrefilterScalarBackend);
 
 #[cfg(test)]
