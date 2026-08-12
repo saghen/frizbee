@@ -12,7 +12,9 @@ use crate::{Match, SortStrategy};
 impl Matcher {
     /// Matches a list of haystacks in parallel on multiple real threads, returning a list of
     /// [`Match`] values. Threads work on 2048 item chunks, and the final result is ordered
-    /// according to [`crate::Config::sort`]. The `threads` must be >0.
+    /// according to [`crate::Config::sort`].
+    ///
+    /// If `threads == 0`, the matcher will default to available CPU cores - 2.
     ///
     /// This API provides the most performant path when matching on lists.
     pub fn match_list_parallel<S: AsRef<str> + Sync>(
@@ -21,7 +23,15 @@ impl Matcher {
         threads: usize,
     ) -> Vec<Match> {
         Self::guard_against_haystack_overflow(haystacks.len(), 0);
-        assert!(threads > 0, "threads must be positive");
+
+        // If threads == 0, default to available cpu cores
+        let mut threads = threads;
+        if threads == 0 {
+            threads = std::thread::available_parallelism()
+                .map(|n| n.get().saturating_sub(2))
+                .unwrap_or(1)
+                .max(1);
+        }
 
         // Limit threads based on the number of haystacks
         let threads = threads.min(haystacks.len().div_ceil(2000)).max(1);
@@ -130,9 +140,11 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "threads must be positive")]
-    fn zero_threads_panics() {
-        let _ = Matcher::new("a", &Config::default()).match_list_parallel(&["a"], 0);
+    fn zero_threads_uses_available_parallelism() {
+        let haystacks = ["abc", "xabc", "zzz"];
+        let mut matcher = Matcher::new("abc", &Config::default());
+        let sequential = matcher.match_list(&haystacks);
+        assert_eq!(matcher.match_list_parallel(&haystacks, 0), sequential);
     }
 
     #[test]

@@ -26,7 +26,7 @@
 //!
 //! let mut matcher = Matcher::new(needle, &Config::default());
 //! let matches = matcher.match_list(&haystacks);
-//! // or in parallel (8 threads)
+//! // or in parallel (8 threads, set to 0 to auto-detect)
 //! let matches = matcher.match_list_parallel(&haystacks, 8);
 //! ```
 //!
