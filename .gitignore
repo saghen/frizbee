@@ -1,3 +1,4 @@
 /target
 /smith_waterman_macro/target
-/benches/data
+/benches/data/*
+!/benches/data/download.sh
