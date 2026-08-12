@@ -275,7 +275,7 @@ impl ScoreVec for SseScore {
     }
     #[inline(always)]
     unsafe fn add(self, other: Self) -> Self {
-        unsafe { Self(_mm_add_epi16(self.0, other.0)) }
+        unsafe { Self(_mm_adds_epu16(self.0, other.0)) }
     }
     #[inline(always)]
     unsafe fn subs(self, other: Self) -> Self {
@@ -526,7 +526,7 @@ impl ScoreVec for SseU8Score {
     }
     #[inline(always)]
     unsafe fn add(self, other: Self) -> Self {
-        unsafe { Self(_mm_add_epi8(self.0, other.0)) }
+        unsafe { Self(_mm_adds_epu8(self.0, other.0)) }
     }
     #[inline(always)]
     unsafe fn subs(self, other: Self) -> Self {

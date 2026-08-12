@@ -240,13 +240,13 @@ pub trait ScoreVec: Copy + core::fmt::Debug {
     /// The backend's target features must be enabled at the call site.
     unsafe fn horizontal_max(self) -> u16;
 
-    /// Per-lane wrapping add
+    /// Per-lane saturating add
     ///
     /// # Safety
     /// The backend's target features must be enabled at the call site.
     unsafe fn add(self, other: Self) -> Self;
 
-    /// Per-lane saturating subtract (saturating at zero)
+    /// Per-lane saturating subtract
     ///
     /// # Safety
     /// The backend's target features must be enabled at the call site.

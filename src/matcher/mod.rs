@@ -454,7 +454,7 @@ impl Matcher {
         assert!(
             haystack_len.saturating_add(haystack_index_offset as usize) <= (u32::MAX as usize),
             "too many items in haystack, will overflow the u32 index: {} > {} (index offset: {})",
-            haystack_len + haystack_index_offset as usize,
+            haystack_len.saturating_add(haystack_index_offset as usize),
             u32::MAX,
             haystack_index_offset
         );
@@ -567,7 +567,48 @@ impl Matcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CaseMatching, SortStrategy};
+    use crate::{CaseMatching, Scoring, SortStrategy};
+
+    #[test]
+    fn long_needles_saturate_instead_of_panicking() {
+        let config = Config::default();
+        let needle = "a".repeat(8000);
+        let mut matcher = Matcher::new(needle.as_str(), &config);
+
+        let haystacks = [needle.as_str(), "aaa", "zzz"];
+        let matches = matcher.match_list(&haystacks);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].index, 0);
+        assert_eq!(matches[0].score, u16::MAX);
+    }
+
+    #[test]
+    fn long_needles_saturate_on_the_literal_path() {
+        let config = Config::default().matching(crate::Matching::Prefix);
+        let needle = "a".repeat(2 * u16::MAX as usize);
+        let haystack = "a".repeat(2 * u16::MAX as usize + 5);
+        let mut matcher = Matcher::new(needle.as_str(), &config);
+
+        let matches = matcher.match_list(&[haystack.as_str(), "b"]);
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].score, u16::MAX);
+    }
+
+    #[test]
+    fn huge_scoring_configs_saturate() {
+        let scoring = Scoring {
+            match_score: u16::MAX,
+            gap_extend_penalty: u16::MAX,
+            gap_open_penalty: u16::MAX,
+            ..Scoring::default()
+        };
+        let config = Config::default().scoring(scoring).max_typos(None);
+        let mut matcher = Matcher::new("ab", &config);
+
+        let matches = matcher.match_list(&["ab", "axb", "zz"]);
+        assert_eq!(matches[0].score, u16::MAX);
+        assert!(!matches.is_empty());
+    }
 
     #[test]
     fn test_basic() {

@@ -251,7 +251,7 @@ impl ScoreVec for NeonScore {
     }
     #[inline(always)]
     unsafe fn add(self, other: Self) -> Self {
-        unsafe { Self(vaddq_u16(self.0, other.0)) }
+        unsafe { Self(vqaddq_u16(self.0, other.0)) }
     }
     #[inline(always)]
     unsafe fn subs(self, other: Self) -> Self {
@@ -555,7 +555,7 @@ impl ScoreVec for NeonU8Score {
     }
     #[inline(always)]
     unsafe fn add(self, other: Self) -> Self {
-        unsafe { Self(vaddq_u8(self.0, other.0)) }
+        unsafe { Self(vqaddq_u8(self.0, other.0)) }
     }
     #[inline(always)]
     unsafe fn subs(self, other: Self) -> Self {

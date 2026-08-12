@@ -61,7 +61,7 @@ where
     #[inline(always)]
     pub fn new(needle: &str, config: &Config) -> Self {
         let case_sensitive = config.casing.respects_case_for(needle);
-        let matcher = Self {
+        Self {
             needle: needle.to_string(),
             config: config.clone(),
             min_haystack_len: config
@@ -70,9 +70,7 @@ where
                 .unwrap_or(0),
             prefilter: P::new(needle, case_sensitive),
             smith_waterman: S::new(needle, &config.scoring, case_sensitive),
-        };
-        matcher.guard_against_score_overflow();
-        matcher
+        }
     }
 
     pub fn is_available() -> bool {
@@ -249,7 +247,7 @@ where
 
         let exact = include_exact && self.needle.as_bytes() == haystack;
         if exact {
-            score += self.config.scoring.exact_match_bonus;
+            score = score.saturating_add(self.config.scoring.exact_match_bonus);
         }
 
         #[cfg(not(feature = "match_end_col"))]
@@ -289,7 +287,7 @@ where
 
         let exact = include_exact && self.needle.as_bytes() == haystack;
         if exact {
-            score += self.config.scoring.exact_match_bonus;
+            score = score.saturating_add(self.config.scoring.exact_match_bonus);
         }
 
         MatchIndices {
@@ -310,23 +308,6 @@ where
         } else {
             TYPOS
         }
-    }
-
-    #[inline(always)]
-    fn guard_against_score_overflow(&self) {
-        let scoring = &self.config.scoring;
-        // The unicode path accumulates one score row per char while the ascii path
-        // accumulates one per byte, so bound by the row count the needle actually uses
-        let needle_len = if self.config.unicode.respects_unicode_for(&self.needle) {
-            self.needle.chars().count()
-        } else {
-            self.needle.len()
-        };
-        scoring.guard_against_score_overflow(
-            needle_len,
-            scoring.max_per_char_bonus(),
-            scoring.max_one_time_bonus(),
-        );
     }
 }
 
@@ -373,21 +354,19 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "needle too long")]
-    fn huge_bonuses_report_descriptive_overflow_error() {
+    fn huge_bonuses_saturate_instead_of_panicking() {
         let config = Config::default().scoring(Scoring {
             capitalization_bonus: 60000,
             matching_case_bonus: 40000,
             ..Scoring::default()
         });
-        Matcher::new("f", &config);
+        let matches = Matcher::new("f", &config).match_list(&["f", "z"]);
+        assert_eq!(matches.len(), 1);
     }
 
     #[test]
-    fn overflow_guard_uses_char_count_for_unicode_needles() {
-        // 8 three-byte chars: the unicode path accumulates one score row per char, so
-        // the guard must use the char count (8), not the byte length (24), which would
-        // exceed this scoring config's max needle length (~16) and panic spuriously
+    fn unicode_needles_score_per_char_row() {
+        // the unicode path uses one score row per char (8), not per byte (24)
         let needle = "一二三四五六七八";
         let config = Config::default().scoring(Scoring {
             capitalization_bonus: 4000,

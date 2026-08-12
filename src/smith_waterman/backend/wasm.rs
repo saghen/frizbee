@@ -271,7 +271,7 @@ impl ScoreVec for WasmScore {
     }
     #[inline(always)]
     unsafe fn add(self, other: Self) -> Self {
-        Self(u16x8_add(self.0, other.0))
+        Self(u16x8_add_sat(self.0, other.0))
     }
     #[inline(always)]
     unsafe fn subs(self, other: Self) -> Self {
@@ -555,7 +555,7 @@ impl ScoreVec for WasmU8Score {
     }
     #[inline(always)]
     unsafe fn add(self, other: Self) -> Self {
-        Self(u8x16_add(self.0, other.0))
+        Self(u8x16_add_sat(self.0, other.0))
     }
     #[inline(always)]
     unsafe fn subs(self, other: Self) -> Self {

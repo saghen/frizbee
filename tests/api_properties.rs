@@ -607,20 +607,22 @@ fn case_matching_modes_apply_to_matches_and_indices() {
 }
 
 #[test]
-fn score_overflow_guard_panics() {
+fn long_needle_scores_saturate() {
+    // Needles past `max_needle_len` match with scores capped at u16::MAX instead
+    // of panicking
     let long_needle = "a".repeat(5000);
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        let _ = Matcher::new(&long_needle, &Config::default());
-    }));
-    assert!(result.is_err());
+    let matches =
+        Matcher::new(&long_needle, &Config::default()).match_list(&[long_needle.as_str()]);
+    assert_eq!(matches.len(), 1);
+    assert_eq!(matches[0].score, u16::MAX);
 }
 
 #[test]
-fn zero_parallel_threads_panics() {
-    let result = catch_unwind(AssertUnwindSafe(|| {
-        let _ = Matcher::new("a", &Config::default()).match_list_parallel(&["a"], 0);
-    }));
-    assert!(result.is_err());
+fn zero_parallel_threads_uses_available_parallelism() {
+    let haystacks = ["abc", "xabc", "zzz"];
+    let mut matcher = Matcher::new("abc", &Config::default());
+    let sequential = matcher.match_list(&haystacks);
+    assert_eq!(matcher.match_list_parallel(&haystacks, 0), sequential);
 }
 
 #[test]

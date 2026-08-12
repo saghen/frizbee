@@ -196,7 +196,7 @@ impl<const LANES: usize> ScoreVec for ScalarScoreU16<LANES> {
     unsafe fn add(self, other: Self) -> Self {
         let mut out = [0u16; LANES];
         for (idx, lane) in out.iter_mut().enumerate() {
-            *lane = self.0[idx].wrapping_add(other.0[idx]);
+            *lane = self.0[idx].saturating_add(other.0[idx]);
         }
         Self(out)
     }
@@ -291,7 +291,7 @@ impl<const LANES: usize> ScoreVec for ScalarScoreU8<LANES> {
     unsafe fn add(self, other: Self) -> Self {
         let mut out = [0u8; LANES];
         for (idx, lane) in out.iter_mut().enumerate() {
-            *lane = self.0[idx].wrapping_add(other.0[idx]);
+            *lane = self.0[idx].saturating_add(other.0[idx]);
         }
         Self(out)
     }

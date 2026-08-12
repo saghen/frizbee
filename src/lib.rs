@@ -30,8 +30,6 @@
 //! let matches = matcher.match_list_parallel(&haystacks, 8);
 //! ```
 //!
-//! Note that Frizbee will panic if you provide a needle longer than `config.scoring.max_needle_len()`. With the default configuration, the needle must not be longer than 10922 characters.
-//!
 //! # Example: using multi-pattern queries
 //!
 //! `Matcher::from_query` parses whitespace-separated atoms. Atom syntax can
@@ -488,8 +486,8 @@ impl Default for Scoring {
 }
 
 impl Scoring {
-    /// Max needle length that can be matched with the scoring config. Using a needle length greater
-    /// than this will panic.
+    /// Needle length up to which scores are guaranteed to fit within the `u16` score.
+    /// Longer needles still match, but their scores may saturate at `u16::MAX`
     pub fn max_needle_len(&self) -> usize {
         let max_per_char = self.match_score.saturating_add(self.max_per_char_bonus());
         // A zero per-char score can never overflow regardless of needle length
@@ -524,40 +522,6 @@ impl Scoring {
             .max(bonus.saturating_sub(self.gap_open_penalty));
         bonus - amortized
     }
-
-    /// Panics if a needle of `needle_len` bytes could overflow the `u16` score
-    pub(crate) fn guard_against_score_overflow(
-        &self,
-        needle_len: usize,
-        max_bonus_per_char: u16,
-        max_one_time_bonus: u16,
-    ) {
-        let max_per_char = self.match_score.saturating_add(max_bonus_per_char);
-        // A zero per-char score can never overflow regardless of needle length
-        if max_per_char == 0 {
-            return;
-        }
-        // The diagonal transiently holds the score plus the mismatch penalty before subtracting it
-        let headroom = u16::MAX
-            .saturating_sub(self.prefix_bonus)
-            .saturating_sub(self.exact_match_bonus)
-            .saturating_sub(self.mismatch_penalty)
-            .saturating_sub(max_one_time_bonus);
-        let max_needle_len = headroom / max_per_char;
-        assert!(
-            needle_len <= max_needle_len as usize,
-            "needle too long and could overflow the u16 score: {needle_len} > {max_needle_len}"
-        );
-
-        // Gap propagation multiplies the gap extend penalty by up to 32x (AVX-512, u8 scoring)
-        let max_gap_penalty =
-            32 * self.gap_extend_penalty as usize + self.gap_open_penalty as usize;
-        assert!(
-            max_gap_penalty <= u16::MAX as usize,
-            "gap penalties too large and could overflow the u16 score: {max_gap_penalty} > {}",
-            u16::MAX
-        );
-    }
 }
 
 #[cfg(test)]
@@ -565,25 +529,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn max_needle_len_matches_guard() {
-        let scoring = Scoring::default();
-        assert_eq!(scoring.max_needle_len(), 3639);
-
-        scoring.guard_against_score_overflow(
-            3639,
-            scoring.max_per_char_bonus(),
-            scoring.max_one_time_bonus(),
-        );
-    }
-
-    #[test]
-    #[should_panic]
-    fn max_needle_len_guard_panics_for_needle_too_long() {
-        let scoring = Scoring::default();
-        scoring.guard_against_score_overflow(
-            3640,
-            scoring.max_per_char_bonus(),
-            scoring.max_one_time_bonus(),
-        );
+    fn max_needle_len_default() {
+        assert_eq!(Scoring::default().max_needle_len(), 3639);
     }
 }

@@ -404,7 +404,7 @@ impl ScoreVec for Avx512Score {
     }
     #[inline(always)]
     unsafe fn add(self, other: Self) -> Self {
-        unsafe { Self(_mm512_add_epi16(self.0, other.0)) }
+        unsafe { Self(_mm512_adds_epu16(self.0, other.0)) }
     }
     #[inline(always)]
     unsafe fn subs(self, other: Self) -> Self {
@@ -482,7 +482,7 @@ impl ScoreVec for Avx512U8Score {
     }
     #[inline(always)]
     unsafe fn add(self, other: Self) -> Self {
-        unsafe { Self(_mm512_add_epi8(self.0, other.0)) }
+        unsafe { Self(_mm512_adds_epu8(self.0, other.0)) }
     }
     #[inline(always)]
     unsafe fn subs(self, other: Self) -> Self {

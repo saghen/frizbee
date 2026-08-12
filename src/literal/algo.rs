@@ -32,8 +32,6 @@ impl<B: Backend> LiteralImpl<B> {
     /// The backend's target features must be enabled.
     #[inline(always)]
     pub(crate) unsafe fn new(needle: &str, config: &Config) -> Self {
-        Self::guard_against_score_overflow(needle.len(), &config.scoring);
-
         let case_sensitive = config.casing.respects_case_for(needle);
         let unicode = config.unicode.respects_unicode_for(needle);
         let needle_ascii = case_needle(needle.as_bytes(), case_sensitive);
@@ -185,18 +183,18 @@ impl<B: Backend> LiteralImpl<B> {
         let s = &self.scoring;
         let mut score = s.match_score;
         if matched_exact_case {
-            score += s.matching_case_bonus;
+            score = score.saturating_add(s.matching_case_bonus);
         }
         if start == 0 {
-            score += s.prefix_bonus;
+            score = score.saturating_add(s.prefix_bonus);
         } else {
             let byte = haystack[start];
             let prev = haystack[start - 1];
             if byte.is_ascii_uppercase() && prev.is_ascii_lowercase() {
-                score += s.capitalization_bonus;
+                score = score.saturating_add(s.capitalization_bonus);
             }
             if is_delimiter(prev) && !is_delimiter(byte) {
-                score += s.delimiter_bonus;
+                score = score.saturating_add(s.delimiter_bonus);
             }
         }
         score
@@ -211,18 +209,23 @@ impl<B: Backend> LiteralImpl<B> {
             let mut start = pos;
             for c in &self.needle_unicode {
                 let matched_exact_case = haystack[start..start + c.len] == c.chars[..c.len];
-                score += self.score_scalar(haystack, start, matched_exact_case);
+                score =
+                    score.saturating_add(self.score_scalar(haystack, start, matched_exact_case));
                 start += c.len;
             }
         } else {
             for (k, &(orig, _)) in self.needle_ascii.iter().enumerate() {
                 let start = pos + k;
-                score += self.score_scalar(haystack, start, haystack[start] == orig);
+                score = score.saturating_add(self.score_scalar(
+                    haystack,
+                    start,
+                    haystack[start] == orig,
+                ));
             }
         }
 
         if pos == 0 && self.needle_len == haystack.len() {
-            score += self.scoring.exact_match_bonus;
+            score = score.saturating_add(self.scoring.exact_match_bonus);
         }
         score
     }
@@ -311,17 +314,6 @@ impl<B: Backend> LiteralImpl<B> {
             start += B::LANES;
         }
         best
-    }
-
-    #[inline(always)]
-    fn guard_against_score_overflow(needle_len: usize, scoring: &Scoring) {
-        // Without gaps, a matched character earns at most one of the capitalization or delimiter
-        // bonuses, plus the case bonus, on top of `match_score`.
-        let max_bonus_per_char = scoring
-            .capitalization_bonus
-            .max(scoring.delimiter_bonus)
-            .saturating_add(scoring.matching_case_bonus);
-        scoring.guard_against_score_overflow(needle_len, max_bonus_per_char, 0);
     }
 }
 
