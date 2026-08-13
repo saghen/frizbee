@@ -245,10 +245,10 @@ pub struct Config {
     /// The maximum number of characters missing from the needle, before an item in the
     /// haystack is filtered out
     pub max_typos: Option<u16>,
-    /// Controls how case sensitivity/insensitivity is handled while matching.
+    /// Controls how case sensitivity/insensitivity is handled while matching
     #[cfg_attr(feature = "serde", serde(default))]
     pub casing: CaseMatching,
-    /// Controls how unicode is handled while matching.
+    /// Controls how unicode is handled while matching
     #[cfg_attr(feature = "serde", serde(default))]
     pub unicode: UnicodeMatching,
     /// Selects the matching algorithm: fuzzy (Smith-Waterman) or one of the literal modes
@@ -256,7 +256,7 @@ pub struct Config {
     /// contiguous run of characters and do not support typos (`max_typos` is ignored).
     #[cfg_attr(feature = "serde", serde(default))]
     pub matching: Matching,
-    /// Controls how results are ordered.
+    /// Controls how results are ordered
     #[cfg_attr(feature = "serde", serde(default))]
     pub sort: SortStrategy,
     /// Controls the scoring used by the smith waterman algorithm. You may tweak these but pay
@@ -364,7 +364,7 @@ impl SortStrategy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum CaseMatching {
-    /// Ignore case while matching.
+    /// Ignore case while matching
     Ignore,
     /// Ignore case unless the needle contains uppercase
     #[default]
@@ -410,7 +410,7 @@ impl UnicodeMatching {
 
 /// Selects the matching algorithm
 ///
-/// [`Matching::Fuzzy`] uses the Smith-Waterman algorithm (with typos, gaps and substitutions)
+/// [`Matching::Fuzzy`] uses the Smith-Waterman algorithm with typos, gaps and substitutions (default)
 /// [`Matching::Exact`] matches the haystack exactly
 /// [`Matching::Prefix`] matches the haystack if it starts with the needle
 /// [`Matching::Suffix`] matches the haystack if it ends with the needle
@@ -420,7 +420,7 @@ impl UnicodeMatching {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Matching {
-    /// Smith-Waterman fuzzy matching (the default)
+    /// Smith-Waterman fuzzy matching with typos, gaps and substitutions (default)
     #[default]
     Fuzzy,
     /// The haystack must equal the needle
@@ -441,6 +441,9 @@ impl Matching {
     }
 }
 
+/// Controls the scoring used by the smith waterman algorithm. You may tweak these but pay
+/// close attention to the documentation for each property, as small changes can lead to
+/// poor matching.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
