@@ -1,3 +1,42 @@
+## [0.13.0](https://github.com/saghen/frizbee/compare/v0.12.0..v0.13.0) - 2026-08-13
+
+### Breaking Changes
+
+- switch default to `CaseMatching::Smart` ([e5f0ee2](https://github.com/saghen/frizbee/commit/e5f0ee206bc146dc064c5a4ce6fc62d3dbec911c))
+
+### Features
+
+- add WASM SIMD128 backends ([8d11966](https://github.com/saghen/frizbee/commit/8d11966be1c8f16b021f34f406068abab9f577db))
+- add `no_std` support ([efeab87](https://github.com/saghen/frizbee/commit/efeab871c8aeba14c444989bf1abfcac9be1957a))
+- drop dead scalar path in wasm ([a9be0d1](https://github.com/saghen/frizbee/commit/a9be0d15e83225561dc90acd42630991b761763d))
+- add download.sh script for bench data ([145deff](https://github.com/saghen/frizbee/commit/145deff628339ee2a355ef1868f65b69d91bdfa1))
+- auto-detect parallelism when threads == 0 ([17ee653](https://github.com/saghen/frizbee/commit/17ee653a8e00e08d796467f6149325640db0c5cd))
+- saturate score instead of panicking ([93785c2](https://github.com/saghen/frizbee/commit/93785c28a76db9566221e31ab900260c11556544))
+- reduce wasm binary size ([6deefc0](https://github.com/saghen/frizbee/commit/6deefc0d6d1f650d45c26dac35590197ecc9ccd3))
+- c and c++ bindings ([2bd75b9](https://github.com/saghen/frizbee/commit/2bd75b987357b71f930e9a54f6e25d46471624aa))
+- python bindings ([b30b6e2](https://github.com/saghen/frizbee/commit/b30b6e24fd761c081cf2322b66660aa15a86c602))
+- wasm bindings ([869c771](https://github.com/saghen/frizbee/commit/869c7718b6c12fb96b1d112cea92c655b856b70a))
+- add justfile ([35bf373](https://github.com/saghen/frizbee/commit/35bf3736848e703827d07a713d039be3c2ff9490))
+- add changelog update to justfile ([19c6783](https://github.com/saghen/frizbee/commit/19c6783c147471cd0877a1c20b65853742ba9891))
+
+### Bug Fixes
+
+- `max_needle_len` returning incorrect value ([90aa3fc](https://github.com/saghen/frizbee/commit/90aa3fce8c170399a4cfa6dff8f1799fdcbd0ade))
+
+### Documentation
+
+- update lib.rs "used by" section ([1ac6e62](https://github.com/saghen/frizbee/commit/1ac6e628020ccb323e76f43dff928ea613d39eed))
+- clarify unicode limitations ([e63827b](https://github.com/saghen/frizbee/commit/e63827b3e4b0e2eee47bc5241c95d17cc672e2b7))
+- tidy config doc comments ([c418120](https://github.com/saghen/frizbee/commit/c4181208c42f853cbeaa5973cea4fc9d18ff7f75))
+- rework safety section ([9592c36](https://github.com/saghen/frizbee/commit/9592c36fb133fd8e6079310e983f06f2146f1886))
+- add bindings to readme ([450523f](https://github.com/saghen/frizbee/commit/450523f4ebcb49771a7b752cfdc61452ec15e2e7))
+- rewrite binding comments/readmes ([277c030](https://github.com/saghen/frizbee/commit/277c030cb2496b27e7cc71df38a9bf3529961e9f))
+- misc links ([daaae5b](https://github.com/saghen/frizbee/commit/daaae5b535cd11e970cbfafc4864dc6cc8728ec2))
+- add CHANGELOG via git-cliff ([507409b](https://github.com/saghen/frizbee/commit/507409b6f5856470f14299818f34ed24a5d757c4))
+- cleanup wasm binding docs ([0826872](https://github.com/saghen/frizbee/commit/08268725df5d5814e6dbc57ecbb7f71dcd29d616))
+- lib-rs and expand bindings docs ([03ae7fe](https://github.com/saghen/frizbee/commit/03ae7fe1d585624c3c6f9e8dd8e20bc9b2ea14b8))
+- add LICENSE to wasm/py bindings ([d395c2b](https://github.com/saghen/frizbee/commit/d395c2bae4f0a27be04178b118fe46ea97e8e718))
+
 ## [0.12.0](https://github.com/saghen/frizbee/compare/v0.11.0..v0.12.0) - 2026-07-30
 
 ### Breaking Changes
