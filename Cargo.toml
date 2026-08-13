@@ -1,6 +1,8 @@
 [workspace]
 default-members = ["."]
-members = []
+members = [
+  "bindings/frizbee-c",
+]
 
 [workspace.package]
 version = "0.12.0"

@@ -253,6 +253,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "frizbee-c"
+version = "0.12.0"
+dependencies = [
+ "frizbee",
+]
+
+[[package]]
 name = "futures-core"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"

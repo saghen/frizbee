@@ -1,0 +1,15 @@
+[package]
+name = "frizbee-c"
+description = "C bindings for frizbee, SIMD fuzzy string matching"
+publish = false
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["staticlib", "cdylib"]
+name = "frizbee"
+
+[dependencies]
+frizbee = { path = "../..", default-features = false, features = ["std"] }
