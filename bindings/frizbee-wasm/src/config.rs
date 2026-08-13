@@ -276,8 +276,6 @@ impl Scoring {
 }
 
 /// `Infinity` means unlimited typos, mirroring core's `max_typos: None`.
-/// The offending value is deliberately not included in the message: formatting
-/// an f64 pulls the ~15 KB dragon/grisu float-formatting stack into the binary
 pub(crate) fn parse_max_typos(value: f64) -> Result<Option<u16>, JsError> {
     if value.is_infinite() && value.is_sign_positive() {
         return Ok(None);
@@ -285,6 +283,7 @@ pub(crate) fn parse_max_typos(value: f64) -> Result<Option<u16>, JsError> {
     if value.fract() == 0.0 && (0.0..=f64::from(u16::MAX)).contains(&value) {
         return Ok(Some(value as u16));
     }
+    // Don't include the value because it pulls in ~15 KB of float-formatting
     Err(JsError::new(&format!(
         "invalid maxTypos: expected an integer between 0 and {} or Infinity for unlimited",
         u16::MAX
