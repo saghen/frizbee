@@ -1,19 +1,31 @@
 {
   "name": "frizbee",
   "version": "0.12.0",
-  "description": "WASM bindings for frizbee, SIMD fuzzy string matching",
+  "description": "Fast typo-resistant fuzzy matching via WASM SIMD smith waterman, similar algorithm to FZF",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/saghen/frizbee",
     "directory": "bindings/frizbee-wasm"
   },
-  "keywords": ["fuzzy", "matching", "search", "simd", "smith-waterman", "wasm"],
+  "keywords": [
+    "fuzzy",
+    "fuzzy-search",
+    "fuzzy-matching",
+    "search",
+    "simd",
+    "smith-waterman",
+    "string-matching",
+    "wasm"
+  ],
   "type": "module",
   "main": "wrapper.mjs",
   "module": "wrapper.mjs",
   "types": "./pkg/frizbee_wasm.d.ts",
-  "sideEffects": ["./wrapper.mjs", "./wrapper-node.mjs"],
+  "sideEffects": [
+    "./wrapper.mjs",
+    "./wrapper-node.mjs"
+  ],
   "exports": {
     ".": {
       "types": "./pkg/frizbee_wasm.d.ts",
@@ -34,5 +46,11 @@
   },
   "engines": {
     "node": ">=16.4"
+  },
+  "prettier": {
+    "semi": false,
+    "singleQuote": true,
+    "trailingComma": "all",
+    "printWidth": 100
   }
 }

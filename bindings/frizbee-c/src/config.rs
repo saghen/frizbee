@@ -79,9 +79,9 @@ pub enum frizbee_sort_strategy_t {
     FRIZBEE_SORT_INDEX_DESC,
 }
 
-/// Controls the scoring used by the smith waterman algorithm. You may tweak
-/// these but pay close attention to the documentation for each property, as
-/// small changes can lead to poor matching.
+/// Controls the scoring used by the smith waterman algorithm. Pay close
+/// attention to the documentation for each property, as small changes can lead
+/// to poor matching.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct frizbee_scoring_t {
@@ -144,9 +144,9 @@ pub struct frizbee_config_t {
     /// One of the `frizbee_sort_strategy_t` values. Anything else falls back to
     /// `FRIZBEE_SORT_SCORE_THEN_INDEX_ASC`.
     pub sort: i32,
-    /// Controls the scoring used by the smith waterman algorithm. You may tweak
-    /// these but pay close attention to the documentation for each
-    /// property, as small changes can lead to poor matching.
+    /// Controls the scoring used by the smith waterman algorithm. Pay close
+    /// attention to the documentation for each property, as small changes can
+    /// lead to poor matching.
     pub scoring: frizbee_scoring_t,
 }
 

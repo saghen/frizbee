@@ -1,9 +1,4 @@
-"""Minimal E2E checks that the binding wires through to the core correctly.
-
-Matching behavior itself is covered by the core crate's test suite These only
-assert the boundary broadly works: construction, matching, ordering, the
-owned haystacks path and query syntax
-"""
+"""Minimal E2E checks to ensure the binding calls the core correctly."""
 
 import unittest
 
@@ -39,6 +34,12 @@ class BasicTests(unittest.TestCase):
         # "barfoo" starts with "bar"
         self.assertEqual(sorted(m.index for m in matches), [0, 2])
 
+        patterns = Pattern.from_query("foo !^bar")
+        self.assertEqual([p.needle for p in patterns], ["foo", "bar"])
+        self.assertTrue(patterns[1].negated)
+        rebuilt = Matcher.from_patterns(patterns)
+        self.assertEqual(rebuilt.match_list(["foo", "barfoo", "foobar"]), matches)
+
     def test_haystacks(self):
         items = ["foo", "prelude", "xfoo", "foobar"]
         matcher = Matcher("foo")
@@ -60,6 +61,25 @@ class BasicTests(unittest.TestCase):
         haystacks.append("xfoo")
         self.assertEqual(len(haystacks), 2)
         self.assertEqual([m.index for m in matcher.match_list(haystacks)], [0, 1])
+
+    def test_pattern_setters(self):
+        [pattern] = Pattern.from_query("foo")
+        pattern.max_typos = 1
+        matches = Matcher.from_patterns([pattern]).match_list(["fio", "xyz"])
+        # "fio" matches with one typo via the per-pattern override
+        self.assertEqual([m.index for m in matches], [0])
+
+        pattern.matching = "prefix"
+        matches = Matcher.from_patterns([pattern]).match_list(["xfoo", "foobar"])
+        # "xfoo" doesn't start with "foo"
+        self.assertEqual([m.index for m in matches], [1])
+
+        with self.assertRaises(ValueError):
+            pattern.matching = "bogus"
+        with self.assertRaises(TypeError):
+            pattern.max_typos = 1.5
+        with self.assertRaises(AttributeError):
+            pattern.needle = "bar"
 
     def test_from_patterns_and_config(self):
         matcher = Matcher.from_patterns(

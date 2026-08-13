@@ -55,11 +55,11 @@ str_enum!(parse_sort, sort_to_str, SortStrategy, "sort", {
     "index_desc" => SortStrategy::IndexDesc,
 });
 
-/// Controls the scoring used by the smith waterman algorithm, mirroring the
-/// core defaults when a field is omitted. You may tweak these but pay close
-/// attention to the documentation for each property, as small changes can lead
-/// to poor matching. Fields are exposed as read-only attributes via `get_all`
-/// (like `PyMatch`)
+/// Controls the scoring used by the smith waterman algorithm.
+///
+/// Mirrors the core defaults when a field is omitted. Pay close attention to
+/// the documentation for each property, as small changes can lead to poor
+/// matching.
 #[pyclass(
     name = "Scoring",
     frozen,
@@ -178,7 +178,7 @@ impl PyScoring {
 }
 
 /// Builds a core config from the kwargs shared by every `Matcher` constructor
-/// Omitted kwargs fall back to the core defaults
+/// and applies defaults
 pub(crate) fn build_config(
     max_typos: Option<u16>,
     casing: Option<&str>,

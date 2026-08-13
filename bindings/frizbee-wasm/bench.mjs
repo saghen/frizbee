@@ -43,7 +43,7 @@ function bench(name, fn) {
 }
 
 const matcher = new Matcher('linux', { maxItems: MAX_ITEMS })
-// untimed first call: reports the match count
+// report match count
 const matches = matcher.matchList(haystacks)
 console.log(
   `chromium: ${haystacks.length} haystacks -> ${matches.length} matches, ` +

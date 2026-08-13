@@ -26,12 +26,31 @@ matches = matcher.match_list(haystacks)
 matcher = frizbee.Matcher.from_query("foo !^bar")
 
 # Per-pattern config overrides
-matcher = frizbee.Matcher.from_patterns([
-    frizbee.Pattern("foo", max_typos=1),
-    frizbee.Pattern("bar", negated=True, matching="prefix"),
-])
+patterns = frizbee.Pattern.parse_query("foo !^bar")
+for pattern in patterns:
+    pattern.max_typos = len(pattern.needle) // 4
+matcher = frizbee.Matcher.from_patterns(patterns)
+```
+
+## Performance
+
+These bindings achieve native performance to the rust crate, after a one-time copy of strings to Rust. On the Chromium file list (1.4M haystacks, needle "linux", maxItems 1000):
+
+```
+new Haystacks(string[]):               33.99 ms
+match_list (string[]):                 58.47 ms/iter
+match_list (Haystacks):                23.60 ms/iter
+match_list_parallel(8) (string[]):     40.14 ms/iter
+match_list_parallel(8) (Haystacks):     4.52 ms/iter
 ```
 
 ## Development
 
-<!-- venv + `maturin develop` + `python -m unittest discover tests`, bench.py -->
+```sh
+# use nix dev shell to get all clis/pkgs
+nix develop
+
+just build-py
+just test-py
+just bench-py
+```

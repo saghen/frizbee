@@ -3,9 +3,8 @@ requires = ["maturin>=1.7,<2.0"]
 build-backend = "maturin"
 
 [project]
-# Placeholder name, owner's call before the first release
 name = "frizbee"
-description = "SIMD fuzzy string matching: typo-resistant Smith-Waterman, similar to FZF"
+description = "Fast typo-resistant fuzzy matching via SIMD smith waterman, similar algorithm to FZF"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -15,13 +14,10 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: CPython",
   "Topic :: Text Processing",
 ]
-# Version comes from Cargo.toml, which inherits the workspace version
 dynamic = ["version"]
 
 [project.urls]
 Repository = "https://github.com/saghen/frizbee"
 
 [tool.maturin]
-# The crate is `frizbee-py` (lib `frizbee_py`) but the Python module is `frizbee`;
-# maturin renames the cdylib and picks up the adjacent `frizbee.pyi` type stubs
 module-name = "frizbee"

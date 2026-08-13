@@ -264,9 +264,9 @@ pub struct Config {
     /// Controls how results are ordered
     #[cfg_attr(feature = "serde", serde(default))]
     pub sort: SortStrategy,
-    /// Controls the scoring used by the smith waterman algorithm. You may tweak
-    /// these but pay close attention to the documentation for each
-    /// property, as small changes can lead to poor matching.
+    /// Controls the scoring used by the smith waterman algorithm. Pay close
+    /// attention to the documentation for each property, as small changes
+    /// can lead to poor matching.
     pub scoring: Scoring,
 }
 
@@ -448,9 +448,9 @@ impl Matching {
     }
 }
 
-/// Controls the scoring used by the smith waterman algorithm. You may tweak
-/// these but pay close attention to the documentation for each property, as
-/// small changes can lead to poor matching.
+/// Controls the scoring used by the smith waterman algorithm. Pay close
+/// attention to the documentation for each property, as small changes can lead
+/// to poor matching.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]

@@ -1,8 +1,3 @@
-//! Mirror of the core `Pattern` plus query parsing, crossing the boundary as
-//! plain JS objects via `js_sys::Reflect` (see the note in [`crate::config`] on
-//! why not serde), with its hand-written TS declaration kept next to the struct
-//! it describes.
-
 use js_sys::{Array, Object};
 use wasm_bindgen::prelude::*;
 
@@ -14,23 +9,28 @@ use crate::matcher::set;
 
 #[wasm_bindgen(typescript_custom_section)]
 const TYPESCRIPT_TYPES: &'static str = r#"
+/** A single pattern to match, parsed from syntax like `!^foo` */
 export interface Pattern {
+  /** Text to match with the syntax stripped, e.g. `foo` */
   needle: string;
   /** Haystacks matching this atom are excluded */
   negated?: boolean;
   /**
-   * Per-pattern override; `undefined` inherits from `Config`. Because the config's
-   * `maxTypos` is itself optional, there is no way to request unlimited typos for a
-   * single pattern (`Infinity` is rejected) while the matcher's config sets a limit
+   * Per-pattern override for `maxTypos`. `undefined` inherits the matcher
+   * config.
+   *
+   * Config's `maxTypos` is itself optional, so there is no way to request
+   * unlimited typos for a single pattern (`Infinity` is rejected) while the
+   * matcher's config sets a limit. Instead, just set it to `0xFFFF`
    */
   maxTypos?: number;
-  /** Per-pattern override; `undefined` inherits from `Config` */
+  /** Per-pattern override for `casing`. `undefined` inherits the matcher config */
   casing?: CaseMatching;
-  /** Per-pattern override; `undefined` inherits from `Config` */
+  /** Per-pattern override for `unicode`. `undefined` inherits the matcher config */
   unicode?: UnicodeMatching;
-  /** Per-pattern override; `undefined` inherits from `Config` */
+  /** Per-pattern override for `matching`. `undefined` inherits the matcher config */
   matching?: Matching;
-  /** Per-pattern override; `undefined` inherits from `Config` */
+  /** Per-pattern override for `scoring`. `undefined` inherits the matcher config */
   scoring?: Scoring;
 }
 "#;
@@ -56,8 +56,8 @@ fn parse_pattern_max_typos(value: f64) -> Result<u16, JsError> {
 }
 
 /// Mirror of [`frizbee::Pattern`] accepted as a plain JS object. Every field
-/// besides `needle` is optional; missing overrides inherit from the matcher's
-/// [`Config`](crate::config::Config)
+/// besides `needle` is optional and missing overrides inherit from the
+/// matcher's [`Config`](crate::config::Config)
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pattern {
     pub needle: String,
@@ -169,18 +169,24 @@ pub(crate) fn patterns_from_js(patterns: PatternArray) -> Result<Vec<frizbee::Pa
         .collect()
 }
 
-/// Parses a query of whitespace separated atoms into patterns, where special
-/// syntax changes the matching mode: `foo` (fuzzy), `^foo` (prefix), `foo$`
-/// (suffix), `'foo` (substring), `^foo$` (exact) and `!foo` (negated, substring
-/// unless combined with the syntax above). Any special character can be escaped
-/// with a backslash, e.g. `\!foo` or `foo\$` match the literal leading/trailing
-/// character, and `foo\ bar` matches the literal space. Atoms with an empty
-/// needle, e.g. `!` or `^$`, are dropped.
+/// Parses a query of whitespace separated atoms (see `Matcher.fromQuery` for
+/// the atom syntax), e.g. `foo !^bar` matches haystacks that fuzzy match `foo`
+/// and don't start with `bar`. Escape a literal space with a backslash, e.g.
+/// `foo\ bar` is a single atom. Atoms with an empty needle, e.g. `!` or `^$`,
+/// are dropped.
 ///
 /// The returned patterns carry only the matching mode derived from the syntax.
 /// Any other per-pattern override is left undefined and inherits the matcher's
-/// config; adjust the returned patterns before passing them to
-/// `Matcher.fromPatterns` to override config per-pattern
+/// config. Set fields on the results to override per-pattern. For example,
+/// setting the max typos based on needle length:
+///
+/// ```js
+/// const patterns = parseQuery('foo longerneedle')
+/// for (const pattern of patterns) {
+///   pattern.maxTypos = Math.floor(pattern.needle.length / 4)
+/// }
+/// const matcher = Matcher.fromPatterns(patterns)
+/// ```
 #[wasm_bindgen(js_name = parseQuery)]
 pub fn parse_query(query: &str) -> Result<PatternArray, JsError> {
     let patterns = frizbee::Pattern::parse_query(query)

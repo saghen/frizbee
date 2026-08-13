@@ -99,13 +99,13 @@ impl Pattern {
     /// Parses a single query atom, where special syntax changes the matching
     /// mode:
     ///
-    /// `foo` - `None` (defers to [`crate::Config::matching`])
-    /// `^foo` - [`Matching::Prefix`]
-    /// `foo$` - [`Matching::Suffix`]
-    /// `'foo` - [`Matching::Substring`]
-    /// `^foo$` - [`Matching::Exact`]
-    /// `!foo` - negated, [`Matching::Substring`] unless combined with the
-    /// syntax above
+    /// - `foo` - `None` (defers to [`crate::Config::matching`])
+    /// - `^foo` - [`Matching::Prefix`]
+    /// - `foo$` - [`Matching::Suffix`]
+    /// - `'foo` - [`Matching::Substring`]
+    /// - `^foo$` - [`Matching::Exact`]
+    /// - `!foo` - negated, [`Matching::Substring`] unless combined with the
+    ///   syntax above
     ///
     /// Any special character can be escaped with a backslash, e.g. `\!foo`,
     /// `\^foo`, `foo\$` or `\'foo` match the literal leading/trailing

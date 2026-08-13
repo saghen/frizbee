@@ -41,7 +41,8 @@ typedef enum frizbee_unicode_matching_t {
    */
   FRIZBEE_UNICODE_IGNORE = 0,
   /**
-   * Ignore unicode unless the needle contains a multi-byte unicode char (default)
+   * Ignore unicode unless the needle contains a multi-byte unicode char
+   * (default)
    */
   FRIZBEE_UNICODE_SMART,
   /**
@@ -54,17 +55,21 @@ typedef enum frizbee_unicode_matching_t {
 /**
  * Selects the matching algorithm
  *
- * `FRIZBEE_MATCHING_FUZZY` uses the Smith-Waterman algorithm with typos, gaps and substitutions (default)
- * `FRIZBEE_MATCHING_EXACT` matches the haystack exactly
- * `FRIZBEE_MATCHING_PREFIX` matches the haystack if it starts with the needle
- * `FRIZBEE_MATCHING_SUFFIX` matches the haystack if it ends with the needle
- * `FRIZBEE_MATCHING_SUBSTRING` matches the haystack if it contains the needle
+ * - `FRIZBEE_MATCHING_FUZZY` (default) uses the Smith-Waterman algorithm with
+ *   typos, gaps and substitutions
+ * - `FRIZBEE_MATCHING_EXACT` matches the haystack exactly
+ * - `FRIZBEE_MATCHING_PREFIX` matches the haystack if it starts with the
+ *   needle
+ * - `FRIZBEE_MATCHING_SUFFIX` matches the haystack if it ends with the needle
+ * - `FRIZBEE_MATCHING_SUBSTRING` matches the haystack if it contains the
+ *   needle
  *
  * Only the `FRIZBEE_MATCHING_FUZZY` mode supports typos
  */
 typedef enum frizbee_matching_t {
   /**
-   * Smith-Waterman fuzzy matching with typos, gaps and substitutions (default)
+   * Smith-Waterman fuzzy matching with typos, gaps and substitutions
+   * (default)
    */
   FRIZBEE_MATCHING_FUZZY = 0,
   /**
@@ -80,8 +85,9 @@ typedef enum frizbee_matching_t {
    */
   FRIZBEE_MATCHING_SUFFIX,
   /**
-   * The needle must appear somewhere in the haystack. When it appears more than
-   * once, the highest-scoring occurrence is used, preferring earlier matches on tie
+   * The needle must appear somewhere in the haystack. When it appears more
+   * than once, the highest-scoring occurrence is used, preferring
+   * earlier matches on tie
    */
   FRIZBEE_MATCHING_SUBSTRING,
 } frizbee_matching_t;
@@ -106,22 +112,26 @@ typedef enum frizbee_sort_strategy_t {
 } frizbee_sort_strategy_t;
 
 /**
+ * Primary entrypoint for fuzzy matching
+ *
  * Opaque matcher handle, created by `frizbee_matcher_new` or
  * `frizbee_matcher_from_query` and destroyed by `frizbee_matcher_free`.
  *
- * Compiles the pattern once, allocates memory for the Smith Waterman matrix, and
- * reuses the selected SIMD backend across calls. Ideally, only construct these at
- * most once per list: they're cheap to construct, but end up being expensive if
- * you construct them for each item in your list.
+ * This compiles the pattern once, allocates memory for the Smith Waterman
+ * matrix, and reuses the selected SIMD backend.
+ *
+ * Ideally, only construct these at most once per list. They're cheap to
+ * construct, but end up being expensive if you construct them for each item in
+ * your list.
  *
  * Not thread-safe: use one matcher per thread or use external locking
  */
 typedef struct frizbee_matcher_t frizbee_matcher_t;
 
 /**
- * Controls the scoring used by the smith waterman algorithm. You may tweak these but pay
- * close attention to the documentation for each property, as small changes can lead to
- * poor matching.
+ * Controls the scoring used by the smith waterman algorithm. Pay close
+ * attention to the documentation for each property, as small changes can lead
+ * to poor matching.
  */
 typedef struct frizbee_scoring_t {
   /**
@@ -141,7 +151,8 @@ typedef struct frizbee_scoring_t {
    */
   uint16_t gap_extend_penalty;
   /**
-   * Bonus for matching the first character of the haystack (e.g. "h" on "hello_world")
+   * Bonus for matching the first character of the haystack (e.g. "h" on
+   * "hello_world")
    */
   uint16_t prefix_bonus;
   /**
@@ -155,12 +166,13 @@ typedef struct frizbee_scoring_t {
    */
   uint16_t matching_case_bonus;
   /**
-   * Bonus for matching the exact needle (e.g. "foo" on "foo" will receive the bonus)
+   * Bonus for matching the exact needle (e.g. "foo" on "foo" will receive
+   * the bonus)
    */
   uint16_t exact_match_bonus;
   /**
-   * Bonus for matching _after_ a delimiter character (e.g. "hw" on "hello_world"
-   * will give a bonus on "w")
+   * Bonus for matching _after_ a delimiter character (e.g. "hw" on
+   * "hello_world" will give a bonus on "w")
    */
   uint16_t delimiter_bonus;
 } frizbee_scoring_t;
@@ -187,15 +199,15 @@ typedef struct frizbee_config_t {
   /**
    * Controls how unicode is handled while matching
    *
-   * One of the `frizbee_unicode_matching_t` values. Anything else falls back to
-   * `FRIZBEE_UNICODE_SMART`.
+   * One of the `frizbee_unicode_matching_t` values. Anything else falls back
+   * to `FRIZBEE_UNICODE_SMART`.
    */
   int32_t unicode;
   /**
-   * Selects the matching algorithm: fuzzy (Smith-Waterman) or one of the literal
-   * modes (exact, prefix, suffix, substring). Literal modes require the needle to
-   * appear as a contiguous run of characters and do not support typos
-   * (`max_typos` is ignored).
+   * Selects the matching algorithm: fuzzy (Smith-Waterman) or one of the
+   * literal modes (exact, prefix, suffix, substring). Literal modes
+   * require the needle to appear as a contiguous run of characters and
+   * do not support typos (`max_typos` is ignored).
    *
    * One of the `frizbee_matching_t` values. Anything else falls back to
    * `FRIZBEE_MATCHING_FUZZY`.
@@ -209,9 +221,9 @@ typedef struct frizbee_config_t {
    */
   int32_t sort;
   /**
-   * Controls the scoring used by the smith waterman algorithm. You may tweak these but pay
-   * close attention to the documentation for each property, as small changes can lead to
-   * poor matching.
+   * Controls the scoring used by the smith waterman algorithm. Pay close
+   * attention to the documentation for each property, as small changes can
+   * lead to poor matching.
    */
   struct frizbee_scoring_t scoring;
 } frizbee_config_t;
@@ -255,7 +267,8 @@ typedef struct frizbee_matches_t {
  * Like `frizbee_match_t` but includes the indices of the chars in the haystack
  * that matched the needle in reverse order. Match `i` of
  * `frizbee_match_indices_list_t` owns
- * `indices[items[i].indices_start .. items[i].indices_start + items[i].indices_len]`
+ * `indices[items[i].indices_start .. items[i].indices_start +
+ * items[i].indices_len]`
  */
 typedef struct frizbee_match_indices_t {
   uint16_t score;
@@ -324,8 +337,8 @@ struct frizbee_matcher_t *frizbee_matcher_new(struct frizbee_str_t needle,
  *
  * Any special character can be escaped with a backslash, e.g. `\!foo` or
  * `foo\$` match the literal leading/trailing character, and `foo\ bar` matches
- * the literal space. Atoms with an empty needle, e.g. `!` or `^$`, are dropped.
- * Otherwise identical to `frizbee_matcher_new`
+ * the literal space. Atoms with an empty needle, e.g. `!` or `^$`, are
+ * dropped. Otherwise identical to `frizbee_matcher_new`
  */
 struct frizbee_matcher_t *frizbee_matcher_from_query(struct frizbee_str_t query,
                                                      const struct frizbee_config_t *config);
@@ -337,8 +350,8 @@ void frizbee_matcher_free(struct frizbee_matcher_t *matcher);
 
 /**
  * Matches `haystacks_len` haystacks against the matcher's pattern, returning
- * the matches ordered by the config's sort strategy. This API provides the most
- * performant path when matching on lists. The result is owned by frizbee:
+ * the matches ordered by the config's sort strategy. This API provides the
+ * most performant path when matching on lists. The result is owned by frizbee:
  * release it with `frizbee_matches_free`
  */
 struct frizbee_matches_t frizbee_match_list(struct frizbee_matcher_t *matcher,
@@ -366,9 +379,9 @@ void frizbee_matches_free(struct frizbee_matches_t *matches);
  * Matches a single haystack, returning whether it matched and writing the
  * match to `out` only when it did (`*out` is untouched otherwise).
  *
- * This API performs ~10% slower than the `frizbee_match_list` API. Consider using
- * `frizbee_match_list` if you have more than one haystack to match, as it performs
- * significantly better.
+ * This API performs ~10% slower than the `frizbee_match_list` API. Consider
+ * using `frizbee_match_list` if you have more than one haystack to match, as
+ * it performs significantly better.
  */
 bool frizbee_match_one(struct frizbee_matcher_t *matcher,
                        struct frizbee_str_t haystack,
@@ -378,8 +391,8 @@ bool frizbee_match_one(struct frizbee_matcher_t *matcher,
 /**
  * Like `frizbee_match_list`, but each match includes the indices of the chars
  * in the haystack that matched the needle (see `frizbee_match_indices_t` for
- * the layout). This API has not been optimized for performance, and should only
- * be used on small lists, e.g. the visible portion of results. Useful for
+ * the layout). This API has not been optimized for performance, and should
+ * only be used on small lists, e.g. the visible portion of results. Useful for
  * displaying matched indices in the UI. The result is owned by frizbee:
  * release it with `frizbee_match_indices_list_free`
  */

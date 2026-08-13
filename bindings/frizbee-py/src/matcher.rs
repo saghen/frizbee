@@ -1,5 +1,3 @@
-//! The `Matcher` class and the `Match`/`MatchIndices` result types it returns.
-
 use pyo3::prelude::*;
 use pyo3::types::PyType;
 
@@ -103,16 +101,18 @@ impl From<frizbee::MatchIndices> for PyMatchIndices {
     }
 }
 
-/// Primary entrypoint for fuzzy matching. Compiles the pattern(s) once,
-/// allocates memory for the Smith Waterman matrix, and reuses the selected SIMD
-/// backend. Ideally, only construct these at most once per list: they're cheap
-/// to construct, but end up being expensive if you construct them for each item
-/// in your list
+/// Primary entrypoint for fuzzy matching
+///
+/// `Matcher` compiles the pattern once, allocates memory for the Smith Waterman
+/// matrix, and reuses the selected SIMD backend.
+///
+/// Ideally, only construct these at most once per list. They're cheap to
+/// construct, but end up being expensive if you construct them for each item in
+/// your list.
 #[pyclass(name = "Matcher", module = "frizbee")]
 pub(crate) struct PyMatcher {
-    // Boxed: the compiled SIMD backends require 64-byte alignment (AVX-512
-    // vectors), which CPython's object allocator does not guarantee for the
-    // pyclass payload itself
+    // Compiled SIMD backends require 64-byte alignment (AVX-512 vectors), which CPython does not
+    // guarantee for the pyclass payload itself, so box
     inner: Box<frizbee::Matcher>,
     /// Truncates the `match_list` results after sorting; `None` means unlimited
     max_items: Option<u32>,
@@ -128,15 +128,9 @@ impl PyMatcher {
 
 #[pymethods]
 impl PyMatcher {
-    // The config kwargs are repeated verbatim on `__init__`, `from_query`,
-    // `from_patterns` and `set_config` (pyo3 disallows macro-generated methods in
-    // `#[pymethods]`). `max_typos` defaults to the core `Config::default()` value
-    // (0); passing `None` means unlimited. `max_items` defaults to `None`
-    // (unlimited)
-
-    /// Creates a matcher from a single pattern (str or Pattern). Strings match
-    /// literally; use `from_query` for query syntax and `from_patterns` for
-    /// multi-pattern queries
+    /// Creates a matcher from a single pattern (string or `Pattern`). Strings
+    /// convert into a pattern that matches literally. Use `from_query` for
+    /// query syntax and `from_patterns` for multi-pattern queries
     #[new]
     #[pyo3(signature = (needle, *, max_typos = frizbee::Config::default().max_typos,
         max_items = None, casing = None, unicode = None, matching = None, sort = None,
@@ -162,16 +156,19 @@ impl PyMatcher {
         })
     }
 
-    /// Shorthand for calling `from_patterns` with the parsed query (see
-    /// `parse_query`), where special syntax changes each atom's matching mode:
-    /// `foo` (fuzzy), `^foo` (prefix), `foo$` (suffix), `'foo` (substring),
-    /// `^foo$` (exact) and `!foo` (negated, substring unless combined with the
-    /// syntax above). A haystack matches when all of the atoms match, summing
-    /// each atom's score.
+    /// Parses a single query atom, where special syntax changes the matching
+    /// mode:
     ///
-    /// Any special character can be escaped with a backslash, e.g. `\!foo` or
-    /// `foo\$` match the literal leading/trailing character, and `foo\ bar`
-    /// matches the literal space
+    /// - `foo` - defers to matching Config, which defaults to fuzzy
+    /// - `^foo` - prefix
+    /// - `foo$` - suffix
+    /// - `'foo` - substring
+    /// - `^foo$` - exact
+    /// - `!foo` - negated, substring unless combined with the syntax above
+    ///
+    /// Any special character can be escaped with a backslash, e.g. `\!foo`,
+    /// `\^foo`, `foo\$` or `\'foo` match the literal leading/trailing
+    /// character, and `foo\ bar` matches the literal space.
     #[classmethod]
     #[pyo3(signature = (query, *, max_typos = frizbee::Config::default().max_typos,
         max_items = None, casing = None, unicode = None, matching = None, sort = None,
@@ -195,7 +192,7 @@ impl PyMatcher {
         })
     }
 
-    /// Creates a matcher from a list of patterns (str or Pattern), matched
+    /// Creates a matcher from a list of patterns (string or `Pattern`), matched
     /// independently. A haystack matches when all of the patterns match, where
     /// the score is the sum of each pattern's score
     #[classmethod]
@@ -222,10 +219,10 @@ impl PyMatcher {
         })
     }
 
-    /// Matches a list of haystacks, returning the matches ordered by the sort
-    /// strategy. This API provides the most performant path when matching on
-    /// lists. Pass a [`PyHaystacks`] to release the GIL while matching;
-    /// plain iterables are borrowed zero-copy under the GIL
+    /// Matches a list of haystacks
+    ///
+    /// This API provides the most performant path when matching on lists.
+    /// The GIL is released while matching if passed a `Haystacks`.
     fn match_list(
         &mut self,
         py: Python<'_>,
@@ -243,11 +240,12 @@ impl PyMatcher {
         Ok(matches.into_iter().map(Into::into).collect())
     }
 
-    /// Like `match_list` but matched in parallel on multiple real threads
-    /// (0 = available CPU cores - 2). Threads work on 2048 item chunks, and the
-    /// final result is identical to `match_list`. The GIL is released while
-    /// matching; plain iterables are first copied into a temporary arena under
-    /// the GIL, which passing a [`PyHaystacks`] skips
+    /// Matches a list of haystacks in parallel on multiple real threads
+    ///
+    /// If `threads == 0`, the matcher will default to available CPU cores - 2.
+    ///
+    /// This API provides the most performant path when matching on lists.
+    /// The GIL is released while matching if passed a `Haystacks`.
     fn match_list_parallel(
         &mut self,
         py: Python<'_>,
@@ -270,11 +268,15 @@ impl PyMatcher {
         Ok(matches.into_iter().map(Into::into).collect())
     }
 
-    /// Like `match_list` but each match includes the indices of the chars in
-    /// the haystack that matched the needle. This API has not been
-    /// optimized for performance, and should only be used on small lists,
-    /// e.g. the visible portion of the results. Useful for displaying
-    /// matched indices in the UI
+    /// Matches a list of haystacks, returning a list of `MatchIndices` which
+    /// are equivalent to `Match` except they include the indices of the matched
+    /// characters in the haystack.
+    ///
+    /// This API has not been optimized for performance, and should only be used
+    /// on small lists or after matching a list of haystacks with
+    /// `Matcher::match_list`. Useful for displaying matched indices in the UI.
+    ///
+    /// The GIL is released while matching if passed a `Haystacks`.
     fn match_list_indices(
         &mut self,
         haystacks: &Bound<'_, PyAny>,
@@ -288,10 +290,8 @@ impl PyMatcher {
         Ok(matches.into_iter().map(Into::into).collect())
     }
 
-    /// Matches a single haystack, returning its match (with `index` echoed
-    /// back) if it passes. This API performs ~10% slower than the
-    /// `match_list` API. Consider using `match_list` if you have more than
-    /// one haystack to match, as it performs significantly better
+    /// Matches a single haystack, returning its `Match` if it passes. This
+    /// API performs much slower than the `match_list` API with `Haystacks`
     fn match_one(&mut self, haystack: &str, index: u32) -> Option<PyMatch> {
         self.inner.match_one(haystack, index).map(Into::into)
     }
@@ -318,7 +318,7 @@ impl PyMatcher {
         self.inner.set_patterns(&patterns);
     }
 
-    /// Updates the config, rebuilding it from the kwargs; omitted kwargs reset
+    /// Updates the config, rebuilding it from the kwargs. Omitted kwargs reset
     /// to their defaults (this is not a merge with the current config).
     /// Skipped if the config is the same as the previous one
     #[pyo3(signature = (*, max_typos = frizbee::Config::default().max_typos, max_items = None,
@@ -340,7 +340,8 @@ impl PyMatcher {
         Ok(())
     }
 
-    /// The current patterns
+    /// The current patterns. Returns copies: mutating them does not affect the
+    /// matcher; pass them back via `set_patterns`
     #[getter]
     fn patterns(&self) -> Vec<PyPattern> {
         self.inner

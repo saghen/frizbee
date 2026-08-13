@@ -7,13 +7,17 @@ use frizbee::Matcher;
 
 use crate::config::{config_to_core, frizbee_config_t, frizbee_str_t};
 
+/// Primary entrypoint for fuzzy matching
+///
 /// Opaque matcher handle, created by `frizbee_matcher_new` or
 /// `frizbee_matcher_from_query` and destroyed by `frizbee_matcher_free`.
 ///
-/// Compiles the pattern once, allocates memory for the Smith Waterman matrix,
-/// and reuses the selected SIMD backend across calls. Ideally, only construct
-/// these at most once per list: they're cheap to construct, but end up being
-/// expensive if you construct them for each item in your list.
+/// This compiles the pattern once, allocates memory for the Smith Waterman
+/// matrix, and reuses the selected SIMD backend.
+///
+/// Ideally, only construct these at most once per list. They're cheap to
+/// construct, but end up being expensive if you construct them for each item in
+/// your list.
 ///
 /// Not thread-safe: use one matcher per thread or use external locking
 pub struct frizbee_matcher_t {

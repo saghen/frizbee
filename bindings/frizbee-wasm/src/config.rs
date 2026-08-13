@@ -1,9 +1,5 @@
-//! Mirrors of the core config types — enums, scoring and config — parsed from
-//! plain JS objects via `js_sys::Reflect`, plus their hand-written TS
-//! declarations kept next to the structs they describe. Hand-rolled instead of
-//! serde: the serde/serde-wasm-bindgen machinery (and the `f64::fmt`
-//! float-formatting stack its error paths drag in) costs ~35 KB of .wasm for
-//! what amounts to reading a dozen optional fields.
+//! JS objects to Rust structs, through `js_sys` directly to avoid
+//! `serde`/`f64::fmt` size overhead
 
 use js_sys::Reflect;
 use wasm_bindgen::prelude::*;
@@ -16,9 +12,9 @@ export type Matching = 'fuzzy' | 'exact' | 'prefix' | 'suffix' | 'substring';
 export type SortStrategy = 'scoreThenIndexAsc' | 'scoreThenIndexDesc' | 'indexAsc' | 'indexDesc';
 
 /**
- * Controls the scoring used by the smith waterman algorithm. You may tweak these but
- * pay close attention to the documentation for each property, as small changes can
- * lead to poor matching. Missing fields fall back to the core defaults
+ * Controls the scoring used by the smith waterman algorithm. Pay close
+ * attention to the documentation for each property, as small changes can lead
+ * to poor matching.
  */
 export interface Scoring {
   /** Score for a matching character between needle and haystack */
@@ -352,10 +348,9 @@ pub(crate) fn config_from_js(
     Ok((config, max_items))
 }
 
-/// Needle length up to which scores are guaranteed exact for the scoring config
-/// (the core default when omitted). Longer needles still match, but their
-/// scores may saturate at `0xffff`, so items whose true scores are both above
-/// the cap tie
+/// Needle length up to which scores are guaranteed to fit within the 16-bit
+/// score (the core default `Scoring` when omitted). Longer needles still match,
+/// but their scores may saturate at `0xffff`
 #[wasm_bindgen(js_name = maxNeedleLen)]
 pub fn max_needle_len(scoring: Option<ScoringObject>) -> Result<f64, JsError> {
     let scoring = match scoring {

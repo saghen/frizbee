@@ -1,5 +1,4 @@
-//! How haystack strings cross the boundary: either extracted per call as
-//! zero-copy borrowed `&str`s under the GIL
+//! Per call zero-copy borrowed `&str`s under the GIL
 //! (`collect_haystacks`/`with_haystacks`), or copied once into the Rust-owned
 //! `Haystacks` arena and matched with the GIL released.
 
@@ -8,8 +7,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyList, PyString, PyTuple};
 
 /// Collects the haystack `str` objects as strong references (`Bound` owns a
-/// reference). `PyList`/`PyTuple` are fast paths; any other iterable goes
-/// through the generic iterator protocol
+/// reference). `PyList`/`PyTuple` have fast paths, with any other iterable
+/// being treated generically
 pub(crate) fn collect_haystacks<'py>(
     haystacks: &Bound<'py, PyAny>,
 ) -> PyResult<Vec<Bound<'py, PyString>>> {
@@ -32,8 +31,8 @@ pub(crate) fn collect_haystacks<'py>(
 }
 
 /// Extracts the haystacks as zero-copy borrowed `&str`s and calls `f` with
-/// them, all under the GIL. The `Bound` handles are kept alive for the duration
-/// of `f` so the borrowed strings cannot be deallocated
+/// them. The `Bound` handles are kept alive for the duration of `f` so the
+/// borrowed strings cannot be deallocated
 pub(crate) fn with_haystacks<R>(
     haystacks: &Bound<'_, PyAny>,
     f: impl FnOnce(&[&str]) -> PyResult<R>,
@@ -46,12 +45,9 @@ pub(crate) fn with_haystacks<R>(
     f(&strs)
 }
 
-/// Owns the haystack list as a packed utf-8 arena in Rust memory, so matching
-/// pays no per-call boundary cost and releases the GIL while matching: the
-/// primary path for matching the same list repeatedly (e.g. per keystroke).
-/// Construct once (copying each string once, under the GIL), `append`/`extend`
-/// to add items, and rebuild (or `clear`) for anything else — match indices
-/// refer to this list's order
+/// Incrementally updatable Haystack copied into Rust memory to avoid per-call
+/// overhead and locking the GIL.
+/// Match indices refer to this list's order
 #[pyclass(name = "Haystacks", module = "frizbee")]
 pub(crate) struct PyHaystacks {
     /// Concatenated utf-8 bytes of every haystack

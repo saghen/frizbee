@@ -96,6 +96,13 @@ mod multi;
 use multi::{CompiledPattern, CompiledPatterns};
 
 /// Primary entrypoint for fuzzy matching
+///
+/// `Matcher` compiles the pattern once, allocates memory for the Smith Waterman
+/// matrix, and reuses the selected SIMD backend.
+///
+/// Ideally, only construct these at most once per list. They're cheap to
+/// construct, but end up being expensive if you construct them for each item in
+/// your list.
 #[derive(Debug, Clone)]
 pub struct Matcher {
     config: Config,
@@ -114,7 +121,7 @@ impl Matcher {
 
     /// Creates a matcher from a list of [`Pattern`]s (see
     /// [`Pattern::parse_query`]), matched independently. A haystack matches
-    /// when all of the patterns match where the score is the sum of each
+    /// when all of the patterns match, where the score is the sum of each
     /// pattern's score.
     ///
     /// ```
@@ -366,9 +373,9 @@ impl Matcher {
     /// Matches a single haystack, returning its [`Match`] if it passes. This
     /// API performs ~10% slower than the [`Matcher::match_list`] API.
     ///
-    /// Consider using the [`Matcher::match_iter`] API or
-    /// [`Matcher::match_list`] if you have more than one haystack to match,
-    /// as they perform significantly better.
+    /// Consider using the [`Matcher::match_iter`] or [`Matcher::match_list`]
+    /// APIs if you have more than one haystack to match, as they perform
+    /// significantly better.
     pub fn match_one<S: AsRef<str>>(&mut self, haystack: S, index: u32) -> Option<Match> {
         match &mut self.patterns {
             CompiledPatterns::Empty => Some(Match::from_index(index as usize)),

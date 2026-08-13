@@ -1,6 +1,3 @@
-//! The `Pattern` class with its per-pattern config overrides, plus query
-//! parsing.
-
 use pyo3::prelude::*;
 
 use crate::config::{
@@ -8,12 +5,8 @@ use crate::config::{
     unicode_to_str,
 };
 
-/// A single pattern to match, optionally overriding parts of the matcher
-/// config. Every override defaults to `None` = inherit from the matcher config
-/// — including `max_typos`, where an unlimited per-pattern override is
-/// inexpressible in core (set `max_typos=None` on the matcher config for
-/// unlimited typos instead)
-#[pyclass(name = "Pattern", frozen, eq, from_py_object, module = "frizbee")]
+/// A single pattern to match, parsed from syntax like `!^foo`
+#[pyclass(name = "Pattern", eq, from_py_object, module = "frizbee")]
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct PyPattern {
     pub(crate) inner: frizbee::Pattern,
@@ -45,6 +38,29 @@ impl PyPattern {
         })
     }
 
+    /// Parses a query of whitespace separated atoms (see `Matcher.from_query`
+    /// for the atom syntax), e.g. `foo !^bar` matches haystacks that fuzzy
+    /// match `foo` and don't start with `bar`. Escape a literal space with a
+    /// backslash, e.g. `foo\ bar` is a single atom. Atoms with an empty needle,
+    /// e.g. `!` or `^$`, are dropped.
+    ///
+    /// The returned patterns carry only the matching mode derived from the
+    /// syntax. Any other per-pattern override is left as `None` and inherits
+    /// the matcher's config. Set fields on the results to override per-pattern.
+    /// For example, setting the max typos based on needle length::
+    ///
+    ///     patterns = Pattern.from_query("foo longerneedle")
+    ///     for p in patterns:
+    ///         p.max_typos = len(p.needle) // 4
+    ///     matcher = Matcher.from_patterns(patterns)
+    #[staticmethod]
+    fn from_query(query: &str) -> Vec<Self> {
+        frizbee::Pattern::parse_query(query)
+            .into_iter()
+            .map(|inner| Self { inner })
+            .collect()
+    }
+
     /// Raw atom text, e.g. `!^foo` when parsed from a query
     #[getter]
     fn pattern(&self) -> &str {
@@ -63,37 +79,75 @@ impl PyPattern {
         self.inner.negated
     }
 
+    #[setter]
+    fn set_negated(&mut self, negated: bool) {
+        self.inner.negated = negated;
+    }
+
     /// Per-pattern override for `matching`; `None` inherits it
     #[getter]
     fn matching(&self) -> Option<&'static str> {
         self.inner.config.matching.map(matching_to_str)
     }
 
-    /// Per-pattern override for `max_typos`; `None` inherits it. Because the
-    /// config's `max_typos` is itself optional, there is no way to request
+    #[setter]
+    fn set_matching(&mut self, matching: Option<&str>) -> PyResult<()> {
+        self.inner.config.matching = matching.map(parse_matching).transpose()?;
+        Ok(())
+    }
+
+    /// Per-pattern override for `max_typos`
+    /// `None` inherits the matcher `Config`
+    ///
+    /// Config's `max_typos` is itself optional, so there is no way to request
     /// unlimited typos for a single pattern while the matcher's config sets a
-    /// limit
+    /// limit. Instead, just set it to 0xFFFF.
     #[getter]
     fn max_typos(&self) -> Option<u16> {
         self.inner.config.max_typos
     }
 
-    /// Per-pattern override for `casing`; `None` inherits it
+    #[setter]
+    fn set_max_typos(&mut self, max_typos: Option<u16>) {
+        self.inner.config.max_typos = max_typos;
+    }
+
+    /// Per-pattern override for `casing`
+    /// `None` inherits the matcher `Config`
     #[getter]
     fn casing(&self) -> Option<&'static str> {
         self.inner.config.casing.map(casing_to_str)
     }
 
-    /// Per-pattern override for `unicode`; `None` inherits it
+    #[setter]
+    fn set_casing(&mut self, casing: Option<&str>) -> PyResult<()> {
+        self.inner.config.casing = casing.map(parse_casing).transpose()?;
+        Ok(())
+    }
+
+    /// Per-pattern override for `unicode`
+    /// `None` inherits the matcher `Config`
     #[getter]
     fn unicode(&self) -> Option<&'static str> {
         self.inner.config.unicode.map(unicode_to_str)
     }
 
-    /// Per-pattern override for `scoring`; `None` inherits it
+    #[setter]
+    fn set_unicode(&mut self, unicode: Option<&str>) -> PyResult<()> {
+        self.inner.config.unicode = unicode.map(parse_unicode).transpose()?;
+        Ok(())
+    }
+
+    /// Per-pattern override for `scoring`
+    /// `None` inherits the matcher `Config`
     #[getter]
     fn scoring(&self) -> Option<PyScoring> {
         self.inner.config.scoring.clone().map(Into::into)
+    }
+
+    #[setter]
+    fn set_scoring(&mut self, scoring: Option<PyScoring>) {
+        self.inner.config.scoring = scoring.map(Into::into);
     }
 
     fn __repr__(&self) -> String {
@@ -137,22 +191,4 @@ impl From<PatternArg> for frizbee::Pattern {
             PatternArg::Text(needle) => needle.into(),
         }
     }
-}
-
-/// Parses a query of whitespace separated atoms (see `Matcher.from_query` for
-/// the atom syntax), e.g. `foo !^bar` matches haystacks that fuzzy match `foo`
-/// and don't start with `bar`. Escape a literal space with a backslash, e.g.
-/// `foo\ bar` is a single atom. Atoms with an empty needle, e.g. `!` or `^$`,
-/// are dropped.
-///
-/// The returned patterns carry only the matching mode derived from the syntax.
-/// Any other per-pattern override is left as `None` and inherits the matcher's
-/// config; rebuild patterns to override per-pattern before passing them to
-/// `Matcher.from_patterns`
-#[pyfunction]
-pub(crate) fn parse_query(query: &str) -> Vec<PyPattern> {
-    frizbee::Pattern::parse_query(query)
-        .into_iter()
-        .map(|inner| PyPattern { inner })
-        .collect()
 }
