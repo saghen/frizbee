@@ -1,6 +1,6 @@
 # Frizbee
 
-Frizbee is a SIMD typo-resistant fuzzy string matcher written in Rust. The core of the algorithm uses Smith-Waterman with affine gaps, similar to FZF. In the included benchmark, with typo resistance disabled, it outperforms [Nucleo](https://github.com/helix-editor/nucleo) by ~4x and [FZF](https://github.com/junegunn/fzf) by ~5x and supports multithreading, see [benchmarks](./BENCHMARKS.md). When matching against unicode, it outperforms Nucleo and FZF by 20x.
+Frizbee is a SIMD typo-resistant fuzzy string matcher written in Rust, with bindings for C, C++, Python and JS (WASM). The core of the algorithm uses Smith-Waterman with affine gaps, similar to FZF. In the included benchmark, with typo resistance disabled, it outperforms [Nucleo](https://github.com/helix-editor/nucleo) by ~4x and [FZF](https://github.com/junegunn/fzf) by ~5x and supports multithreading, see [benchmarks](./BENCHMARKS.md). When matching against unicode, it outperforms Nucleo and FZF by 20x.
 
 Used by [blink.cmp](https://github.com/saghen/blink.cmp), [atuin](https://github.com/atuinsh/atuin), [television](https://github.com/alexpasmantier/television), [skim](https://github.com/skim-rs/skim), and [fff](https://github.com/dmtrKovalenko/fff). Special thank you to [stefanboca](https://github.com/stefanboca) and [ii14](https://github.com/ii14)!
 
@@ -52,6 +52,16 @@ let mut matches: Vec<_> = haystacks
     .collect();
 radix_sort_matches(&mut matches);
 ```
+
+### Bindings (C, C++, Python, WASM)
+
+The [bindings](./bindings) directory contains bindings for C, C++, Python and WASM.
+
+- [frizbee-c](./bindings/frizbee-c/) (C ABI, C++ header): Native performance
+- [frizbee-py](https://pypi.org/project/frizbee/) (Python): Native performance after one-time copy of strings to Rust (42ms copy on Chromium, 24ms for matching)
+- [frizbee-wasm](https://www.npmjs.com/package/frizbee) (SIMD128 WASM): 60% slower (40.5ms on Chromium) with one-time copy of strings to Rust (130ms) with `maxItems = 1000`. Sending `Match` objects to JS has significant overhead so `maxItems` is essential for performance critical use cases. The WASM binary is 50KBs (Brotli)
+
+If you're integrating this crate which will be built for WASM, include `RUSTFLAGS='-C target-feature=+simd128'` while building your project, otherwise the scalar path will be taken. You can see an example of how to set this up in this repo's `.cargo/config.toml`.
 
 ## Benchmarks
 
@@ -230,12 +240,6 @@ With the default `UnicodeMatching::Smart`, an ASCII needle matching against a ha
 For case-insensitive matching, the case flipped version will be skipped if it's a different byte length (`İ` -> `i` in Turkish) or has multiple codepoints (such as the German `ß` -> `SS`). These cases are typically very rare (<0.01% of text, depending on language). This could be solved by running `match_list` twice when one of these is detected in the needle, PRs welcome!
 
 Unlike FZF/Nucleo, Frizbee will not match `a` against `á`.
-
-## WebAssembly
-
-Frizbee builds for WASM, optionally without `std` (see below) to reduce binary size (24KBs brotli). **Include `RUSTFLAGS='-C target-feature=+simd128'` while building your project**, otherwise Frizbee will fallback to the scalar path. See `.cargo/config.toml` for how you can do this automatically in your repo.
-
-For development, you can run tests via `cargo test --target wasm32-wasip1 --lib` with `wasmtime` available on the `PATH` (available automatically in `nix develop`).
 
 ## `no_std`
 
