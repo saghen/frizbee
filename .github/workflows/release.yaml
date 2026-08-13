@@ -1,0 +1,298 @@
+name: Release
+
+# Tag push publishes everything; workflow_dispatch is a dry run that builds all
+# artifacts but skips every publish job (they gate on ref_type == 'tag').
+#
+# Registry setup (one-time, before the first tag):
+# - crates.io: add this workflow as a trusted publisher in the frizbee crate
+#   settings (repository saghen/frizbee, workflow release.yaml)
+# - PyPI: register a pending publisher for `frizbee` (workflow release.yaml,
+#   environment pypi)
+# - npm: trusted publishing cannot create a new package — publish the first
+#   `frizbee` release with a granular automation token (NODE_AUTH_TOKEN), then
+#   configure the trusted publisher (workflow release.yaml) and drop the token
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  # check tag and workspace version agree
+  check:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check tag matches workspace version
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(cargo metadata --format-version 1 --no-deps \
+            | jq -r '.packages[] | select(.name == "frizbee") | .version')
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match workspace version $version" >&2
+            exit 1
+          fi
+
+          # the npm manifest is committed separately; `just bump` updates both
+          npm_version=$(jq -r .version bindings/frizbee-wasm/package.json)
+          if [ "v$npm_version" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match bindings/frizbee-wasm/package.json version $npm_version" >&2
+            exit 1
+          fi
+
+  # Run the full suites on the tagged commit
+  test:
+    uses: ./.github/workflows/test.yaml
+
+  bindings:
+    uses: ./.github/workflows/bindings.yaml
+
+  c:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+          # musl defaults to +crt-static, which the cdylib cannot link against
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-musl
+            rustflags: "-C target-feature=-crt-static"
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+            rustflags: "-C target-feature=-crt-static"
+          # x86_64 cross-compiled on arm, since intel macos runners are deprecated
+          - os: macos-14
+            target: x86_64-apple-darwin
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: windows-2022
+            target: x86_64-pc-windows-msvc
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install target
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install musl-tools
+        if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Build
+        run: cargo build --release -p frizbee-c --target ${{ matrix.target }}
+        env:
+          RUSTFLAGS: ${{ matrix.rustflags || '' }}
+
+      - name: Package
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NAME="frizbee-c-${VERSION}-${{ matrix.target }}"
+          OUT="target/${{ matrix.target }}/release"
+
+          mkdir -p "dist/$NAME/lib/pkgconfig"
+          cp -r bindings/frizbee-c/include "dist/$NAME/include"
+          # staticlib + cdylib; names vary per platform
+          for f in libfrizbee.a libfrizbee.so libfrizbee.dylib \
+                   frizbee.dll frizbee.dll.lib frizbee.lib; do
+            [ -f "$OUT/$f" ] && cp "$OUT/$f" "dist/$NAME/lib/"
+          done
+
+          # pkg-config file with a placeholder prefix; consumers relocate it
+          cat > "dist/$NAME/lib/pkgconfig/frizbee.pc" <<EOF
+          prefix=/usr/local
+          exec_prefix=\${prefix}
+          libdir=\${exec_prefix}/lib
+          includedir=\${prefix}/include
+
+          Name: frizbee
+          Description: C bindings for frizbee, SIMD fuzzy string matching
+          Version: ${VERSION}
+          Libs: -L\${libdir} -lfrizbee
+          Libs.private: -lpthread -ldl -lm
+          Cflags: -I\${includedir}
+          EOF
+
+          cd dist
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "$NAME.zip" "$NAME"
+          else
+            tar czf "$NAME.tar.gz" "$NAME"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+
+  github-release:
+    needs: [check, test, bindings, c]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: c-*
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+
+  # abi3 wheels: one per platform, covering CPython 3.10+. maturin-action only
+  # reads `manylinux` on Linux (it selects the build container)
+  py-wheels:
+    name: Build wheel (${{ matrix.name }})
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x86_64,  os: ubuntu-24.04,     target: x86_64,  manylinux: auto }
+          - { name: linux-aarch64, os: ubuntu-24.04-arm, target: aarch64, manylinux: auto }
+          - { name: musl-x86_64,   os: ubuntu-24.04,     target: x86_64,  manylinux: musllinux_1_2 }
+          - { name: musl-aarch64,  os: ubuntu-24.04-arm, target: aarch64, manylinux: musllinux_1_2 }
+          - { name: macos-x86_64,  os: macos-14,         target: x86_64 }
+          - { name: macos-aarch64, os: macos-14,         target: aarch64 }
+          - { name: windows-x64,   os: windows-2022,     target: x64 }
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: bindings/frizbee-py
+          target: ${{ matrix.target }}
+          args: --release --out dist
+          manylinux: ${{ matrix.manylinux }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-${{ matrix.name }}
+          path: bindings/frizbee-py/dist
+
+  py-sdist:
+    needs: check
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build sdist
+        uses: PyO3/maturin-action@v1
+        with:
+          working-directory: bindings/frizbee-py
+          command: sdist
+          args: --out dist
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # the sdist must vendor the workspace path dependency on the root crate
+      # prove it builds standalone before releasing
+      - name: Install from sdist and test
+        working-directory: bindings/frizbee-py
+        run: |
+          pip install dist/*.tar.gz
+          python -m unittest discover tests -v
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels-sdist
+          path: bindings/frizbee-py/dist
+
+  pypi:
+    name: Publish to PyPI
+    needs: [check, test, bindings, py-wheels, py-sdist]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write # OIDC
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: wheels-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+
+  npm:
+    name: Publish to npm
+    needs: [check, test, bindings]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write # OIDC
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-pack
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # .cargo/config.toml enables +simd128. The binding directory is the package
+      # root (committed package.json + wrappers); wasm-pack only produces ./pkg
+      - name: Build (web)
+        working-directory: bindings/frizbee-wasm
+        run: wasm-pack build --target web --release
+
+      - name: Publish
+        working-directory: bindings/frizbee-wasm
+        run: npm publish --provenance --access public
+
+  crates-io:
+    name: Publish to crates.io
+    needs: [check, test, bindings]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write # OIDC
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
+      - name: Publish
+        run: cargo publish -p frizbee --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

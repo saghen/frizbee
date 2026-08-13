@@ -1,0 +1,94 @@
+name: Bindings
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "src/**"
+      - "bindings/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "justfile"
+      - ".github/workflows/bindings.yaml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "bindings/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/**"
+      - "justfile"
+      - ".github/workflows/bindings.yaml"
+  # allows release.yaml to wait for this workflow
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  c:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # cbindgen pinned to the nix dev shell's version
+      - name: Install just and cbindgen
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just,cbindgen@0.29.3
+
+      - name: Test
+        run: just test-c
+
+  py:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install just
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just
+
+      - name: Install maturin
+        run: pip install maturin
+
+      - name: Test
+        run: just test-py
+
+  wasm:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install just and wasm-pack
+        uses: taiki-e/install-action@v2
+        with:
+          tool: just,wasm-pack
+
+      # builds pkg/ (web target) as part of the wrapper tests
+      - name: Test
+        run: just test-wasm
+
+      - name: Report size
+        working-directory: bindings/frizbee-wasm
+        run: |
+          ls -la pkg/
+          echo "gzip -9: $(gzip -9 -c pkg/frizbee_wasm_bg.wasm | wc -c) bytes"
