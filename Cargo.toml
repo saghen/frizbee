@@ -3,6 +3,7 @@ default-members = ["."]
 members = [
   "bindings/frizbee-c",
   "bindings/frizbee-py",
+  "bindings/frizbee-wasm",
 ]
 
 [workspace.package]

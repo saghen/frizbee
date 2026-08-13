@@ -1,0 +1,38 @@
+{
+  "name": "frizbee",
+  "version": "0.12.0",
+  "description": "WASM bindings for frizbee, SIMD fuzzy string matching",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/saghen/frizbee",
+    "directory": "bindings/frizbee-wasm"
+  },
+  "keywords": ["fuzzy", "matching", "search", "simd", "smith-waterman", "wasm"],
+  "type": "module",
+  "main": "wrapper.mjs",
+  "module": "wrapper.mjs",
+  "types": "./pkg/frizbee_wasm.d.ts",
+  "sideEffects": ["./wrapper.mjs", "./wrapper-node.mjs"],
+  "exports": {
+    ".": {
+      "types": "./pkg/frizbee_wasm.d.ts",
+      "node": "./wrapper-node.mjs",
+      "default": "./wrapper.mjs"
+    },
+    "./frizbee_wasm_bg.wasm": "./pkg/frizbee_wasm_bg.wasm"
+  },
+  "files": [
+    "pkg/frizbee_wasm_bg.wasm",
+    "pkg/frizbee_wasm.js",
+    "pkg/frizbee_wasm.d.ts",
+    "wrapper.mjs",
+    "wrapper-node.mjs"
+  ],
+  "scripts": {
+    "prepublishOnly": "node -e \"if (!require('node:fs').existsSync('pkg/frizbee_wasm_bg.wasm')) { console.error('pkg/ missing - run: wasm-pack build --target web --release'); process.exit(1) }\""
+  },
+  "engines": {
+    "node": ">=16.4"
+  }
+}
