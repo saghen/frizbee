@@ -8,15 +8,17 @@
 //! - Always finds the best alignment
 //! - Supports insertion (unmatched char in haystack, basis of fuzzy matching)
 //! - Supports deletion (unmatched char in needle, basis of typo-resistance)
-//! - Supports substitution (haystack and needle char mismatch, basis of typo-resistance)
+//! - Supports substitution (haystack and needle char mismatch, basis of
+//!   typo-resistance)
 //!
 //! # Example: using `Matcher`
 //!
-//! `Matcher` compiles the pattern once, allocates memory for the Smith Waterman matrix,
-//! and reuses the selected SIMD backend.
+//! `Matcher` compiles the pattern once, allocates memory for the Smith Waterman
+//! matrix, and reuses the selected SIMD backend.
 //!
-//! Ideally, only construct these at most once per list. They're cheap to construct,
-//! but end up being expensive if you construct them for each item in your list.
+//! Ideally, only construct these at most once per list. They're cheap to
+//! construct, but end up being expensive if you construct them for each item in
+//! your list.
 //!
 //! ```rust
 //! use frizbee::{Config, Matcher};
@@ -48,8 +50,9 @@
 //! let matches = matcher.match_list(&haystacks);
 //! ```
 //!
-//! `Pattern::parse_query` returns the parsed patterns, so per-pattern config can be applied
-//! before building the matcher. For example, setting the max typos based on needle length:
+//! `Pattern::parse_query` returns the parsed patterns, so per-pattern config
+//! can be applied before building the matcher. For example, setting the max
+//! typos based on needle length:
 //!
 //! ```rust
 //! use frizbee::{Config, Matcher, Pattern};
@@ -154,8 +157,8 @@ pub struct Match {
     pub index: u32,
     /// Matched the needle exactly (e.g. "foo" on "foo")
     pub exact: bool,
-    /// Column position (0-based haystack byte offset) where the best alignment ends.
-    /// Only populated when the `match_end_col` feature is enabled.
+    /// Column position (0-based haystack byte offset) where the best alignment
+    /// ends. Only populated when the `match_end_col` feature is enabled.
     #[cfg(feature = "match_end_col")]
     pub end_col: u16,
 }
@@ -192,8 +195,8 @@ impl PartialEq for Match {
 }
 impl Eq for Match {}
 
-/// Like [`Match`] but includes the indices of the chars in the haystack that matched the needle in
-/// reverse order
+/// Like [`Match`] but includes the indices of the chars in the haystack that
+/// matched the needle in reverse order
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MatchIndices {
@@ -202,7 +205,8 @@ pub struct MatchIndices {
     pub index: u32,
     /// Matched the needle exactly (e.g. "foo" on "foo")
     pub exact: bool,
-    /// Indices of the chars in the haystack that matched the needle in reverse order
+    /// Indices of the chars in the haystack that matched the needle in reverse
+    /// order
     pub indices: Vec<u32>,
 }
 
@@ -242,8 +246,8 @@ impl Eq for MatchIndices {}
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct Config {
-    /// The maximum number of characters missing from the needle, before an item in the
-    /// haystack is filtered out
+    /// The maximum number of characters missing from the needle, before an item
+    /// in the haystack is filtered out
     pub max_typos: Option<u16>,
     /// Controls how case sensitivity/insensitivity is handled while matching
     #[cfg_attr(feature = "serde", serde(default))]
@@ -251,17 +255,18 @@ pub struct Config {
     /// Controls how unicode is handled while matching
     #[cfg_attr(feature = "serde", serde(default))]
     pub unicode: UnicodeMatching,
-    /// Selects the matching algorithm: fuzzy (Smith-Waterman) or one of the literal modes
-    /// (exact, prefix, suffix, substring). Literal modes require the needle to appear as a
-    /// contiguous run of characters and do not support typos (`max_typos` is ignored).
+    /// Selects the matching algorithm: fuzzy (Smith-Waterman) or one of the
+    /// literal modes (exact, prefix, suffix, substring). Literal modes
+    /// require the needle to appear as a contiguous run of characters and
+    /// do not support typos (`max_typos` is ignored).
     #[cfg_attr(feature = "serde", serde(default))]
     pub matching: Matching,
     /// Controls how results are ordered
     #[cfg_attr(feature = "serde", serde(default))]
     pub sort: SortStrategy,
-    /// Controls the scoring used by the smith waterman algorithm. You may tweak these but pay
-    /// close attention to the documentation for each property, as small changes can lead to
-    /// poor matching.
+    /// Controls the scoring used by the smith waterman algorithm. You may tweak
+    /// these but pay close attention to the documentation for each
+    /// property, as small changes can lead to poor matching.
     pub scoring: Scoring,
 }
 
@@ -340,11 +345,11 @@ impl SortStrategy {
         }
     }
 
-    /// Whether the sort strategy matches index (asc) (normal order) or index (desc)
-    /// (reverse order).
+    /// Whether the sort strategy matches index (asc) (normal order) or index
+    /// (desc) (reverse order).
     ///
-    /// When this is `true`, the sort strategy may still sort by score (desc) first,
-    /// see [`SortStrategy::is_by_score`].
+    /// When this is `true`, the sort strategy may still sort by score (desc)
+    /// first, see [`SortStrategy::is_by_score`].
     pub fn is_reversed(self) -> bool {
         matches!(
             self,
@@ -410,8 +415,8 @@ impl UnicodeMatching {
 
 /// Selects the matching algorithm
 ///
-/// [`Matching::Fuzzy`] uses the Smith-Waterman algorithm with typos, gaps and substitutions (default)
-/// [`Matching::Exact`] matches the haystack exactly
+/// [`Matching::Fuzzy`] uses the Smith-Waterman algorithm with typos, gaps and
+/// substitutions (default) [`Matching::Exact`] matches the haystack exactly
 /// [`Matching::Prefix`] matches the haystack if it starts with the needle
 /// [`Matching::Suffix`] matches the haystack if it ends with the needle
 /// [`Matching::Substring`] matches the haystack if it contains the needle
@@ -420,7 +425,8 @@ impl UnicodeMatching {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum Matching {
-    /// Smith-Waterman fuzzy matching with typos, gaps and substitutions (default)
+    /// Smith-Waterman fuzzy matching with typos, gaps and substitutions
+    /// (default)
     #[default]
     Fuzzy,
     /// The haystack must equal the needle
@@ -429,8 +435,9 @@ pub enum Matching {
     Prefix,
     /// The haystack must end with the needle
     Suffix,
-    /// The needle must appear somewhere in the haystack. When it appears more than once, the
-    /// highest-scoring occurrence is used, preferring earlier matches on tie
+    /// The needle must appear somewhere in the haystack. When it appears more
+    /// than once, the highest-scoring occurrence is used, preferring
+    /// earlier matches on tie
     Substring,
 }
 
@@ -441,9 +448,9 @@ impl Matching {
     }
 }
 
-/// Controls the scoring used by the smith waterman algorithm. You may tweak these but pay
-/// close attention to the documentation for each property, as small changes can lead to
-/// poor matching.
+/// Controls the scoring used by the smith waterman algorithm. You may tweak
+/// these but pay close attention to the documentation for each property, as
+/// small changes can lead to poor matching.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
@@ -457,17 +464,21 @@ pub struct Scoring {
     /// Penalty for extending a gap (deletion/insertion)
     pub gap_extend_penalty: u16,
 
-    /// Bonus for matching the first character of the haystack (e.g. "h" on "hello_world")
+    /// Bonus for matching the first character of the haystack (e.g. "h" on
+    /// "hello_world")
     pub prefix_bonus: u16,
     /// Bonus for matching a capital letter after a lowercase letter
     /// (e.g. "b" on "fooBar" will receive a bonus on "B")
     pub capitalization_bonus: u16,
-    /// Bonus for matching the case of the needle (e.g. "WorLd" on "WoRld" will receive a bonus on "W", "o", "d")
+    /// Bonus for matching the case of the needle (e.g. "WorLd" on "WoRld" will
+    /// receive a bonus on "W", "o", "d")
     pub matching_case_bonus: u16,
-    /// Bonus for matching the exact needle (e.g. "foo" on "foo" will receive the bonus)
+    /// Bonus for matching the exact needle (e.g. "foo" on "foo" will receive
+    /// the bonus)
     pub exact_match_bonus: u16,
-    /// Bonus for matching _after_ a delimiter character (e.g. "hw" on "hello_world",
-    /// will give a bonus on "w") if "_" is included in the delimiters string
+    /// Bonus for matching _after_ a delimiter character (e.g. "hw" on
+    /// "hello_world", will give a bonus on "w") if "_" is included in the
+    /// delimiters string
     pub delimiter_bonus: u16,
 }
 
@@ -489,8 +500,9 @@ impl Default for Scoring {
 }
 
 impl Scoring {
-    /// Needle length up to which scores are guaranteed to fit within the `u16` score.
-    /// Longer needles still match, but their scores may saturate at `u16::MAX`
+    /// Needle length up to which scores are guaranteed to fit within the `u16`
+    /// score. Longer needles still match, but their scores may saturate at
+    /// `u16::MAX`
     pub fn max_needle_len(&self) -> usize {
         let max_per_char = self.match_score.saturating_add(self.max_per_char_bonus());
         // A zero per-char score can never overflow regardless of needle length
@@ -498,7 +510,8 @@ impl Scoring {
             return usize::MAX;
         }
 
-        // The diagonal transiently holds the score plus the mismatch penalty before subtracting it
+        // The diagonal transiently holds the score plus the mismatch penalty before
+        // subtracting it
         let headroom = u16::MAX
             .saturating_sub(self.max_one_time_bonus())
             .saturating_sub(self.prefix_bonus)
@@ -508,7 +521,8 @@ impl Scoring {
         max_needle_len as usize
     }
 
-    /// Max additional score that a needle character can receive, aside from the match score
+    /// Max additional score that a needle character can receive, aside from the
+    /// match score
     pub(crate) fn max_per_char_bonus(&self) -> u16 {
         let bonus = self.delimiter_bonus.max(self.capitalization_bonus);
         let amortized = bonus
@@ -517,7 +531,8 @@ impl Scoring {
         amortized.saturating_add(self.matching_case_bonus)
     }
 
-    /// Max bonus given to a score one time, aside from the prefix or exact bonuses
+    /// Max bonus given to a score one time, aside from the prefix or exact
+    /// bonuses
     pub(crate) fn max_one_time_bonus(&self) -> u16 {
         let bonus = self.delimiter_bonus.max(self.capitalization_bonus);
         let amortized = bonus

@@ -1,6 +1,7 @@
-//! The `Matcher` class, the match result marshalling into plain JS objects, and the
-//! hand-written TS declarations for the result types — including the interface merge
-//! that lets `matchList`/`matchListIndices` accept an owned `Haystacks`.
+//! The `Matcher` class, the match result marshalling into plain JS objects, and
+//! the hand-written TS declarations for the result types — including the
+//! interface merge that lets `matchList`/`matchListIndices` accept an owned
+//! `Haystacks`.
 
 use js_sys::{Array, Object, Reflect};
 use wasm_bindgen::prelude::*;
@@ -104,10 +105,11 @@ fn matches_indices_to_js(matches: &[frizbee::MatchIndices]) -> MatchIndicesArray
     arr.unchecked_into()
 }
 
-/// Primary entrypoint for fuzzy matching. Compiles the pattern once, allocates memory
-/// for the Smith Waterman matrix, and reuses the selected SIMD backend. Ideally, only
-/// construct these at most once per list: they're cheap to construct, but end up being
-/// expensive if you construct them for each item in your list.
+/// Primary entrypoint for fuzzy matching. Compiles the pattern once, allocates
+/// memory for the Smith Waterman matrix, and reuses the selected SIMD backend.
+/// Ideally, only construct these at most once per list: they're cheap to
+/// construct, but end up being expensive if you construct them for each item in
+/// your list.
 ///
 /// Instances hold memory in the wasm heap: call `.free()` when done, or rely on
 /// `FinalizationRegistry` to eventually collect it.
@@ -128,8 +130,8 @@ impl Matcher {
 
 #[wasm_bindgen]
 impl Matcher {
-    /// Creates a matcher from a single needle, matched literally (no query syntax);
-    /// use `fromQuery` or `fromPatterns` for multi-pattern queries
+    /// Creates a matcher from a single needle, matched literally (no query
+    /// syntax); use `fromQuery` or `fromPatterns` for multi-pattern queries
     #[wasm_bindgen(constructor)]
     pub fn new(needle: &str, config: Option<ConfigObject>) -> Result<Matcher, JsError> {
         let (config, max_items) = config_from_js(config)?;
@@ -137,9 +139,9 @@ impl Matcher {
         Ok(Matcher { inner, max_items })
     }
 
-    /// Shorthand for calling `fromPatterns` with the parsed query (see `parseQuery`),
-    /// e.g. `foo !^bar` matches haystacks that fuzzy match `foo` and don't start
-    /// with `bar`
+    /// Shorthand for calling `fromPatterns` with the parsed query (see
+    /// `parseQuery`), e.g. `foo !^bar` matches haystacks that fuzzy match
+    /// `foo` and don't start with `bar`
     #[wasm_bindgen(js_name = fromQuery)]
     pub fn from_query(query: &str, config: Option<ConfigObject>) -> Result<Matcher, JsError> {
         let (config, max_items) = config_from_js(config)?;
@@ -147,9 +149,9 @@ impl Matcher {
         Ok(Matcher { inner, max_items })
     }
 
-    /// Creates a matcher from a list of patterns, matched independently. A haystack
-    /// matches when all of the patterns match, where the score is the sum of each
-    /// pattern's score
+    /// Creates a matcher from a list of patterns, matched independently. A
+    /// haystack matches when all of the patterns match, where the score is
+    /// the sum of each pattern's score
     #[wasm_bindgen(js_name = fromPatterns)]
     pub fn from_patterns(
         patterns: PatternArray,
@@ -161,9 +163,10 @@ impl Matcher {
         Ok(Matcher { inner, max_items })
     }
 
-    /// Matches a list of haystacks, returning the matches ordered by the config's
-    /// sort strategy. Through the package entry, also accepts a [`Haystacks`] list
-    /// (forwarding to `matchHaystacks`) — the primary path for keystroke loops
+    /// Matches a list of haystacks, returning the matches ordered by the
+    /// config's sort strategy. Through the package entry, also accepts a
+    /// [`Haystacks`] list (forwarding to `matchHaystacks`) — the primary
+    /// path for keystroke loops
     #[wasm_bindgen(js_name = matchList, skip_typescript)]
     pub fn match_list(&mut self, haystacks: Vec<String>) -> MatchArray {
         // borrow as &str so the core monomorphizes once for H = &str (shared with the
@@ -174,10 +177,11 @@ impl Matcher {
         matches_to_js(&matches)
     }
 
-    /// Like `matchList`, but each match includes the indices of the chars in the
-    /// haystack that matched the needle, in reverse order. This API has not been
-    /// optimized for performance, and should only be used on small lists, e.g. the
-    /// items in view. Useful for displaying matched indices in the UI
+    /// Like `matchList`, but each match includes the indices of the chars in
+    /// the haystack that matched the needle, in reverse order. This API has
+    /// not been optimized for performance, and should only be used on small
+    /// lists, e.g. the items in view. Useful for displaying matched indices
+    /// in the UI
     #[wasm_bindgen(js_name = matchListIndices, skip_typescript)]
     pub fn match_list_indices(&mut self, haystacks: Vec<String>) -> MatchIndicesArray {
         let haystacks: Vec<&str> = haystacks.iter().map(String::as_str).collect();
@@ -186,10 +190,10 @@ impl Matcher {
         matches_indices_to_js(&matches)
     }
 
-    /// Like `matchList`, but matches an owned [`Haystacks`] list: no strings cross
-    /// the boundary per call, making this the most performant path when matching the
-    /// same list repeatedly. Through the package entry, `matchList` accepts a
-    /// `Haystacks` directly and forwards here
+    /// Like `matchList`, but matches an owned [`Haystacks`] list: no strings
+    /// cross the boundary per call, making this the most performant path
+    /// when matching the same list repeatedly. Through the package entry,
+    /// `matchList` accepts a `Haystacks` directly and forwards here
     #[wasm_bindgen(js_name = matchHaystacks)]
     pub fn match_haystacks(&mut self, haystacks: &Haystacks) -> MatchArray {
         let mut matches = self.inner.match_list(&haystacks.as_strs());
@@ -206,9 +210,9 @@ impl Matcher {
         matches_indices_to_js(&matches)
     }
 
-    /// Matches a single haystack, returning its match (with the given `index`) if it
-    /// passes. Consider using `matchList` if you have more than one haystack to
-    /// match, as it performs significantly better
+    /// Matches a single haystack, returning its match (with the given `index`)
+    /// if it passes. Consider using `matchList` if you have more than one
+    /// haystack to match, as it performs significantly better
     #[wasm_bindgen(js_name = matchOne)]
     pub fn match_one(&mut self, haystack: &str, index: u32) -> Option<MatchObject> {
         self.inner
@@ -216,9 +220,9 @@ impl Matcher {
             .map(|m| match_to_js(&m).unchecked_into())
     }
 
-    /// Like `matchOne`, but includes the indices of the chars in the haystack that
-    /// matched the needle, in reverse order. Useful for displaying matched indices
-    /// in the UI
+    /// Like `matchOne`, but includes the indices of the chars in the haystack
+    /// that matched the needle, in reverse order. Useful for displaying
+    /// matched indices in the UI
     #[wasm_bindgen(js_name = matchOneIndices)]
     pub fn match_one_indices(&mut self, haystack: &str, index: u32) -> Option<MatchIndicesObject> {
         self.inner
@@ -226,8 +230,9 @@ impl Matcher {
             .map(|m| match_indices_to_js(&m).unchecked_into())
     }
 
-    /// Updates the pattern, keeping the config. Strings match literally (no query
-    /// syntax). Skipped if the pattern is the same as the previous one
+    /// Updates the pattern, keeping the config. Strings match literally (no
+    /// query syntax). Skipped if the pattern is the same as the previous
+    /// one
     #[wasm_bindgen(js_name = setPattern)]
     pub fn set_pattern(&mut self, pattern: PatternLike) -> Result<(), JsError> {
         let pattern = pattern_from_js(pattern.into())?;
@@ -235,8 +240,8 @@ impl Matcher {
         Ok(())
     }
 
-    /// Updates the patterns, keeping the config. Skipped if the patterns are the
-    /// same as the previous ones
+    /// Updates the patterns, keeping the config. Skipped if the patterns are
+    /// the same as the previous ones
     #[wasm_bindgen(js_name = setPatterns)]
     pub fn set_patterns(&mut self, patterns: PatternArray) -> Result<(), JsError> {
         let patterns = patterns_from_js(patterns)?;
@@ -244,8 +249,8 @@ impl Matcher {
         Ok(())
     }
 
-    /// Updates the config, keeping the patterns. Skipped if the config is the same
-    /// as the previous one
+    /// Updates the config, keeping the patterns. Skipped if the config is the
+    /// same as the previous one
     #[wasm_bindgen(js_name = setConfig)]
     pub fn set_config(&mut self, config: ConfigObject) -> Result<(), JsError> {
         let (config, max_items) = config_from_js(Some(config))?;

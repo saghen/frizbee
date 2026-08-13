@@ -1,5 +1,5 @@
-//! Merges multiple pre-sorted runs of [`crate::Match`]es into a single sorted [`Vec`]
-//! using the k-way merge algorithm specialized for [`crate::Match`]es.
+//! Merges multiple pre-sorted runs of [`crate::Match`]es into a single sorted
+//! [`Vec`] using the k-way merge algorithm specialized for [`crate::Match`]es.
 
 use crate::Match;
 use alloc::vec::Vec;
@@ -84,8 +84,8 @@ pub fn k_merge_matches_by_index_desc(runs: Vec<Vec<Match>>) -> Vec<Match> {
 ///
 /// The input runs must already be sorted according to the same order `O`.
 ///
-/// [`k_merge_matches_by_score_then_index_asc`] to sort by score (desc), tie-broken
-/// by index (asc)
+/// [`k_merge_matches_by_score_then_index_asc`] to sort by score (desc),
+/// tie-broken by index (asc)
 /// [`k_merge_matches_by_index_asc`] to sort by index
 /// [`k_merge_matches_by_score_then_index_desc`] to sort by score (desc)
 pub fn k_merge_matches_by<O: MergeOrder>(runs: Vec<Vec<Match>>) -> Vec<Match> {
@@ -94,7 +94,8 @@ pub fn k_merge_matches_by<O: MergeOrder>(runs: Vec<Vec<Match>>) -> Vec<Match> {
     let mut merged = Vec::with_capacity(total_matches);
     let mut heap = Vec::with_capacity(runs.len());
 
-    // One cursor per non-empty sorted run; heap root is the next globally best match.
+    // One cursor per non-empty sorted run; heap root is the next globally best
+    // match.
     for (run_idx, run) in runs.iter().enumerate() {
         if let Some(&head) = run.first() {
             heap.push(MergeCursor {

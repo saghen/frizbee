@@ -1,4 +1,5 @@
-//! The `Pattern` class with its per-pattern config overrides, plus query parsing.
+//! The `Pattern` class with its per-pattern config overrides, plus query
+//! parsing.
 
 use pyo3::prelude::*;
 
@@ -7,10 +8,11 @@ use crate::config::{
     unicode_to_str,
 };
 
-/// A single pattern to match, optionally overriding parts of the matcher config.
-/// Every override defaults to `None` = inherit from the matcher config — including
-/// `max_typos`, where an unlimited per-pattern override is inexpressible in core
-/// (set `max_typos=None` on the matcher config for unlimited typos instead)
+/// A single pattern to match, optionally overriding parts of the matcher
+/// config. Every override defaults to `None` = inherit from the matcher config
+/// — including `max_typos`, where an unlimited per-pattern override is
+/// inexpressible in core (set `max_typos=None` on the matcher config for
+/// unlimited typos instead)
 #[pyclass(name = "Pattern", frozen, eq, from_py_object, module = "frizbee")]
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct PyPattern {
@@ -69,7 +71,8 @@ impl PyPattern {
 
     /// Per-pattern override for `max_typos`; `None` inherits it. Because the
     /// config's `max_typos` is itself optional, there is no way to request
-    /// unlimited typos for a single pattern while the matcher's config sets a limit
+    /// unlimited typos for a single pattern while the matcher's config sets a
+    /// limit
     #[getter]
     fn max_typos(&self) -> Option<u16> {
         self.inner.config.max_typos
@@ -119,8 +122,8 @@ impl PyPattern {
     }
 }
 
-/// Accepts either a `str` (matched literally, like the core `impl Into<Pattern>`)
-/// or a `Pattern`
+/// Accepts either a `str` (matched literally, like the core `impl
+/// Into<Pattern>`) or a `Pattern`
 #[derive(FromPyObject)]
 pub(crate) enum PatternArg {
     Pattern(PyPattern),

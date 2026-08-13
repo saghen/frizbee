@@ -1,5 +1,5 @@
-//! The matcher handle, the match result types and every matching `extern "C"` fn,
-//! including the `*_free` functions releasing the result buffers.
+//! The matcher handle, the match result types and every matching `extern "C"`
+//! fn, including the `*_free` functions releasing the result buffers.
 
 use std::ptr;
 
@@ -10,10 +10,10 @@ use crate::config::{config_to_core, frizbee_config_t, frizbee_str_t};
 /// Opaque matcher handle, created by `frizbee_matcher_new` or
 /// `frizbee_matcher_from_query` and destroyed by `frizbee_matcher_free`.
 ///
-/// Compiles the pattern once, allocates memory for the Smith Waterman matrix, and
-/// reuses the selected SIMD backend across calls. Ideally, only construct these at
-/// most once per list: they're cheap to construct, but end up being expensive if
-/// you construct them for each item in your list.
+/// Compiles the pattern once, allocates memory for the Smith Waterman matrix,
+/// and reuses the selected SIMD backend across calls. Ideally, only construct
+/// these at most once per list: they're cheap to construct, but end up being
+/// expensive if you construct them for each item in your list.
 ///
 /// Not thread-safe: use one matcher per thread or use external locking
 pub struct frizbee_matcher_t {
@@ -44,7 +44,8 @@ pub struct frizbee_matches_t {
 /// Like `frizbee_match_t` but includes the indices of the chars in the haystack
 /// that matched the needle in reverse order. Match `i` of
 /// `frizbee_match_indices_list_t` owns
-/// `indices[items[i].indices_start .. items[i].indices_start + items[i].indices_len]`
+/// `indices[items[i].indices_start .. items[i].indices_start +
+/// items[i].indices_len]`
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct frizbee_match_indices_t {
@@ -80,9 +81,9 @@ unsafe fn str_from_c<'a>(s: frizbee_str_t) -> &'a str {
     unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(s.ptr.cast(), s.len)) }
 }
 
-/// `frizbee_str_t` usable as a core-matcher haystack. `repr(transparent)` so the
-/// caller's `frizbee_str_t` array can be reinterpreted as `&[haystack_str_t]` and
-/// passed to the core matcher without a per-call copy
+/// `frizbee_str_t` usable as a core-matcher haystack. `repr(transparent)` so
+/// the caller's `frizbee_str_t` array can be reinterpreted as
+/// `&[haystack_str_t]` and passed to the core matcher without a per-call copy
 #[repr(transparent)]
 struct haystack_str_t(frizbee_str_t);
 
@@ -97,8 +98,12 @@ impl AsRef<str> for haystack_str_t {
 // unmodified for the duration of the call
 unsafe impl Sync for haystack_str_t {}
 
-/// SAFETY: the caller promises `haystacks` points to `len` valid `frizbee_str_t`
-unsafe fn haystacks_from_c<'a>(haystacks: *const frizbee_str_t, len: usize) -> &'a [haystack_str_t] {
+/// SAFETY: the caller promises `haystacks` points to `len` valid
+/// `frizbee_str_t`
+unsafe fn haystacks_from_c<'a>(
+    haystacks: *const frizbee_str_t,
+    len: usize,
+) -> &'a [haystack_str_t] {
     if len == 0 {
         return &[];
     }
@@ -149,8 +154,8 @@ pub unsafe extern "C" fn frizbee_matcher_new(
 ///
 /// Any special character can be escaped with a backslash, e.g. `\!foo` or
 /// `foo\$` match the literal leading/trailing character, and `foo\ bar` matches
-/// the literal space. Atoms with an empty needle, e.g. `!` or `^$`, are dropped.
-/// Otherwise identical to `frizbee_matcher_new`
+/// the literal space. Atoms with an empty needle, e.g. `!` or `^$`, are
+/// dropped. Otherwise identical to `frizbee_matcher_new`
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn frizbee_matcher_from_query(
     query: frizbee_str_t,
@@ -171,8 +176,8 @@ pub unsafe extern "C" fn frizbee_matcher_free(matcher: *mut frizbee_matcher_t) {
 }
 
 /// Matches `haystacks_len` haystacks against the matcher's pattern, returning
-/// the matches ordered by the config's sort strategy. This API provides the most
-/// performant path when matching on lists. The result is owned by frizbee:
+/// the matches ordered by the config's sort strategy. This API provides the
+/// most performant path when matching on lists. The result is owned by frizbee:
 /// release it with `frizbee_matches_free`
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn frizbee_match_list(
@@ -219,9 +224,9 @@ pub unsafe extern "C" fn frizbee_matches_free(matches: *mut frizbee_matches_t) {
 /// Matches a single haystack, returning whether it matched and writing the
 /// match to `out` only when it did (`*out` is untouched otherwise).
 ///
-/// This API performs ~10% slower than the `frizbee_match_list` API. Consider using
-/// `frizbee_match_list` if you have more than one haystack to match, as it performs
-/// significantly better.
+/// This API performs ~10% slower than the `frizbee_match_list` API. Consider
+/// using `frizbee_match_list` if you have more than one haystack to match, as
+/// it performs significantly better.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn frizbee_match_one(
     matcher: *mut frizbee_matcher_t,
@@ -242,8 +247,8 @@ pub unsafe extern "C" fn frizbee_match_one(
 
 /// Like `frizbee_match_list`, but each match includes the indices of the chars
 /// in the haystack that matched the needle (see `frizbee_match_indices_t` for
-/// the layout). This API has not been optimized for performance, and should only
-/// be used on small lists, e.g. the visible portion of results. Useful for
+/// the layout). This API has not been optimized for performance, and should
+/// only be used on small lists, e.g. the visible portion of results. Useful for
 /// displaying matched indices in the UI. The result is owned by frizbee:
 /// release it with `frizbee_match_indices_list_free`
 #[unsafe(no_mangle)]

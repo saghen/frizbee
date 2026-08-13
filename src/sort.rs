@@ -2,7 +2,8 @@ use crate::Match;
 use alloc::vec;
 
 /// Sorts a slice of [`Match`] values in-place by descending `score` using a
-/// stable radix sort. This assumes that the matches are already sorted by index.
+/// stable radix sort. This assumes that the matches are already sorted by
+/// index.
 #[inline]
 pub fn radix_sort_matches(matches: &mut [Match]) {
     // pass 1

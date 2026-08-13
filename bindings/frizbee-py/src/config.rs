@@ -1,6 +1,3 @@
-//! Config at the boundary: the enum <-> string literal mappings, the `Scoring`
-//! class, and the config kwargs shared by every `Matcher` constructor.
-
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 
@@ -58,11 +55,11 @@ str_enum!(parse_sort, sort_to_str, SortStrategy, "sort", {
     "index_desc" => SortStrategy::IndexDesc,
 });
 
-/// Controls the scoring used by the smith waterman algorithm, mirroring the core
-/// defaults when a field is omitted. You may tweak these but pay close attention
-/// to the documentation for each property, as small changes can lead to poor
-/// matching. Fields are exposed as read-only attributes via `get_all` (like
-/// `PyMatch`)
+/// Controls the scoring used by the smith waterman algorithm, mirroring the
+/// core defaults when a field is omitted. You may tweak these but pay close
+/// attention to the documentation for each property, as small changes can lead
+/// to poor matching. Fields are exposed as read-only attributes via `get_all`
+/// (like `PyMatch`)
 #[pyclass(
     name = "Scoring",
     frozen,
@@ -81,7 +78,8 @@ pub(crate) struct PyScoring {
     gap_open_penalty: u16,
     /// Penalty for extending a gap (deletion/insertion)
     gap_extend_penalty: u16,
-    /// Bonus for matching the first character of the haystack (e.g. "h" on "hello_world")
+    /// Bonus for matching the first character of the haystack (e.g. "h" on
+    /// "hello_world")
     prefix_bonus: u16,
     /// Bonus for matching a capital letter after a lowercase letter
     /// (e.g. "b" on "fooBar" will receive a bonus on "B")
@@ -89,10 +87,11 @@ pub(crate) struct PyScoring {
     /// Bonus for matching the case of the needle (e.g. "WorLd" on "WoRld" will
     /// receive a bonus on "W", "o", "d")
     matching_case_bonus: u16,
-    /// Bonus for matching the exact needle (e.g. "foo" on "foo" will receive the bonus)
+    /// Bonus for matching the exact needle (e.g. "foo" on "foo" will receive
+    /// the bonus)
     exact_match_bonus: u16,
-    /// Bonus for matching _after_ a delimiter character (e.g. "hw" on "hello_world"
-    /// will give a bonus on "w")
+    /// Bonus for matching _after_ a delimiter character (e.g. "hw" on
+    /// "hello_world" will give a bonus on "w")
     delimiter_bonus: u16,
 }
 
@@ -178,8 +177,8 @@ impl PyScoring {
     }
 }
 
-/// Builds a core config from the kwargs shared by every `Matcher` constructor;
-/// omitted kwargs fall back to the core defaults
+/// Builds a core config from the kwargs shared by every `Matcher` constructor
+/// Omitted kwargs fall back to the core defaults
 pub(crate) fn build_config(
     max_typos: Option<u16>,
     casing: Option<&str>,

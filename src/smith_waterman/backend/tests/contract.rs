@@ -245,8 +245,8 @@ fn check_backend_contract<B: Backend>() {
     check_score_shift_right_padded::<B>();
 }
 
-/// Generate a `#[test]` that runs against `$backend` (skipping it when the CPU lacks
-/// the required features), plus any backend-specific extra checks
+/// Generate a `#[test]` that runs against `$backend` (skipping it when the CPU
+/// lacks the required features), plus any backend-specific extra checks
 macro_rules! backend_contract_tests {
     ($name:ident, $backend:ty $(, $extra:ident)*) => {
         #[test]

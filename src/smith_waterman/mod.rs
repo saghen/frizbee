@@ -46,7 +46,10 @@
 //! final:       [8   7   24  19]
 //! ```
 //!
-//! Frizbee previously used inter-sequence parallelism (one needle, $LANES haystacks) but this performed about the same as sequential layout due to requiring interleaving the haystacks and bucketing based on haystack length, while performing worse in parallel due to the required bucketing.
+//! Frizbee previously used inter-sequence parallelism (one needle, $LANES
+//! haystacks) but this performed about the same as sequential layout due to
+//! requiring interleaving the haystacks and bucketing based on haystack length,
+//! while performing worse in parallel due to the required bucketing.
 
 use crate::{Scoring, prefilter::UnicodeChar};
 use alloc::{string::String, vec::Vec};
@@ -95,9 +98,10 @@ pub type SmithWatermanScalar = SmithWaterman<BackendScalar8>;
 #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
 pub type SmithWatermanScalarU8 = SmithWaterman<BackendScalar16U8>;
 
-/// Returns true if every possible Smith-Waterman matrix cell value for this needle length and
-/// scoring config fits in a u8. The u8 backends are otherwise identical to the u16 backends but
-/// with double the lane count (64 cells/chunk on AVX-512, 32 on AVX2, 16 on SSE/NEON).
+/// Returns true if every possible Smith-Waterman matrix cell value for this
+/// needle length and scoring config fits in a u8. The u8 backends are otherwise
+/// identical to the u16 backends but with double the lane count (64 cells/chunk
+/// on AVX-512, 32 on AVX2, 16 on SSE/NEON).
 #[inline]
 pub(crate) fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
     let max_constant = (scoring.match_score as usize + scoring.mismatch_penalty as usize)

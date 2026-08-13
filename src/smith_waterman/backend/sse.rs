@@ -5,7 +5,8 @@ use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
 
 use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
-/// 8-lane u16 scoring (128-bit __mm128i), 8-lane u8 input (low half of __m128i).
+/// 8-lane u16 scoring (128-bit __mm128i)
+/// 8-lane u8 input (low half of __m128i)
 #[derive(Debug, Clone, Copy)]
 pub struct BackendSSE;
 

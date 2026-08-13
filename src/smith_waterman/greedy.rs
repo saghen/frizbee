@@ -1,6 +1,6 @@
 //! Greedy fallback fuzzy matching algorithm, which doesn't use Smith Waterman
-//! to find the optimal alignment. Runs in linear time and used for when the Smith Waterman matrix
-//! would balloon in size (due to being N * M)
+//! to find the optimal alignment. Runs in linear time and used for when the
+//! Smith Waterman matrix would balloon in size (due to being N * M)
 
 use crate::{Scoring, prefilter::case_needle};
 use alloc::{vec, vec::Vec};
@@ -156,7 +156,8 @@ mod tests {
 
     #[test]
     fn huge_gap_saturates_instead_of_overflowing() {
-        // the gap penalty exceeds u16::MAX, so the score saturates to 0 before the case bonus
+        // the gap penalty exceeds u16::MAX, so the score saturates to 0 before the case
+        // bonus
         let haystack = format!("a{}b", "x".repeat(70000));
         assert_eq!(get_score("ab", &haystack), MATCHING_CASE_BONUS);
     }

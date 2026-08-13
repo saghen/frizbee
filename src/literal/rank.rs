@@ -262,10 +262,12 @@ pub(super) const RANK: [u8; 256] = [
     255, // 'ÿ'
 ];
 
-/// Picks the byte offsets of the two rarest bytes in `needle` (lowest [`RANK`], i.e. least likely to
-/// appear in a haystack), returning them ordered as `(lower, higher)`. The two offsets always differ
-/// and, when possible, point at two distinct byte values, maximizing the selectivity of the
-/// two-byte substring prefilter. Mirrors the heuristic in memchr's `packedpair`.
+/// Picks the byte offsets of the two rarest bytes in `needle` (lowest [`RANK`],
+/// i.e. least likely to appear in a haystack), returning them ordered as
+/// `(lower, higher)`. The two offsets always differ and, when possible, point
+/// at two distinct byte values, maximizing the selectivity of the
+/// two-byte substring prefilter. Mirrors the heuristic in memchr's
+/// `packedpair`.
 ///
 /// Requires `needle.len() >= 2`.
 pub(super) fn rare_byte_offsets(needle: &[u8]) -> (usize, usize) {
@@ -276,7 +278,8 @@ pub(super) fn rare_byte_offsets(needle: &[u8]) -> (usize, usize) {
 
     let rank = |byte: u8| RANK[byte as usize];
 
-    // Seed the search with the first two bytes, keeping the rarer of the two as `rare1`.
+    // Seed the search with the first two bytes, keeping the rarer of the two as
+    // `rare1`.
     let (mut rare1, mut offset1) = (needle[0], 0usize);
     let (mut rare2, mut offset2) = (needle[1], 1usize);
     if rank(rare2) < rank(rare1) {
@@ -319,7 +322,8 @@ mod tests {
 
     #[test]
     fn prefers_rarer_bytes_over_position() {
-        // 'z' is far rarer than 'a', so it must be chosen even though it is neither first nor last.
+        // 'z' is far rarer than 'a', so it must be chosen even though it is neither
+        // first nor last.
         assert!(RANK[b'z' as usize] < RANK[b'a' as usize]);
         let (a, b) = rare_byte_offsets(b"aazaa");
         assert!(

@@ -28,7 +28,8 @@ pub enum frizbee_case_matching_t {
 pub enum frizbee_unicode_matching_t {
     /// Always match against bytes directly
     FRIZBEE_UNICODE_IGNORE = 0,
-    /// Ignore unicode unless the needle contains a multi-byte unicode char (default)
+    /// Ignore unicode unless the needle contains a multi-byte unicode char
+    /// (default)
     FRIZBEE_UNICODE_SMART,
     /// Always use expensive unicode Smith Waterman for correctness across
     /// multi-byte unicode chars in the haystack
@@ -37,17 +38,21 @@ pub enum frizbee_unicode_matching_t {
 
 /// Selects the matching algorithm
 ///
-/// `FRIZBEE_MATCHING_FUZZY` uses the Smith-Waterman algorithm with typos, gaps and substitutions (default)
-/// `FRIZBEE_MATCHING_EXACT` matches the haystack exactly
-/// `FRIZBEE_MATCHING_PREFIX` matches the haystack if it starts with the needle
-/// `FRIZBEE_MATCHING_SUFFIX` matches the haystack if it ends with the needle
-/// `FRIZBEE_MATCHING_SUBSTRING` matches the haystack if it contains the needle
+/// - `FRIZBEE_MATCHING_FUZZY` (default) uses the Smith-Waterman algorithm with
+///   typos, gaps and substitutions
+/// - `FRIZBEE_MATCHING_EXACT` matches the haystack exactly
+/// - `FRIZBEE_MATCHING_PREFIX` matches the haystack if it starts with the
+///   needle
+/// - `FRIZBEE_MATCHING_SUFFIX` matches the haystack if it ends with the needle
+/// - `FRIZBEE_MATCHING_SUBSTRING` matches the haystack if it contains the
+///   needle
 ///
 /// Only the `FRIZBEE_MATCHING_FUZZY` mode supports typos
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum frizbee_matching_t {
-    /// Smith-Waterman fuzzy matching with typos, gaps and substitutions (default)
+    /// Smith-Waterman fuzzy matching with typos, gaps and substitutions
+    /// (default)
     FRIZBEE_MATCHING_FUZZY = 0,
     /// The haystack must equal the needle
     FRIZBEE_MATCHING_EXACT,
@@ -55,8 +60,9 @@ pub enum frizbee_matching_t {
     FRIZBEE_MATCHING_PREFIX,
     /// The haystack must end with the needle
     FRIZBEE_MATCHING_SUFFIX,
-    /// The needle must appear somewhere in the haystack. When it appears more than
-    /// once, the highest-scoring occurrence is used, preferring earlier matches on tie
+    /// The needle must appear somewhere in the haystack. When it appears more
+    /// than once, the highest-scoring occurrence is used, preferring
+    /// earlier matches on tie
     FRIZBEE_MATCHING_SUBSTRING,
 }
 
@@ -73,9 +79,9 @@ pub enum frizbee_sort_strategy_t {
     FRIZBEE_SORT_INDEX_DESC,
 }
 
-/// Controls the scoring used by the smith waterman algorithm. You may tweak these but pay
-/// close attention to the documentation for each property, as small changes can lead to
-/// poor matching.
+/// Controls the scoring used by the smith waterman algorithm. You may tweak
+/// these but pay close attention to the documentation for each property, as
+/// small changes can lead to poor matching.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct frizbee_scoring_t {
@@ -88,7 +94,8 @@ pub struct frizbee_scoring_t {
     /// Penalty for extending a gap (deletion/insertion)
     pub gap_extend_penalty: u16,
 
-    /// Bonus for matching the first character of the haystack (e.g. "h" on "hello_world")
+    /// Bonus for matching the first character of the haystack (e.g. "h" on
+    /// "hello_world")
     pub prefix_bonus: u16,
     /// Bonus for matching a capital letter after a lowercase letter
     /// (e.g. "b" on "fooBar" will receive a bonus on "B")
@@ -96,10 +103,11 @@ pub struct frizbee_scoring_t {
     /// Bonus for matching the case of the needle (e.g. "WorLd" on "WoRld" will
     /// receive a bonus on "W", "o", "d")
     pub matching_case_bonus: u16,
-    /// Bonus for matching the exact needle (e.g. "foo" on "foo" will receive the bonus)
+    /// Bonus for matching the exact needle (e.g. "foo" on "foo" will receive
+    /// the bonus)
     pub exact_match_bonus: u16,
-    /// Bonus for matching _after_ a delimiter character (e.g. "hw" on "hello_world"
-    /// will give a bonus on "w")
+    /// Bonus for matching _after_ a delimiter character (e.g. "hw" on
+    /// "hello_world" will give a bonus on "w")
     pub delimiter_bonus: u16,
 }
 
@@ -120,13 +128,13 @@ pub struct frizbee_config_t {
     pub casing: i32,
     /// Controls how unicode is handled while matching
     ///
-    /// One of the `frizbee_unicode_matching_t` values. Anything else falls back to
-    /// `FRIZBEE_UNICODE_SMART`.
+    /// One of the `frizbee_unicode_matching_t` values. Anything else falls back
+    /// to `FRIZBEE_UNICODE_SMART`.
     pub unicode: i32,
-    /// Selects the matching algorithm: fuzzy (Smith-Waterman) or one of the literal
-    /// modes (exact, prefix, suffix, substring). Literal modes require the needle to
-    /// appear as a contiguous run of characters and do not support typos
-    /// (`max_typos` is ignored).
+    /// Selects the matching algorithm: fuzzy (Smith-Waterman) or one of the
+    /// literal modes (exact, prefix, suffix, substring). Literal modes
+    /// require the needle to appear as a contiguous run of characters and
+    /// do not support typos (`max_typos` is ignored).
     ///
     /// One of the `frizbee_matching_t` values. Anything else falls back to
     /// `FRIZBEE_MATCHING_FUZZY`.
@@ -136,15 +144,16 @@ pub struct frizbee_config_t {
     /// One of the `frizbee_sort_strategy_t` values. Anything else falls back to
     /// `FRIZBEE_SORT_SCORE_THEN_INDEX_ASC`.
     pub sort: i32,
-    /// Controls the scoring used by the smith waterman algorithm. You may tweak these but pay
-    /// close attention to the documentation for each property, as small changes can lead to
-    /// poor matching.
+    /// Controls the scoring used by the smith waterman algorithm. You may tweak
+    /// these but pay close attention to the documentation for each
+    /// property, as small changes can lead to poor matching.
     pub scoring: frizbee_scoring_t,
 }
 
 /// Generates the private `*_to_core`/`*_from_core` conversions for enums
 ///
-/// Out-of-range values fall back to the core default rather than being undefined behavior
+/// Out-of-range values fall back to the core default rather than being
+/// undefined behavior
 macro_rules! convert_enum {
     ($c:ident => $core:ident, $to_core:ident, $from_core:ident,
      { $($c_variant:ident => $core_variant:ident),+ $(,)? }) => {

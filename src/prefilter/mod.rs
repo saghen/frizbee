@@ -1,6 +1,6 @@
-//! Fast prefiltering algorithms, which run before Smith Waterman since in the typical case,
-//! a small percentage of the haystack will match the needle. Automatically used by the Matcher
-//! and match_list APIs.
+//! Fast prefiltering algorithms, which run before Smith Waterman since in the
+//! typical case, a small percentage of the haystack will match the needle.
+//! Automatically used by the Matcher and match_list APIs.
 //!
 //! The ASCII prefilter proves that an ordered alignment exists after deleting
 //! at most `max_typos` needle bytes. The Unicode typo paths use UTF-8 scalar
@@ -65,10 +65,11 @@ pub(crate) fn case_needle(needle: &[u8], case_sensitive: bool) -> Vec<(u8, u8)> 
         .collect()
 }
 
-/// Returns a vector of pairs of Unicode characters, where the first is the original and the second
-/// is the opposite case. When the case flipping results in multiple characters, the case flipped version
-/// is ignored. This happens in extremely rare cases, with by far the most common case being
-/// the German `ß` -> `SS`.
+/// Returns a vector of pairs of Unicode characters, where the first is the
+/// original and the second is the opposite case. When the case flipping results
+/// in multiple characters, the case flipped version is ignored. This happens in
+/// extremely rare cases, with by far the most common case being the German `ß`
+/// -> `SS`.
 pub(crate) fn case_needle_unicode(needle: &str, case_sensitive: bool) -> Vec<UnicodeChar> {
     needle
         .chars()
@@ -317,7 +318,8 @@ mod tests {
 
     #[test]
     fn unicode_prefilter_decoy_last_byte_does_not_hide_case_flipped_match() {
-        // '٩' (0xD9 0xA9) shares 'é''s (0xC3 0xA9) last byte, while 'É' only matches case flipped
+        // '٩' (0xD9 0xA9) shares 'é''s (0xC3 0xA9) last byte, while 'É' only matches
+        // case flipped
         assert_eq!("٩".as_bytes()[1], "é".as_bytes()[1]);
         assert_eq!(unicode_result_generic("é", "٩É", false), (true, 2, 4));
         assert!(!unicode_result_generic("é", "٩É", true).0);

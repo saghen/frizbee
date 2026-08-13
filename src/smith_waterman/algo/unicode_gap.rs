@@ -1,9 +1,9 @@
-//! With the default gap propagation, `hw` matched against `h😀w` will receive a penalty
-//! to the score of `gap_open_penalty + gap_extend_penalty * 4` due to the emoji taking
-//! up 4 bytes. If the haystack was instead `hew`, the penalty would be
-//! `gap_open_penalty + gap_extend_penalty`. As a result, we need to be aware of the unicode
-//! boundaries and only apply the gap penalty when reaching the end of a multi-byte
-//! codepoint.
+//! With the default gap propagation, `hw` matched against `h😀w` will receive a
+//! penalty to the score of `gap_open_penalty + gap_extend_penalty * 4` due to
+//! the emoji taking up 4 bytes. If the haystack was instead `hew`, the penalty
+//! would be `gap_open_penalty + gap_extend_penalty`. As a result, we need to be
+//! aware of the unicode boundaries and only apply the gap penalty when reaching
+//! the end of a multi-byte codepoint.
 //!
 //! Each row becomes a single needle char (multi-byte utf-8 codepoint)
 //! Haystack stays as bytes
@@ -18,8 +18,8 @@
 //! \u 0  0  0  0  0  11  10  9   25
 //! ```
 //!
-//! We can solve the issue by keeping track of the continuation bytes as we apply the
-//! gap propagation.
+//! We can solve the issue by keeping track of the continuation bytes as we
+//! apply the gap propagation.
 //!
 //! ```text
 //! input:

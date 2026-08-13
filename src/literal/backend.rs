@@ -1,6 +1,7 @@
 //! Target-feature-specific instantiations of the literal matcher, mirroring
-//! `src/matcher/backend.rs`. Each backend attaches its `#[target_feature]` to the [`Specialized`]
-//! methods, which forward to the `#[inline(always)]` helpers on [`LiteralImpl`].
+//! `src/matcher/backend.rs`. Each backend attaches its `#[target_feature]` to
+//! the [`Specialized`] methods, which forward to the `#[inline(always)]`
+//! helpers on [`LiteralImpl`].
 
 use super::algo::LiteralImpl;
 use crate::matcher::algo::Specialized;
@@ -29,8 +30,9 @@ pub(crate) type LiteralWasm = LiteralImpl<PrefilterWasmBackend>;
 #[cfg(any(test, not(all(target_arch = "wasm32", target_feature = "simd128"))))]
 pub(crate) type LiteralScalar = LiteralImpl<PrefilterScalarBackend>;
 
-/// Implements [`Specialized`] for one literal backend. `TYPOS` is ignored (literal matching has no
-/// typo tolerance); `UNICODE` selects the byte-level ASCII path or the per-codepoint unicode path.
+/// Implements [`Specialized`] for one literal backend. `TYPOS` is ignored
+/// (literal matching has no typo tolerance); `UNICODE` selects the byte-level
+/// ASCII path or the per-codepoint unicode path.
 macro_rules! impl_specialized_literal {
     ($backend:ty $(, target_feature = $feature:literal)?) => {
         impl Specialized for LiteralImpl<$backend> {
@@ -102,10 +104,11 @@ mod backend_parity {
     use crate::matcher::algo::Specialized;
     use crate::{Config, Matching, SortStrategy};
 
-    /// Runs one needle/haystack through a specialized literal backend, returning the observable
-    /// result of both `match_one` and `match_one_indices`. `UNICODE` is chosen the same way the real
-    /// dispatch chooses it (`respects_unicode_for`), so non-ASCII needles exercise the codepoint
-    /// path on every backend.
+    /// Runs one needle/haystack through a specialized literal backend,
+    /// returning the observable result of both `match_one` and
+    /// `match_one_indices`. `UNICODE` is chosen the same way the real
+    /// dispatch chooses it (`respects_unicode_for`), so non-ASCII needles
+    /// exercise the codepoint path on every backend.
     #[allow(clippy::type_complexity)]
     unsafe fn probe<T: Specialized>(
         needle: &str,
@@ -154,7 +157,8 @@ mod backend_parity {
             ("ba", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaba"),
             ("foobar", "foobatefoobarfoobar"),
             // Unicode codepoint path with case folding: mixed-case occurrences, script mixes, and
-            // the Cherokee hybrid (E1 8E A0 / EA AD B0) that per-byte matching would wrongly accept.
+            // the Cherokee hybrid (E1 8E A0 / EA AD B0) that per-byte matching would wrongly
+            // accept.
             ("é", "xÉyéZÉ"),
             ("café", "un CAFÉ, deux cafés"),
             ("Ꭰ", "\u{1b70}Ꭰꭰ\u{1b70}"),

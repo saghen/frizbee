@@ -43,8 +43,8 @@ impl Display for HaystackGenerationOptions {
 }
 
 /// Generates a dataset matching the specified criteria.
-/// NOTE: The length of the generated strings may not match the median if the needle
-/// is close to or longer than the median length.
+/// NOTE: The length of the generated strings may not match the median if the
+/// needle is close to or longer than the median length.
 pub fn generate_haystack(needle: &str, options: HaystackGenerationOptions) -> Vec<String> {
     let mut rng = StdRng::seed_from_u64(options.seed);
 
@@ -128,7 +128,8 @@ pub fn generate_haystack(needle: &str, options: HaystackGenerationOptions) -> Ve
         .collect::<Vec<String>>()
 }
 
-/// Generates a vector of unique indices from 0 to `y` with a maximum of `x` unique indices.
+/// Generates a vector of unique indices from 0 to `y` with a maximum of `x`
+/// unique indices.
 fn generate_unique_indices(x: usize, y: usize, rng: &mut StdRng) -> Vec<usize> {
     assert!(
         x <= y,

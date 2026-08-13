@@ -74,7 +74,8 @@ pub(crate) struct PyMatchIndices {
     index: u32,
     /// Matched the needle exactly (e.g. "foo" on "foo")
     exact: bool,
-    /// Indices of the chars in the haystack that matched the needle in reverse order
+    /// Indices of the chars in the haystack that matched the needle in reverse
+    /// order
     indices: Vec<u32>,
 }
 
@@ -102,11 +103,11 @@ impl From<frizbee::MatchIndices> for PyMatchIndices {
     }
 }
 
-/// Primary entrypoint for fuzzy matching. Compiles the pattern(s) once, allocates
-/// memory for the Smith Waterman matrix, and reuses the selected SIMD backend.
-/// Ideally, only construct these at most once per list: they're cheap to
-/// construct, but end up being expensive if you construct them for each item in
-/// your list
+/// Primary entrypoint for fuzzy matching. Compiles the pattern(s) once,
+/// allocates memory for the Smith Waterman matrix, and reuses the selected SIMD
+/// backend. Ideally, only construct these at most once per list: they're cheap
+/// to construct, but end up being expensive if you construct them for each item
+/// in your list
 #[pyclass(name = "Matcher", module = "frizbee")]
 pub(crate) struct PyMatcher {
     // Boxed: the compiled SIMD backends require 64-byte alignment (AVX-512
@@ -130,7 +131,8 @@ impl PyMatcher {
     // The config kwargs are repeated verbatim on `__init__`, `from_query`,
     // `from_patterns` and `set_config` (pyo3 disallows macro-generated methods in
     // `#[pymethods]`). `max_typos` defaults to the core `Config::default()` value
-    // (0); passing `None` means unlimited. `max_items` defaults to `None` (unlimited)
+    // (0); passing `None` means unlimited. `max_items` defaults to `None`
+    // (unlimited)
 
     /// Creates a matcher from a single pattern (str or Pattern). Strings match
     /// literally; use `from_query` for query syntax and `from_patterns` for
@@ -194,8 +196,8 @@ impl PyMatcher {
     }
 
     /// Creates a matcher from a list of patterns (str or Pattern), matched
-    /// independently. A haystack matches when all of the patterns match, where the
-    /// score is the sum of each pattern's score
+    /// independently. A haystack matches when all of the patterns match, where
+    /// the score is the sum of each pattern's score
     #[classmethod]
     #[pyo3(signature = (patterns, *, max_typos = frizbee::Config::default().max_typos,
         max_items = None, casing = None, unicode = None, matching = None, sort = None,
@@ -221,9 +223,9 @@ impl PyMatcher {
     }
 
     /// Matches a list of haystacks, returning the matches ordered by the sort
-    /// strategy. This API provides the most performant path when matching on lists.
-    /// Pass a [`PyHaystacks`] to release the GIL while matching; plain iterables
-    /// are borrowed zero-copy under the GIL
+    /// strategy. This API provides the most performant path when matching on
+    /// lists. Pass a [`PyHaystacks`] to release the GIL while matching;
+    /// plain iterables are borrowed zero-copy under the GIL
     fn match_list(
         &mut self,
         py: Python<'_>,
@@ -244,8 +246,8 @@ impl PyMatcher {
     /// Like `match_list` but matched in parallel on multiple real threads
     /// (0 = available CPU cores - 2). Threads work on 2048 item chunks, and the
     /// final result is identical to `match_list`. The GIL is released while
-    /// matching; plain iterables are first copied into a temporary arena under the
-    /// GIL, which passing a [`PyHaystacks`] skips
+    /// matching; plain iterables are first copied into a temporary arena under
+    /// the GIL, which passing a [`PyHaystacks`] skips
     fn match_list_parallel(
         &mut self,
         py: Python<'_>,
@@ -268,10 +270,11 @@ impl PyMatcher {
         Ok(matches.into_iter().map(Into::into).collect())
     }
 
-    /// Like `match_list` but each match includes the indices of the chars in the
-    /// haystack that matched the needle. This API has not been optimized for
-    /// performance, and should only be used on small lists, e.g. the visible
-    /// portion of the results. Useful for displaying matched indices in the UI
+    /// Like `match_list` but each match includes the indices of the chars in
+    /// the haystack that matched the needle. This API has not been
+    /// optimized for performance, and should only be used on small lists,
+    /// e.g. the visible portion of the results. Useful for displaying
+    /// matched indices in the UI
     fn match_list_indices(
         &mut self,
         haystacks: &Bound<'_, PyAny>,
@@ -285,16 +288,17 @@ impl PyMatcher {
         Ok(matches.into_iter().map(Into::into).collect())
     }
 
-    /// Matches a single haystack, returning its match (with `index` echoed back) if
-    /// it passes. This API performs ~10% slower than the `match_list` API. Consider
-    /// using `match_list` if you have more than one haystack to match, as it
-    /// performs significantly better
+    /// Matches a single haystack, returning its match (with `index` echoed
+    /// back) if it passes. This API performs ~10% slower than the
+    /// `match_list` API. Consider using `match_list` if you have more than
+    /// one haystack to match, as it performs significantly better
     fn match_one(&mut self, haystack: &str, index: u32) -> Option<PyMatch> {
         self.inner.match_one(haystack, index).map(Into::into)
     }
 
-    /// Like `match_one` but includes the indices of the chars in the haystack that
-    /// matched the needle. Useful for displaying matched indices in the UI
+    /// Like `match_one` but includes the indices of the chars in the haystack
+    /// that matched the needle. Useful for displaying matched indices in
+    /// the UI
     fn match_one_indices(&mut self, haystack: &str, index: u32) -> Option<PyMatchIndices> {
         self.inner
             .match_one_indices(haystack, index)
@@ -307,16 +311,16 @@ impl PyMatcher {
         self.inner.set_pattern(frizbee::Pattern::from(pattern));
     }
 
-    /// Updates the patterns (str or Pattern items), keeping the config. Skipped if
-    /// the patterns are the same as the previous ones
+    /// Updates the patterns (str or Pattern items), keeping the config. Skipped
+    /// if the patterns are the same as the previous ones
     fn set_patterns(&mut self, patterns: Vec<PatternArg>) {
         let patterns: Vec<frizbee::Pattern> = patterns.into_iter().map(Into::into).collect();
         self.inner.set_patterns(&patterns);
     }
 
-    /// Updates the config, rebuilding it from the kwargs; omitted kwargs reset to
-    /// their defaults (this is not a merge with the current config). Skipped if the
-    /// config is the same as the previous one
+    /// Updates the config, rebuilding it from the kwargs; omitted kwargs reset
+    /// to their defaults (this is not a merge with the current config).
+    /// Skipped if the config is the same as the previous one
     #[pyo3(signature = (*, max_typos = frizbee::Config::default().max_typos, max_items = None,
         casing = None, unicode = None, matching = None, sort = None, scoring = None))]
     #[allow(clippy::too_many_arguments)]

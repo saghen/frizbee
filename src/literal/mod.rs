@@ -1,8 +1,9 @@
 //! Literal matching: exact / prefix / suffix / substring
 //!
-//! Unlike the fuzzy [`crate::matcher`], literal matching requires the needle to appear as a
-//! *contiguous* run of characters. The only step that benefits from SIMD is finding *where*
-//! the needle occurs (substring search), which reuses [`crate::prefilter::backend::Backend`].
+//! Unlike the fuzzy [`crate::matcher`], literal matching requires the needle to
+//! appear as a *contiguous* run of characters. The only step that benefits from
+//! SIMD is finding *where* the needle occurs (substring search), which reuses
+//! [`crate::prefilter::backend::Backend`].
 //!
 //! All of the implementations ignore the `max_typos` parameter for now.
 
@@ -33,13 +34,15 @@ mod tests {
             .collect()
     }
 
-    /// Score of the best-scoring substring occurrence of `needle` in `haystack`. Panics when the
-    /// needle is absent, since the scoring tests always use a present needle.
+    /// Score of the best-scoring substring occurrence of `needle` in
+    /// `haystack`. Panics when the needle is absent, since the scoring
+    /// tests always use a present needle.
     fn get_score(needle: &str, haystack: &str) -> u16 {
         get_score_case(needle, haystack, CaseMatching::Ignore).expect("needle should be present")
     }
 
-    /// Best-scoring substring occurrence under the given casing, or `None` when the needle is absent.
+    /// Best-scoring substring occurrence under the given casing, or `None` when
+    /// the needle is absent.
     fn get_score_case(needle: &str, haystack: &str, casing: CaseMatching) -> Option<u16> {
         let config = Config::default()
             .matching(Matching::Substring)
@@ -55,7 +58,8 @@ mod tests {
     fn exact_matches_whole_haystack_only() {
         let haystacks = ["foo", "foobar", "xfoo", "FOO"];
         let got = scores(Matching::Exact, "foo", &haystacks);
-        // "foo" (exact, case match) and "FOO" (exact, case-insensitive) match; nothing else.
+        // "foo" (exact, case match) and "FOO" (exact, case-insensitive) match; nothing
+        // else.
         assert_eq!(got.iter().map(|m| m.0).collect::<Vec<_>>(), vec![0, 3]);
         assert!(got.iter().all(|m| m.2), "all exact");
     }
@@ -127,8 +131,8 @@ mod tests {
 
     #[test]
     fn substring_picks_best_scoring_occurrence() {
-        // In "ab_ab" the position-0 occurrence (prefix bonus) must beat the one after '_'
-        // (delimiter bonus).
+        // In "ab_ab" the position-0 occurrence (prefix bonus) must beat the one after
+        // '_' (delimiter bonus).
         assert_eq!(get_score("ab", "ab_ab"), 2 * CHAR_SCORE + PREFIX_BONUS);
     }
 
@@ -200,9 +204,10 @@ mod tests {
         }
     }
 
-    // The tests below mirror the Smith-Waterman scoring suite (`src/smith_waterman/mod.rs`),
-    // adapted to literal matching: matches are contiguous (so the gap/affine/typo cases do not
-    // apply) and the exact-match bonus is included when the run spans the whole haystack.
+    // The tests below mirror the Smith-Waterman scoring suite
+    // (`src/smith_waterman/mod.rs`), adapted to literal matching: matches are
+    // contiguous (so the gap/affine/typo cases do not apply) and the
+    // exact-match bonus is included when the run spans the whole haystack.
 
     #[test]
     fn test_score_basic() {
@@ -219,8 +224,8 @@ mod tests {
 
     #[test]
     fn test_score_exact_match() {
-        // Unlike the raw Smith-Waterman scorer, the literal scorer adds the exact-match bonus when
-        // the run covers the whole haystack.
+        // Unlike the raw Smith-Waterman scorer, the literal scorer adds the exact-match
+        // bonus when the run covers the whole haystack.
         assert_eq!(
             get_score("a", "a"),
             CHAR_SCORE + PREFIX_BONUS + EXACT_MATCH_BONUS
@@ -288,8 +293,9 @@ mod tests {
         );
     }
 
-    // Unicode matching: a non-ASCII needle takes the per-codepoint path. Multibyte characters are
-    // scored once (not once per UTF-8 byte) and case folding compares whole codepoints.
+    // Unicode matching: a non-ASCII needle takes the per-codepoint path. Multibyte
+    // characters are scored once (not once per UTF-8 byte) and case folding
+    // compares whole codepoints.
 
     #[test]
     fn test_score_unicode_per_codepoint() {
@@ -298,7 +304,8 @@ mod tests {
             get_score("é", "é"),
             CHAR_SCORE + PREFIX_BONUS + EXACT_MATCH_BONUS
         );
-        // Two codepoints (é is 2 bytes, x is 1) score as two characters, not three bytes.
+        // Two codepoints (é is 2 bytes, x is 1) score as two characters, not three
+        // bytes.
         assert_eq!(
             get_score("éx", "éx"),
             2 * CHAR_SCORE + PREFIX_BONUS + EXACT_MATCH_BONUS
@@ -309,7 +316,8 @@ mod tests {
 
     #[test]
     fn unicode_case_insensitive_fold() {
-        // Whole-codepoint case folding across several scripts (é/É, Cyrillic и/И, Greek α/Α).
+        // Whole-codepoint case folding across several scripts (é/É, Cyrillic и/И, Greek
+        // α/Α).
         for (needle, upper) in [("é", "É"), ("и", "И"), ("α", "Α")] {
             assert!(
                 get_score_case(needle, upper, CaseMatching::Ignore).is_some(),
@@ -327,8 +335,9 @@ mod tests {
     fn unicode_rejects_hybrid_case_bytes() {
         // Cherokee case pairs are the same length but differ in every byte:
         //   'Ꭰ' U+13A0 = E1 8E A0, 'ꭰ' U+AB70 = EA AD B0.
-        // A per-byte verifier would accept the hybrid E1 AD B0 (= U+1B70 '᭰'); the codepoint
-        // verifier must reject it while still matching the true lowercase form.
+        // A per-byte verifier would accept the hybrid E1 AD B0 (= U+1B70 '᭰'); the
+        // codepoint verifier must reject it while still matching the true
+        // lowercase form.
         assert_eq!(
             get_score_case("Ꭰ", "\u{1b70}", CaseMatching::Ignore),
             None,
@@ -342,8 +351,8 @@ mod tests {
 
     #[test]
     fn unicode_length_changing_fold_is_case_sensitive() {
-        // 'ß' folds to "SS" (a length change), so it is treated case-sensitively: it matches only
-        // itself, never "SS"/"ss".
+        // 'ß' folds to "SS" (a length change), so it is treated case-sensitively: it
+        // matches only itself, never "SS"/"ss".
         assert!(get_score_case("ß", "ß", CaseMatching::Ignore).is_some());
         assert_eq!(get_score_case("ß", "SS", CaseMatching::Ignore), None);
         assert_eq!(get_score_case("ß", "ss", CaseMatching::Ignore), None);

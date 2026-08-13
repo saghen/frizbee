@@ -10,9 +10,10 @@ use crate::sort::radix_sort_matches;
 use crate::{Match, SortStrategy};
 
 impl Matcher {
-    /// Matches a list of haystacks in parallel on multiple real threads, returning a list of
-    /// [`Match`] values. Threads work on 2048 item chunks, and the final result is ordered
-    /// according to [`crate::Config::sort`].
+    /// Matches a list of haystacks in parallel on multiple real threads,
+    /// returning a list of [`Match`] values. Threads work on 2048 item
+    /// chunks, and the final result is ordered according to
+    /// [`crate::Config::sort`].
     ///
     /// If `threads == 0`, the matcher will default to available CPU cores - 2.
     ///

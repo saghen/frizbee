@@ -4,7 +4,8 @@ use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
 
 use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
-/// 32-lane u16 scoring (512-bit __m512i), 32-lane u8 input (low half of __m512i).
+/// 32-lane u16 scoring (512-bit __m512i), 32-lane u8 input (low half of
+/// __m512i).
 #[derive(Debug, Clone, Copy)]
 pub struct BackendAVX512;
 
@@ -530,8 +531,8 @@ unsafe fn shift_right_u16_lanes<const L: i32>(prev: __m512i, cur: __m512i) -> __
         32 => prev,
 
         _ if cfg!(miri) => unsafe {
-            // Miri doesn't support _mm512_permutex2var_epi16, so use a fallback implementation
-            // TODO: add support to Miri
+            // Miri doesn't support _mm512_permutex2var_epi16, so use a fallback
+            // implementation TODO: add support to Miri
             let mut cur_arr = [0u16; 32];
             _mm512_storeu_si512(cur_arr.as_mut_ptr() as *mut __m512i, cur);
 
@@ -582,8 +583,8 @@ unsafe fn shift_right_lanes<const L: i32>(prev: __m512i, cur: __m512i) -> __m512
         32 => unsafe { _mm512_alignr_epi64::<4>(cur, prev) },
 
         _ if cfg!(miri) => unsafe {
-            // Miri doesn't support _mm512_permutex2var_epi16, so use a fallback implementation
-            // TODO: add support to Miri
+            // Miri doesn't support _mm512_permutex2var_epi16, so use a fallback
+            // implementation TODO: add support to Miri
             let mut cur_arr = [0u8; 64];
             _mm512_storeu_si512(cur_arr.as_mut_ptr() as *mut __m512i, cur);
 

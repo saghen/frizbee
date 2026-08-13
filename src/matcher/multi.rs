@@ -79,9 +79,10 @@ impl Matcher {
         Some(combined)
     }
 
-    /// Matches multiple patterns by matching the first non-negated pattern against every
-    /// haystack, then re-matching each remaining pattern against only the haystacks that
-    /// survived the previous patterns. Scores are summed across the non-negated patterns.
+    /// Matches multiple patterns by matching the first non-negated pattern
+    /// against every haystack, then re-matching each remaining pattern
+    /// against only the haystacks that survived the previous patterns.
+    /// Scores are summed across the non-negated patterns.
     pub(super) fn match_list_multi_into<S: AsRef<str>>(
         patterns: &mut [CompiledPattern],
         haystacks: &[S],
@@ -335,8 +336,8 @@ mod tests {
 
     #[test]
     fn pattern_max_typos_override_beats_config() {
-        // "helloz" has a 'z' absent from "hello", so it needs one typo to match. The config
-        // forbids typos, but the pattern raises the budget to one.
+        // "helloz" has a 'z' absent from "hello", so it needs one typo to match. The
+        // config forbids typos, but the pattern raises the budget to one.
         let haystacks = ["hello", "world"];
         let config = Config::default()
             .max_typos(Some(0))
@@ -358,8 +359,9 @@ mod tests {
 
     #[test]
     fn pattern_max_typos_override_applies_per_pattern() {
-        // "foo" inherits the config's zero-typo budget while "barz" (with its absent 'z')
-        // raises its own budget to one. So "foo" must match exactly but "bar" may be a typo off.
+        // "foo" inherits the config's zero-typo budget while "barz" (with its absent
+        // 'z') raises its own budget to one. So "foo" must match exactly but
+        // "bar" may be a typo off.
         let haystacks = ["foo bar", "fox bar"];
         let config = Config::default()
             .max_typos(Some(0))

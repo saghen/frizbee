@@ -1,8 +1,9 @@
-//! Mirrors of the core config types — enums, scoring and config — parsed from plain JS
-//! objects via `js_sys::Reflect`, plus their hand-written TS declarations kept next to
-//! the structs they describe. Hand-rolled instead of serde: the serde/serde-wasm-bindgen
-//! machinery (and the `f64::fmt` float-formatting stack its error paths drag in) costs
-//! ~35 KB of .wasm for what amounts to reading a dozen optional fields.
+//! Mirrors of the core config types — enums, scoring and config — parsed from
+//! plain JS objects via `js_sys::Reflect`, plus their hand-written TS
+//! declarations kept next to the structs they describe. Hand-rolled instead of
+//! serde: the serde/serde-wasm-bindgen machinery (and the `f64::fmt`
+//! float-formatting stack its error paths drag in) costs ~35 KB of .wasm for
+//! what amounts to reading a dozen optional fields.
 
 use js_sys::Reflect;
 use wasm_bindgen::prelude::*;
@@ -88,8 +89,8 @@ extern "C" {
     pub type ScoringObject;
 }
 
-/// Reads `obj[key]`, mapping `undefined`/`null` to `None` (both mean "use the default",
-/// like serde's treatment of `Option`)
+/// Reads `obj[key]`, mapping `undefined`/`null` to `None` (both mean "use the
+/// default", like serde's treatment of `Option`)
 pub(crate) fn get_opt(obj: &JsValue, key: &str) -> Option<JsValue> {
     // Reflect::get only throws when obj is not an object; every caller checks first
     let value = Reflect::get(obj, &JsValue::from_str(key)).unwrap_throw();
@@ -142,8 +143,9 @@ pub(crate) fn opt_object(obj: &JsValue, key: &str) -> Result<Option<JsValue>, Js
         .transpose()
 }
 
-/// Generates a mirror of the same-named core enum with its JS string names, the `From`
-/// conversions in both directions, and string parsing/formatting for the boundary
+/// Generates a mirror of the same-named core enum with its JS string names, the
+/// `From` conversions in both directions, and string parsing/formatting for the
+/// boundary
 macro_rules! mirror_enum {
     ($name:ident { $($variant:ident = $string:literal),+ $(,)? }) => {
         #[doc = concat!("Mirror of [`frizbee::", stringify!($name), "`] crossing the boundary as a string")]
@@ -211,8 +213,8 @@ mirror_enum!(SortStrategy {
     IndexDesc = "indexDesc",
 });
 
-/// Mirror of [`frizbee::Scoring`] with all-optional camelCase fields; missing fields fall
-/// back to the core defaults
+/// Mirror of [`frizbee::Scoring`] with all-optional camelCase fields; missing
+/// fields fall back to the core defaults
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Scoring {
     pub match_score: Option<u16>,
@@ -278,8 +280,8 @@ impl Scoring {
 }
 
 /// `Infinity` means unlimited typos, mirroring core's `max_typos: None`.
-/// The offending value is deliberately not included in the message: formatting an f64
-/// pulls the ~15 KB dragon/grisu float-formatting stack into the binary
+/// The offending value is deliberately not included in the message: formatting
+/// an f64 pulls the ~15 KB dragon/grisu float-formatting stack into the binary
 pub(crate) fn parse_max_typos(value: f64) -> Result<Option<u16>, JsError> {
     if value.is_infinite() && value.is_sign_positive() {
         return Ok(None);
@@ -306,7 +308,8 @@ fn parse_max_items(value: f64) -> Result<Option<u32>, JsError> {
     ))
 }
 
-/// Returns the core config plus the binding-level `maxItems` limit (`None` = unlimited)
+/// Returns the core config plus the binding-level `maxItems` limit (`None` =
+/// unlimited)
 pub(crate) fn config_from_js(
     config: Option<ConfigObject>,
 ) -> Result<(frizbee::Config, Option<u32>), JsError> {
@@ -349,9 +352,10 @@ pub(crate) fn config_from_js(
     Ok((config, max_items))
 }
 
-/// Needle length up to which scores are guaranteed exact for the scoring config (the
-/// core default when omitted). Longer needles still match, but their scores may
-/// saturate at `0xffff`, so items whose true scores are both above the cap tie
+/// Needle length up to which scores are guaranteed exact for the scoring config
+/// (the core default when omitted). Longer needles still match, but their
+/// scores may saturate at `0xffff`, so items whose true scores are both above
+/// the cap tie
 #[wasm_bindgen(js_name = maxNeedleLen)]
 pub fn max_needle_len(scoring: Option<ScoringObject>) -> Result<f64, JsError> {
     let scoring = match scoring {

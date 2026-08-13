@@ -2,8 +2,8 @@ use super::Matcher;
 use crate::{Config, Match, MatchIndices, Pattern};
 
 /// Extension trait adding fuzzy matching functions to any iterator whose items
-/// are strings. Results are yielded lazily in iteration order (not sorted by score).
-/// Items that don't match are skipped.
+/// are strings. Results are yielded lazily in iteration order (not sorted by
+/// score). Items that don't match are skipped.
 ///
 /// # Example
 ///
@@ -17,8 +17,9 @@ use crate::{Config, Match, MatchIndices, Pattern};
 ///     .collect();
 /// ```
 pub trait FuzzyMatchExt: Iterator + Sized {
-    /// Fuzzy matches each item against `needle`, yielding a [`Match`] for every item that
-    /// passes. This API performs ~10% slower than the [`Matcher::match_list`] API.
+    /// Fuzzy matches each item against `needle`, yielding a [`Match`] for every
+    /// item that passes. This API performs ~10% slower than the
+    /// [`Matcher::match_list`] API.
     ///
     /// ```
     /// use frizbee::{Config, iter::FuzzyMatchExt};
@@ -40,12 +41,13 @@ pub trait FuzzyMatchExt: Iterator + Sized {
         }
     }
 
-    /// Fuzzy matches each item against `needle`, yielding a [`MatchIndices`], which are
-    /// equivalent to [`Match`] except they include the indices of the matched characters in the
-    /// haystack.
+    /// Fuzzy matches each item against `needle`, yielding a [`MatchIndices`],
+    /// which are equivalent to [`Match`] except they include the indices of
+    /// the matched characters in the haystack.
     ///
-    /// This API has not been optimized for performance, and should only be used on small lists or
-    /// after matching a list of haystacks with [`FuzzyMatchExt::fuzzy_match`]. Useful for displaying
+    /// This API has not been optimized for performance, and should only be used
+    /// on small lists or after matching a list of haystacks with
+    /// [`FuzzyMatchExt::fuzzy_match`]. Useful for displaying
     /// matched indices in the UI.
     ///
     /// ```

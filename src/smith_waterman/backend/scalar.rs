@@ -1,4 +1,5 @@
-//! Scalar backend used when no SIMD instruction set is available (non-x86, non-ARM)
+//! Scalar backend used when no SIMD instruction set is available (non-x86,
+//! non-ARM)
 
 use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
 

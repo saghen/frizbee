@@ -104,16 +104,18 @@ pub struct Matcher {
 }
 
 impl Matcher {
-    /// Creates a matcher from a single [`Pattern`]. Strings convert into a pattern
-    /// that matches literally. Use [`Pattern::parse`] for query syntax, and
-    /// [`Matcher::from_patterns`] or [`Matcher::from_query`] for multi-pattern queries.
+    /// Creates a matcher from a single [`Pattern`]. Strings convert into a
+    /// pattern that matches literally. Use [`Pattern::parse`] for query
+    /// syntax, and [`Matcher::from_patterns`] or [`Matcher::from_query`]
+    /// for multi-pattern queries.
     pub fn new(pattern: impl Into<Pattern>, config: &Config) -> Self {
         Self::from_patterns(&[pattern.into()], config)
     }
 
-    /// Creates a matcher from a list of [`Pattern`]s (see [`Pattern::parse_query`]),
-    /// matched independently. A haystack matches when all of the patterns match where
-    /// the score is the sum of each pattern's score.
+    /// Creates a matcher from a list of [`Pattern`]s (see
+    /// [`Pattern::parse_query`]), matched independently. A haystack matches
+    /// when all of the patterns match where the score is the sum of each
+    /// pattern's score.
     ///
     /// ```
     /// use frizbee::{Config, Matcher, Pattern};
@@ -130,7 +132,8 @@ impl Matcher {
         }
     }
 
-    /// Shorthand for calling [`Matcher::from_patterns`] with [`Pattern::parse_query`].
+    /// Shorthand for calling [`Matcher::from_patterns`] with
+    /// [`Pattern::parse_query`].
     ///
     /// ```rust
     /// use frizbee::{Config, Matcher};
@@ -140,9 +143,10 @@ impl Matcher {
     /// assert_eq!(matches.len(), 2); // "barfoo" starts with "bar"
     /// ```
     ///
-    /// To override config per-pattern, call [`Pattern::parse_query`] directly and adjust
-    /// each pattern's [`crate::PatternConfig`] before passing them to [`Matcher::from_patterns`].
-    /// For example, setting the max typos based on needle length:
+    /// To override config per-pattern, call [`Pattern::parse_query`] directly
+    /// and adjust each pattern's [`crate::PatternConfig`] before passing
+    /// them to [`Matcher::from_patterns`]. For example, setting the max
+    /// typos based on needle length:
     ///
     /// ```rust
     /// use frizbee::{Config, Matcher, Pattern};
@@ -179,14 +183,16 @@ impl Matcher {
         self.patterns = Self::build_patterns(&self.raw_patterns, &self.config);
     }
 
-    /// Updates the pattern, as in [`Matcher::new`], and rebuilds the internal matcher
-    /// backend. Skipped if the pattern is the same as the previous one.
+    /// Updates the pattern, as in [`Matcher::new`], and rebuilds the internal
+    /// matcher backend. Skipped if the pattern is the same as the previous
+    /// one.
     pub fn set_pattern(&mut self, pattern: impl Into<Pattern>) {
         self.set_patterns(&[pattern.into()]);
     }
 
-    /// Updates the patterns, as in [`Matcher::from_patterns`], and rebuilds the internal
-    /// matcher backends. Skipped if the patterns are the same as the previous ones.
+    /// Updates the patterns, as in [`Matcher::from_patterns`], and rebuilds the
+    /// internal matcher backends. Skipped if the patterns are the same as
+    /// the previous ones.
     pub fn set_patterns(&mut self, patterns: &[Pattern]) {
         if self.raw_patterns == patterns {
             return;
@@ -207,8 +213,9 @@ impl Matcher {
         }
     }
 
-    /// Builds the backend for a pattern, resolving any per-pattern overrides against the
-    /// matcher's config (see [`crate::PatternConfig::resolve`]). Returns `None` for empty
+    /// Builds the backend for a pattern, resolving any per-pattern overrides
+    /// against the matcher's config (see
+    /// [`crate::PatternConfig::resolve`]). Returns `None` for empty
     /// needles.
     fn compile(source: &Pattern, config: &Config) -> Option<CompiledPattern> {
         if source.needle.is_empty() {
@@ -226,9 +233,10 @@ impl Matcher {
     /// Matches a list of haystacks, returning a list of [`Match`] values.
     /// This API provides the most performant path when matching on lists.
     ///
-    /// This API should not be called with one item at a time as it performs dynamic dispatch to
-    /// the underlying backend. Instead, consider using the [`Matcher::match_iter`],
-    /// [`Matcher::match_one`] or [`iter::FuzzyMatchExt`] API.
+    /// This API should not be called with one item at a time as it performs
+    /// dynamic dispatch to the underlying backend. Instead, consider using
+    /// the [`Matcher::match_iter`], [`Matcher::match_one`] or
+    /// [`iter::FuzzyMatchExt`] API.
     pub fn match_list<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<Match> {
         let mut matches = vec![];
         self.match_list_into(haystacks, 0, &mut matches);
@@ -241,16 +249,18 @@ impl Matcher {
         matches
     }
 
-    /// Matches a list of haystacks, returning a list of [`MatchIndices`] which are equivalent
-    /// to [`Match`] except they include the indices of the matched characters in the haystack.
+    /// Matches a list of haystacks, returning a list of [`MatchIndices`] which
+    /// are equivalent to [`Match`] except they include the indices of the
+    /// matched characters in the haystack.
     ///
-    /// This API has not been optimized for performance, and should only be used on small lists or
-    /// after matching a list of haystacks with [`Matcher::match_list`]. Useful for displaying
-    /// matched indices in the UI.
+    /// This API has not been optimized for performance, and should only be used
+    /// on small lists or after matching a list of haystacks with
+    /// [`Matcher::match_list`]. Useful for displaying matched indices in
+    /// the UI.
     ///
-    /// This API should not be called with one item at a time as it performs dynamic dispatch to
-    /// the underlying backend. Instead, consider using the [`Matcher::match_iter_indices`] or
-    /// [`iter::FuzzyMatchExt`] API.
+    /// This API should not be called with one item at a time as it performs
+    /// dynamic dispatch to the underlying backend. Instead, consider using
+    /// the [`Matcher::match_iter_indices`] or [`iter::FuzzyMatchExt`] API.
     pub fn match_list_indices<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<MatchIndices> {
         Self::guard_against_haystack_overflow(haystacks.len(), 0);
         let mut matches = match &mut self.patterns {
@@ -289,11 +299,11 @@ impl Matcher {
         matches
     }
 
-    /// Returns an iterator over [`Match`] values for an iterator of strings. This API performs ~10%
-    /// slower than the [`Matcher::match_list`] API.
+    /// Returns an iterator over [`Match`] values for an iterator of strings.
+    /// This API performs ~10% slower than the [`Matcher::match_list`] API.
     ///
-    /// You may also use the [`iter::FuzzyMatchExt`] API which provides a more convenient API
-    /// for when re-using the [`Matcher`] isn't necessary.
+    /// You may also use the [`iter::FuzzyMatchExt`] API which provides a more
+    /// convenient API for when re-using the [`Matcher`] isn't necessary.
     ///
     /// ```
     /// use frizbee::{Config, iter::FuzzyMatchExt};
@@ -318,16 +328,17 @@ impl Matcher {
             })
     }
 
-    /// Returns an iterator over [`MatchIndices`] values for an iterator of strings, which are
-    /// equivalent to [`Match`] except they include the indices of the matched characters in the
-    /// haystack.
+    /// Returns an iterator over [`MatchIndices`] values for an iterator of
+    /// strings, which are equivalent to [`Match`] except they include the
+    /// indices of the matched characters in the haystack.
     ///
-    /// This API has not been optimized for performance, and should only be used on small lists or
-    /// after matching a list of haystacks with [`Matcher::match_iter`]. Useful for displaying
-    /// matched indices in the UI.
+    /// This API has not been optimized for performance, and should only be used
+    /// on small lists or after matching a list of haystacks with
+    /// [`Matcher::match_iter`]. Useful for displaying matched indices in
+    /// the UI.
     ///
-    /// You may also use the [`iter::FuzzyMatchExt`] API which provides a more convenient API
-    /// for when re-using the [`Matcher`] isn't necessary.
+    /// You may also use the [`iter::FuzzyMatchExt`] API which provides a more
+    /// convenient API for when re-using the [`Matcher`] isn't necessary.
     ///
     /// ```
     /// use frizbee::{Config, iter::FuzzyMatchExt};
@@ -352,11 +363,12 @@ impl Matcher {
             })
     }
 
-    /// Matches a single haystack, returning its [`Match`] if it passes. This API performs ~10%
-    /// slower than the [`Matcher::match_list`] API.
+    /// Matches a single haystack, returning its [`Match`] if it passes. This
+    /// API performs ~10% slower than the [`Matcher::match_list`] API.
     ///
-    /// Consider using the [`Matcher::match_iter`] API or [`Matcher::match_list`] if you have more
-    /// than one haystack to match, as they perform significantly better.
+    /// Consider using the [`Matcher::match_iter`] API or
+    /// [`Matcher::match_list`] if you have more than one haystack to match,
+    /// as they perform significantly better.
     pub fn match_one<S: AsRef<str>>(&mut self, haystack: S, index: u32) -> Option<Match> {
         match &mut self.patterns {
             CompiledPatterns::Empty => Some(Match::from_index(index as usize)),
@@ -367,13 +379,15 @@ impl Matcher {
         }
     }
 
-    /// Matches a single haystack, returning its [`MatchIndices`] if it passes, which is
-    /// equivalent to [`Match`] except they include the indices of the matched characters in the
-    /// haystack.
+    /// Matches a single haystack, returning its [`MatchIndices`] if it passes,
+    /// which is equivalent to [`Match`] except they include the indices of
+    /// the matched characters in the haystack.
     ///
-    /// This API has not been optimized for performance, and should only be used on small lists or
-    /// after matching a list of haystacks with [`Matcher::match_one`], [`Matcher::match_iter`] or
-    /// [`Matcher::match_list`]. Useful for displaying matched indices in the UI.
+    /// This API has not been optimized for performance, and should only be used
+    /// on small lists or after matching a list of haystacks with
+    /// [`Matcher::match_one`], [`Matcher::match_iter`] or
+    /// [`Matcher::match_list`]. Useful for displaying matched indices in the
+    /// UI.
     pub fn match_one_indices<S: AsRef<str>>(
         &mut self,
         haystack: S,

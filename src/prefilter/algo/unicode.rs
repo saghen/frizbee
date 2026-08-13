@@ -51,8 +51,9 @@ impl<B: Backend> Prefilter<B> {
         }
     }
 
-    /// Occurrence mask for one case variant of a needle char: lanes where `last_byte` matches,
-    /// verified against the char's remaining UTF-8 bytes
+    /// Occurrence mask for one case variant of a needle char: lanes where
+    /// `last_byte` matches, verified against the char's remaining UTF-8
+    /// bytes
     #[inline(always)]
     unsafe fn char_variant_mask(
         (chunk, chunk_mask): (B::Chunk, B::Mask),
@@ -136,8 +137,9 @@ impl<B: Backend> Prefilter<B> {
         let mut start = 0usize;
 
         while start + needle_char.len <= len {
-            // keep the subsequence mask (`available`) separate from the load's width-dependent
-            // bounds (`valid`) so a width change can reload without dropping consumed lanes
+            // keep the subsequence mask (`available`) separate from the load's
+            // width-dependent bounds (`valid`) so a width change can reload
+            // without dropping consumed lanes
             let mut char_len = needle_char.len;
             let (mut chunk, mut valid) =
                 unsafe { load_window::<B>(haystack, start + char_len - 1, len) };

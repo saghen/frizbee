@@ -7,12 +7,13 @@ use alloc::{
     vec::Vec,
 };
 
-/// Magic numbers for `TYPOS` specialization keys beyond the literal counts 0/1/2
+/// Magic numbers for `TYPOS` specialization keys beyond literal 0/1/2
 pub(super) const MANY_TYPOS: u16 = u16::MAX;
 pub(super) const NO_PREFILTER: u16 = u16::MAX - 1;
 
-/// Fully inlined per-backend implementations, specialized for each configuration
-/// (0 typos, 1 typo, unicode variants, ...) and built with the backend's `#[target_feature]`.
+/// Fully inlined per-backend implementations, specialized for each
+/// configuration (0 typos, 1 typo, unicode variants, ...) and built with the
+/// backend's `#[target_feature]`.
 ///
 /// # Safety
 /// The backend's required CPU features must be available
@@ -311,9 +312,9 @@ where
     }
 }
 
-/// Trims the haystack to the prefilter's window, returning the trimmed slice, the trimmed
-/// start position, and whether the window covers the full haystack (making it eligible for
-/// the exact match bonus)
+/// Trims the haystack to the prefilter's window, returning the trimmed slice,
+/// the trimmed start position, and whether the window covers the full haystack
+/// (making it eligible for the exact match bonus)
 #[inline(always)]
 fn trim_haystack(haystack: &[u8], start_pos: usize, end_pos: usize) -> (&[u8], usize, bool) {
     // substract 1 so that we add the delimiter bonus from the first char

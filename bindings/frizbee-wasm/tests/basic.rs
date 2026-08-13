@@ -1,7 +1,8 @@
 //! Minimal E2E checks that the binding wires through to the core correctly.
-//! Matching behavior itself is covered by the core crate's test suite; these only
-//! assert the boundary broadly works: construction, matching, ordering, the owned
-//! haystacks path and query syntax
+//!
+//! Matching behavior itself is covered by the core crate's test suite These
+//! only assert the boundary broadly works: construction, matching, ordering,
+//! the owned haystacks path and query syntax
 
 #![cfg(target_arch = "wasm32")]
 

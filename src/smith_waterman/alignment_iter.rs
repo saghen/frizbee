@@ -20,7 +20,8 @@ pub(crate) enum Alignment {
 pub(crate) struct AlignmentPathIter<'a> {
     score_matrix: &'a [u8],
     match_masks: &'a [u8],
-    /// Number of byte-positions in one row = chunks_per_row * LANES * LANE_BYTES.
+    /// Number of byte-positions in one row = chunks_per_row * LANES *
+    /// LANE_BYTES.
     row_stride: usize,
     lanes_per_chunk: usize,
     /// 1 for u8 scoring, 2 for u16 scoring.

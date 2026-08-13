@@ -1,13 +1,14 @@
 //! Python bindings for frizbee, SIMD fuzzy string matching.
 //!
-//! The module is named `frizbee` (see `module-name` in `pyproject.toml`) and only
-//! translates types at the boundary: matching always happens in the core crate.
+//! The module is named `frizbee` (see `module-name` in `pyproject.toml`) and
+//! only translates types at the boundary: matching always happens in the core
+//! crate.
 //!
 //! Haystacks either live in a Rust-owned [`haystacks::PyHaystacks`] arena — the
-//! primary path for repeated matching, with the GIL released while matching — or are
-//! extracted per call as zero-copy borrowed `&str`s under the GIL (CPython caches
-//! the UTF-8 representation on each `str` object, so repeat calls are pure pointer
-//! reads).
+//! primary path for repeated matching, with the GIL released while matching —
+//! or are extracted per call as zero-copy borrowed `&str`s under the GIL
+//! (CPython caches the UTF-8 representation on each `str` object, so repeat
+//! calls are pure pointer reads).
 
 use pyo3::prelude::*;
 

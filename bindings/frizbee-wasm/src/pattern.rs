@@ -1,6 +1,7 @@
-//! Mirror of the core `Pattern` plus query parsing, crossing the boundary as plain JS
-//! objects via `js_sys::Reflect` (see the note in [`crate::config`] on why not serde),
-//! with its hand-written TS declaration kept next to the struct it describes.
+//! Mirror of the core `Pattern` plus query parsing, crossing the boundary as
+//! plain JS objects via `js_sys::Reflect` (see the note in [`crate::config`] on
+//! why not serde), with its hand-written TS declaration kept next to the struct
+//! it describes.
 
 use js_sys::{Array, Object};
 use wasm_bindgen::prelude::*;
@@ -44,8 +45,8 @@ extern "C" {
     pub type PatternArray;
 }
 
-/// Core's `PatternConfig` cannot override `max_typos` back to unlimited (`None` means
-/// inherit), so `Infinity` is rejected at the pattern level
+/// Core's `PatternConfig` cannot override `max_typos` back to unlimited (`None`
+/// means inherit), so `Infinity` is rejected at the pattern level
 fn parse_pattern_max_typos(value: f64) -> Result<u16, JsError> {
     parse_max_typos(value)?.ok_or_else(|| {
         JsError::new(
@@ -54,8 +55,8 @@ fn parse_pattern_max_typos(value: f64) -> Result<u16, JsError> {
     })
 }
 
-/// Mirror of [`frizbee::Pattern`] accepted as a plain JS object. Every field besides
-/// `needle` is optional; missing overrides inherit from the matcher's
+/// Mirror of [`frizbee::Pattern`] accepted as a plain JS object. Every field
+/// besides `needle` is optional; missing overrides inherit from the matcher's
 /// [`Config`](crate::config::Config)
 #[derive(Debug, Clone, PartialEq)]
 pub struct Pattern {
@@ -168,17 +169,18 @@ pub(crate) fn patterns_from_js(patterns: PatternArray) -> Result<Vec<frizbee::Pa
         .collect()
 }
 
-/// Parses a query of whitespace separated atoms into patterns, where special syntax
-/// changes the matching mode: `foo` (fuzzy), `^foo` (prefix), `foo$` (suffix), `'foo`
-/// (substring), `^foo$` (exact) and `!foo` (negated, substring unless combined with
-/// the syntax above). Any special character can be escaped with a backslash, e.g.
-/// `\!foo` or `foo\$` match the literal leading/trailing character, and `foo\ bar`
-/// matches the literal space. Atoms with an empty needle, e.g. `!` or `^$`, are dropped.
+/// Parses a query of whitespace separated atoms into patterns, where special
+/// syntax changes the matching mode: `foo` (fuzzy), `^foo` (prefix), `foo$`
+/// (suffix), `'foo` (substring), `^foo$` (exact) and `!foo` (negated, substring
+/// unless combined with the syntax above). Any special character can be escaped
+/// with a backslash, e.g. `\!foo` or `foo\$` match the literal leading/trailing
+/// character, and `foo\ bar` matches the literal space. Atoms with an empty
+/// needle, e.g. `!` or `^$`, are dropped.
 ///
-/// The returned patterns carry only the matching mode derived from the syntax. Any
-/// other per-pattern override is left undefined and inherits the matcher's config;
-/// adjust the returned patterns before passing them to `Matcher.fromPatterns` to
-/// override config per-pattern
+/// The returned patterns carry only the matching mode derived from the syntax.
+/// Any other per-pattern override is left undefined and inherits the matcher's
+/// config; adjust the returned patterns before passing them to
+/// `Matcher.fromPatterns` to override config per-pattern
 #[wasm_bindgen(js_name = parseQuery)]
 pub fn parse_query(query: &str) -> Result<PatternArray, JsError> {
     let patterns = frizbee::Pattern::parse_query(query)

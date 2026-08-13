@@ -1,11 +1,11 @@
 //! Browser WASM bindings for [frizbee](https://github.com/saghen/frizbee), SIMD fuzzy
 //! string matching.
 //!
-//! Config and Pattern cross the boundary as plain JS objects (camelCase keys, enums as
-//! strings) parsed via `js_sys::Reflect` mirror structs. Haystacks cross as `string[]`
-//! through wasm-bindgen's per-element string glue, or live in a wasm-owned
-//! [`Haystacks`] arena filled by the wrapper with a single `TextEncoder` pass — the
-//! primary path for keystroke loops.
+//! Config and Pattern cross the boundary as plain JS objects (camelCase keys,
+//! enums as strings) parsed via `js_sys::Reflect` mirror structs. Haystacks
+//! cross as `string[]` through wasm-bindgen's per-element string glue, or live
+//! in a wasm-owned [`Haystacks`] arena filled by the wrapper with a single
+//! `TextEncoder` pass — the primary path for keystroke loops.
 
 mod config;
 mod haystacks;

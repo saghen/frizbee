@@ -1,21 +1,22 @@
-//! How haystack strings cross the boundary and stay there: a wasm-owned packed utf-8
-//! arena, filled either through wasm-bindgen's per-string glue (`new`/`push`) or by
-//! the wrapper's single-`TextEncoder`-pass fill protocol
+//! How haystack strings cross the boundary and stay there: a wasm-owned packed
+//! utf-8 arena, filled either through wasm-bindgen's per-string glue
+//! (`new`/`push`) or by the wrapper's single-`TextEncoder`-pass fill protocol
 //! (`reserve`/`bytesView`/`offsetsView`/`commit`).
 
 use js_sys::{Uint8Array, Uint32Array};
 use wasm_bindgen::prelude::*;
 
-/// Owns a list of haystacks as a packed utf-8 arena in wasm memory, so matching pays
-/// no boundary cost per call: the primary path for matching the same list repeatedly
-/// (e.g. per keystroke). Construct once, `push` to append, and rebuild (or `clear`)
-/// for anything else — match indices refer to this list's order.
+/// Owns a list of haystacks as a packed utf-8 arena in wasm memory, so matching
+/// pays no boundary cost per call: the primary path for matching the same list
+/// repeatedly (e.g. per keystroke). Construct once, `push` to append, and
+/// rebuild (or `clear`) for anything else — match indices refer to this list's
+/// order.
 ///
 /// Through the package entry (wrapper.mjs), construction and `push` encode each
 /// string directly into the arena with a single `TextEncoder` pass, via the
-/// `reserve`/`bytesView`/`offsetsView`/`commit` protocol below. Instances hold memory
-/// in the wasm heap: call `.free()` when done, or rely on `FinalizationRegistry` to
-/// eventually collect it.
+/// `reserve`/`bytesView`/`offsetsView`/`commit` protocol below. Instances hold
+/// memory in the wasm heap: call `.free()` when done, or rely on
+/// `FinalizationRegistry` to eventually collect it.
 #[wasm_bindgen]
 pub struct Haystacks {
     /// Concatenated utf-8 bytes of every haystack
@@ -59,9 +60,9 @@ impl Haystacks {
         haystacks
     }
 
-    /// Appends haystacks. Through the package entry this is a single `TextEncoder`
-    /// pass straight into the arena; calling the native export directly pays
-    /// wasm-bindgen's per-string glue instead
+    /// Appends haystacks. Through the package entry this is a single
+    /// `TextEncoder` pass straight into the arena; calling the native
+    /// export directly pays wasm-bindgen's per-string glue instead
     pub fn push(&mut self, items: Vec<String>) {
         for item in &items {
             self.push_str(item);
@@ -80,18 +81,19 @@ impl Haystacks {
         self.offsets.len() - 1
     }
 
-    /// Low-level fill protocol, used by the package entry: reserves spare capacity
-    /// for at least `bytes` more utf-8 bytes and `items` more haystacks, to be
-    /// filled via `bytesView`/`offsetsView` and committed with `commit`. Prefer
-    /// `push` unless you are writing glue code
+    /// Low-level fill protocol, used by the package entry: reserves spare
+    /// capacity for at least `bytes` more utf-8 bytes and `items` more
+    /// haystacks, to be filled via `bytesView`/`offsetsView` and committed
+    /// with `commit`. Prefer `push` unless you are writing glue code
     pub fn reserve(&mut self, bytes: usize, items: usize) {
         self.bytes.reserve(bytes);
         self.offsets.reserve(items);
     }
 
-    /// View over the reserved spare byte capacity, to be filled with concatenated
-    /// utf-8 haystacks. Detached by ANY call into the wasm module (memory may grow
-    /// and move): take it after `reserve`, write, `commit`, and never touch it again
+    /// View over the reserved spare byte capacity, to be filled with
+    /// concatenated utf-8 haystacks. Detached by ANY call into the wasm
+    /// module (memory may grow and move): take it after `reserve`, write,
+    /// `commit`, and never touch it again
     #[wasm_bindgen(js_name = bytesView)]
     pub fn bytes_view(&mut self) -> Uint8Array {
         let len = self.bytes.len();
@@ -100,8 +102,8 @@ impl Haystacks {
     }
 
     /// View over the reserved spare offset capacity, to be filled with each new
-    /// haystack's END byte offset, relative to the start of the newly written bytes.
-    /// Same detachment rules as `bytesView`
+    /// haystack's END byte offset, relative to the start of the newly written
+    /// bytes. Same detachment rules as `bytesView`
     #[wasm_bindgen(js_name = offsetsView)]
     pub fn offsets_view(&mut self) -> Uint32Array {
         let len = self.offsets.len();
@@ -109,11 +111,12 @@ impl Haystacks {
         unsafe { Uint32Array::view_mut_raw(self.offsets.as_mut_ptr().add(len), spare) }
     }
 
-    /// Commits `bytes_written` bytes and `items` end-offsets written into the views.
-    /// Offsets are validated (monotonically increasing, within `bytes_written`), so
-    /// matching cannot read out of bounds — but the bytes are NOT validated: they
-    /// MUST be valid utf-8 (e.g. written by `TextEncoder`, which only emits valid
-    /// utf-8). Feeding invalid utf-8 is undefined behavior
+    /// Commits `bytes_written` bytes and `items` end-offsets written into the
+    /// views. Offsets are validated (monotonically increasing, within
+    /// `bytes_written`), so matching cannot read out of bounds — but the
+    /// bytes are NOT validated: they MUST be valid utf-8 (e.g. written by
+    /// `TextEncoder`, which only emits valid utf-8). Feeding invalid utf-8
+    /// is undefined behavior
     pub fn commit(&mut self, bytes_written: usize, items: usize) -> Result<(), JsError> {
         if bytes_written > self.bytes.capacity() - self.bytes.len()
             || items > self.offsets.capacity() - self.offsets.len()
