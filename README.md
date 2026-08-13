@@ -227,7 +227,7 @@ Frizbee will not perform any [unicode normalization](https://docs.rs/unicode-nor
 
 With the default `UnicodeMatching::Smart`, an ASCII needle matching against a haystack with multi-byte UTF-8 codepoints will have a slightly lower score than a pure ASCII haystack. For example, `hw` matched against `h😀w` will receive a penalty to the score of `gap_open_penalty + gap_extend_penalty * 4` due to the emoji taking up 4 bytes. If the haystack was instead `hew`, the penalty would be `gap_open_penalty + gap_extend_penalty`. Typically, this shouldn't be an issue, but you can force the slower unicode path with `UnicodeMatching::Always` on ASCII needles if necessary.
 
-For case-insensitive matching, the case flipped version will be skipped if it's a different byte length (İ vs i in Turkish) or has multiple codepoints (such as the German `ß` -> `SS`). These cases are typically very rare (<0.01% of text, depending on language). This could be solved by running `match_list` twice when one of these is detected in the needle, PRs welcome!
+For case-insensitive matching, the case flipped version will be skipped if it's a different byte length (`İ` -> `i` in Turkish) or has multiple codepoints (such as the German `ß` -> `SS`). These cases are typically very rare (<0.01% of text, depending on language). This could be solved by running `match_list` twice when one of these is detected in the needle, PRs welcome!
 
 Unlike FZF/Nucleo, Frizbee will not match `a` against `á`.
 
@@ -247,6 +247,6 @@ frizbee = { version = "...", default-features = false }
 
 ## Safety
 
-On stable Rust, it's only possible to use SIMD via intrinsics ([portable-simd](https://github.com/rust-lang/portable-simd) is nightly-only). Many existing crates for safe SIMD abstractions do not currently support AVX512, or left performance on the table. The codebase isolates the vast majority of the unsafe code to SIMD "Backend"s ([prefilter](src/prefilter/backend) and [smith waterman](src/smith_waterman/backend)) which contain many unit/property tests, checked through Miri.
+On stable Rust, it's only possible to use SIMD via intrinsics ([portable-simd](https://github.com/rust-lang/portable-simd) is nightly-only). Many excellent safe SIMD wrappers exist ([fearless_simd](https://github.com/linebender/fearless_simd)) but using raw intrinsics has slightly better performance and compatibility, at the cost of testing overhead. The codebase isolates the vast majority of the unsafe code to SIMD "Backend"s ([prefilter](src/prefilter/backend) and [smith waterman](src/smith_waterman/backend)) which contain many unit/property tests, checked through Miri. For those interested in writing SIMD themselves, it's actually possible to write safe SIMD with only one unsafe block and a macro, check out [Sergey Davidoff's sblog post on the topic](https://shnatsel.github.io/safe-simd-in-rust-even-on-the-inside/).
 
 Without the `safe_read` feature, Frizbee will over-read haystacks when safe to do so (within page-boundary) which will trigger the `AddressSanitizer`. Without AVX512, performance regresses by ~40% with `safe_read` enabled. Over-reads are automatically disabled when running inside of miri (`cfg!(miri)`).
