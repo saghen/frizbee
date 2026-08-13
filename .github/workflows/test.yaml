@@ -21,7 +21,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build
         run: cargo build --verbose
@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install wasm targets
         run: rustup target add wasm32-wasip1 wasm32-unknown-unknown
@@ -58,7 +58,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # wasm32v1-none has no std at all, so this proves the crate is no_std
       - name: Install wasm32v1-none target
@@ -74,7 +74,6 @@ jobs:
       - name: Check no_std with serde
         run: cargo check --verbose --no-default-features --features serde --target wasm32v1-none
 
-      # Runtime SIMD feature detection (cpuid) path on x86_64
       - name: Check no_std on host
         run: cargo check --verbose --no-default-features
 
@@ -87,7 +86,7 @@ jobs:
         msrv: ["1.89.0"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install ${{ matrix.msrv }}
         run: rustup toolchain install ${{ matrix.msrv }}
@@ -99,7 +98,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run clippy
         run: cargo clippy --all-targets -- -D warnings
@@ -108,7 +107,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install nightly Miri
         run: rustup toolchain install nightly --component miri,rust-src

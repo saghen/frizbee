@@ -1,16 +1,5 @@
 name: Release
 
-# Tag push publishes everything; workflow_dispatch is a dry run that builds all
-# artifacts but skips every publish job (they gate on ref_type == 'tag').
-#
-# Registry setup (one-time, before the first tag):
-# - crates.io: add this workflow as a trusted publisher in the frizbee crate
-#   settings (repository saghen/frizbee, workflow release.yaml)
-# - PyPI: register a pending publisher for `frizbee` (workflow release.yaml,
-#   environment pypi)
-# - npm: trusted publishing cannot create a new package — publish the first
-#   `frizbee` release with a granular automation token (NODE_AUTH_TOKEN), then
-#   configure the trusted publisher (workflow release.yaml) and drop the token
 on:
   push:
     tags: ["v*"]
@@ -81,7 +70,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install target
         run: rustup target add ${{ matrix.target }}
@@ -132,7 +121,7 @@ jobs:
             tar czf "$NAME.tar.gz" "$NAME"
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: c-${{ matrix.target }}
           path: |
@@ -147,14 +136,22 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
         with:
           pattern: c-*
           path: dist
           merge-multiple: true
 
+      - name: Generate changelog
+        uses: orhun/git-cliff-action@v4
+        with:
+          args: --latest --strip header
+
       - uses: softprops/action-gh-release@v2
         with:
+          body_path: git-cliff/CHANGELOG.md
           files: dist/*
 
   # abi3 wheels: one per platform, covering CPython 3.10+. maturin-action only
@@ -165,6 +162,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # prettier-ignore
         include:
           - { name: linux-x86_64,  os: ubuntu-24.04,     target: x86_64,  manylinux: auto }
           - { name: linux-aarch64, os: ubuntu-24.04-arm, target: aarch64, manylinux: auto }
@@ -176,7 +174,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
@@ -186,7 +184,7 @@ jobs:
           args: --release --out dist
           manylinux: ${{ matrix.manylinux }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-${{ matrix.name }}
           path: bindings/frizbee-py/dist
@@ -196,7 +194,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build sdist
         uses: PyO3/maturin-action@v1
@@ -205,19 +203,17 @@ jobs:
           command: sdist
           args: --out dist
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      # the sdist must vendor the workspace path dependency on the root crate
-      # prove it builds standalone before releasing
       - name: Install from sdist and test
         working-directory: bindings/frizbee-py
         run: |
           pip install dist/*.tar.gz
           python -m unittest discover tests -v
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-sdist
           path: bindings/frizbee-py/dist
@@ -232,7 +228,7 @@ jobs:
       id-token: write # OIDC
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: wheels-*
           path: dist
@@ -253,7 +249,7 @@ jobs:
       contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install wasm target
         run: rustup target add wasm32-unknown-unknown
@@ -263,13 +259,12 @@ jobs:
         with:
           tool: wasm-pack
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      # .cargo/config.toml enables +simd128. The binding directory is the package
-      # root (committed package.json + wrappers); wasm-pack only produces ./pkg
+      # .cargo/config.toml enables +simd128
       - name: Build (web)
         working-directory: bindings/frizbee-wasm
         run: wasm-pack build --target web --release
@@ -287,7 +282,7 @@ jobs:
       id-token: write # OIDC
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
