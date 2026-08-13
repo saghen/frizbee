@@ -2,3 +2,8 @@
 /smith_waterman_macro/target
 /benches/data/*
 !/benches/data/download.sh
+
+# bindings
+/bindings/frizbee-py/*.so
+__pycache__/
+.venv/

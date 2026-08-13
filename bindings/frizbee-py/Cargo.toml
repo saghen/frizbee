@@ -1,0 +1,16 @@
+[package]
+name = "frizbee-py"
+description = "Python bindings for frizbee, SIMD fuzzy string matching"
+publish = false
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+repository.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+name = "frizbee_py"
+
+[dependencies]
+frizbee = { path = "../.." }
+pyo3 = { version = "0.29", features = ["abi3-py310", "extension-module"] }
