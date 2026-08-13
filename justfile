@@ -88,7 +88,18 @@ download-bench-data:
 
 # --------------
 
-bump version:
+bump version: test
     sed -i 's/^version = ".*"/version = "{{ version }}"/' Cargo.toml
     sed -i 's/"version": ".*"/"version": "{{ version }}"/' bindings/frizbee-wasm/package.json
     cargo update --workspace --offline
+
+    git add Cargo.toml bindings/frizbee-wasm/package.json Cargo.lock
+    git commit -m "chore: bump version to {{ version }}"
+    git tag v{{ version }} -s -m v{{ version }}
+
+    git-cliff --github-token $(gh auth token) -o CHANGELOG.md
+    git add CHANGELOG.md
+    git reset --soft HEAD~1
+    git commit -m "chore: bump version to {{ version }}"
+    git tag -d v{{ version }}
+    git tag v{{ version }} -s -m v{{ version }}
