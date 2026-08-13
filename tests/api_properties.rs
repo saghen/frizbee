@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::panic::{AssertUnwindSafe, catch_unwind};
 
 use frizbee::k_merge::k_merge_matches_by_score_then_index_desc;
 use frizbee::{

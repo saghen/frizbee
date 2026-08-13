@@ -1,10 +1,20 @@
-[package]
-name = "frizbee"
-description = "Fast typo-resistant fuzzy matching via SIMD smith waterman, similar algorithm to FZF/FZY"
-license = "MIT"
+[workspace]
+default-members = ["."]
+members = []
+
+[workspace.package]
 version = "0.12.0"
+license = "MIT"
 edition = "2024"
 repository = "https://github.com/saghen/frizbee"
+
+[package]
+name = "frizbee"
+description = "Fast typo-resistant fuzzy matching via SIMD smith waterman, similar algorithm to FZF"
+license.workspace = true
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
 keywords = ["fuzzy-search", "fuzzy-matching", "string-matching", "simd", "smith-waterman"]
 categories = ["algorithms", "text-processing"]
 rust-version = "1.89.0" # Changing this? Remember to update CI to test the new msrv!

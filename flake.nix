@@ -27,7 +27,7 @@
         default = pkgs.mkShell {
           packages =
             let
-              fx = fenix.packages.${pkgs.system};
+              fx = fenix.packages.${pkgs.stdenv.hostPlatform.system};
               toolchain = fx.combine [
                 fx.stable.rustc
                 fx.stable.cargo
@@ -42,6 +42,17 @@
             [
               toolchain
               pkgs.wasmtime
+
+              # bindings
+              pkgs.just
+              pkgs.rust-cbindgen
+              pkgs.maturin
+              pkgs.python3
+              pkgs.nodejs
+              pkgs.wasm-pack
+              # keep the wasm-bindgen version in bindings/frizbee-wasm updated with this
+              pkgs.wasm-bindgen-cli
+              pkgs.binaryen
             ];
         };
       });
