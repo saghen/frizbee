@@ -61,7 +61,7 @@ The [bindings](./bindings) directory contains bindings for C, C++, Python and WA
 - [frizbee-py](https://pypi.org/project/frizbee/) (Python): Native performance after one-time copy of strings to Rust (42ms copy on Chromium, 24ms for matching)
 - [frizbee-wasm](https://www.npmjs.com/package/frizbee) (SIMD128 WASM): 60% slower (40.5ms on Chromium) with one-time copy of strings to Rust (130ms) with `maxItems = 1000`. Sending `Match` objects to JS has significant overhead so `maxItems` is essential for performance critical use cases. The WASM binary is 50KBs (Brotli)
 
-If you're integrating this crate which will be built for WASM, include `RUSTFLAGS='-C target-feature=+simd128'` while building your project, otherwise the scalar path will be taken. You can see an example of how to set this up in this repo's `.cargo/config.toml`.
+If you're integrating this crate into your own WASM bundle, include `RUSTFLAGS='-C target-feature=+simd128'` while building your project, otherwise the scalar path will be taken. See this repo's `.cargo/config.toml`.
 
 ## Benchmarks
 

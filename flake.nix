@@ -41,15 +41,16 @@
             in
             [
               toolchain
-              pkgs.wasmtime
+              pkgs.just
+              pkgs.git-cliff
 
               # bindings
-              pkgs.just
               pkgs.rust-cbindgen
               pkgs.maturin
               pkgs.python3
               pkgs.nodejs
               pkgs.wasm-pack
+              pkgs.wasmtime
               # keep the wasm-bindgen version in bindings/frizbee-wasm updated with this
               pkgs.wasm-bindgen-cli
               pkgs.binaryen
