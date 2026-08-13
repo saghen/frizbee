@@ -2,7 +2,8 @@ use super::{PathState, Prefilter, load_window};
 use crate::prefilter::backend::{Backend, BitMaskOps};
 
 impl<B: Backend> Prefilter<B> {
-    #[inline(always)]
+    #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
     pub unsafe fn match_haystack_many_typos(
         &mut self,
         haystack: &[u8],
@@ -11,7 +12,8 @@ impl<B: Backend> Prefilter<B> {
         unsafe { self.match_haystack_many_typos_impl(haystack, max_typos as usize) }
     }
 
-    #[inline(always)]
+    #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
     pub unsafe fn match_haystack_1_typo(&self, haystack: &[u8]) -> (bool, usize, usize) {
         let len = haystack.len();
         let needle_len = self.needle_ascii.len();
@@ -109,7 +111,8 @@ impl<B: Backend> Prefilter<B> {
         (false, match_start_pos, len)
     }
 
-    #[inline(always)]
+    #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
     pub unsafe fn match_haystack_2_typos(&self, haystack: &[u8]) -> (bool, usize, usize) {
         let len = haystack.len();
         let needle_len = self.needle_ascii.len();

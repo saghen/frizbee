@@ -77,9 +77,14 @@ macro_rules! dispatch_typos {
             (None, true)      => { const $typos: u16 = NO_PREFILTER; const $unicode: bool = true;  $body }
             (Some(0), false)  => { const $typos: u16 = 0;            const $unicode: bool = false; $body }
             (Some(0), true)   => { const $typos: u16 = 0;            const $unicode: bool = true;  $body }
+            // Drop 1/2-typo specializations on wasm for binary size (10% slowdown)
+            #[cfg(not(target_arch = "wasm32"))]
             (Some(1), false)  => { const $typos: u16 = 1;            const $unicode: bool = false; $body }
+            #[cfg(not(target_arch = "wasm32"))]
             (Some(1), true)   => { const $typos: u16 = 1;            const $unicode: bool = true;  $body }
+            #[cfg(not(target_arch = "wasm32"))]
             (Some(2), false)  => { const $typos: u16 = 2;            const $unicode: bool = false; $body }
+            #[cfg(not(target_arch = "wasm32"))]
             (Some(2), true)   => { const $typos: u16 = 2;            const $unicode: bool = true;  $body }
             (Some(_), false)  => { const $typos: u16 = MANY_TYPOS;   const $unicode: bool = false; $body }
             (Some(_), true)   => { const $typos: u16 = MANY_TYPOS;   const $unicode: bool = true;  $body }

@@ -115,7 +115,8 @@ impl<B: Backend> Prefilter<B> {
         mask
     }
 
-    #[inline(always)]
+    #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
     pub unsafe fn match_haystack_unicode(&self, haystack: &[u8]) -> (bool, usize, usize) {
         let len = haystack.len();
         if len == 0 {

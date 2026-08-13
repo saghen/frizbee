@@ -46,7 +46,8 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         B::is_available()
     }
 
-    #[inline(always)]
+    #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
     fn score_haystack_indices(
         &mut self,
         haystack: &[u8],
@@ -94,7 +95,8 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         (score, indices)
     }
 
-    #[inline(always)]
+    #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
     fn score_haystack_unicode_indices(
         &mut self,
         haystack: &[u8],
@@ -153,12 +155,14 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         (score, indices)
     }
 
-    #[inline(always)]
+    #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
     fn score_haystack(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16 {
         SmithWaterman::score_haystack(self, haystack, haystack_start_pos == 0)
     }
 
-    #[inline(always)]
+    #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
     fn score_haystack_unicode(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16 {
         SmithWaterman::score_haystack_unicode(self, haystack, haystack_start_pos == 0)
     }

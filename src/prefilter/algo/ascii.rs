@@ -2,7 +2,8 @@ use super::{Prefilter, load_window};
 use crate::prefilter::backend::{Backend, BitMaskOps};
 
 impl<B: Backend> Prefilter<B> {
-    #[inline(always)]
+    #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
     pub unsafe fn match_haystack(&self, haystack: &[u8]) -> (bool, usize, usize) {
         let len = haystack.len();
         if len == 0 {
