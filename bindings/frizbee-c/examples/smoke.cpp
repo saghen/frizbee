@@ -7,12 +7,13 @@
 #include <string>
 #include <vector>
 
-#include "frizbee.hpp"
+#include <frizbee/frizbee.hpp>
 
 int main() {
   frizbee::Matcher matcher("fBr");
 
-  auto matches = matcher.match_list({"fooBar", "foo_bar", "barfoo", "prelude", "println!"});
+  auto matches = matcher.match_list(
+      {"fooBar", "foo_bar", "barfoo", "prelude", "println!"});
   assert(matches.size() == 1);
   assert(matches[0].index == 0);
   assert(!matches[0].exact);
@@ -25,7 +26,7 @@ int main() {
 
   auto indices = matcher.match_list_indices(haystacks);
   assert(indices.size() == 1);
-  assert(indices[0].indices.size() == 3); // "fBr" matched 3 bytes of "fooBar"
+  assert(indices[0].indices.size() == 3);
 
   auto one = matcher.match_one("fooBar", 42);
   assert(one.has_value());
@@ -34,7 +35,7 @@ int main() {
 
   auto query = frizbee::Matcher::from_query("foo !^bar");
   auto query_matches = query.match_list({"foo", "barfoo", "foobar"});
-  assert(query_matches.size() == 2); // "barfoo" starts with "bar"
+  assert(query_matches.size() == 2);
 
   // moved-from matchers destruct safely
   frizbee::Matcher moved = std::move(matcher);

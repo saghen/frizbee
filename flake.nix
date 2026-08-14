@@ -45,7 +45,10 @@
               pkgs.git-cliff
 
               # bindings
+              pkgs.cargo-c
               pkgs.rust-cbindgen
+              pkgs.cmake
+              pkgs.pkg-config
               pkgs.maturin
               pkgs.python3
               pkgs.nodejs

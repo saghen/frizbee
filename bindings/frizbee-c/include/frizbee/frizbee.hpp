@@ -1,8 +1,4 @@
-// Header-only C++17 wrapper over the frizbee C API (frizbee.h). Hand-written;
-// no ABI of its own — everything forwards to the extern "C" functions.
-//
-// Strings are NOT validated as UTF-8 (see frizbee.h); passing invalid UTF-8 is
-// undefined behavior. A Matcher is not thread-safe: use one per thread or lock.
+// Header-only C++17 wrapper over the frizbee C API
 
 #ifndef FRIZBEE_HPP
 #define FRIZBEE_HPP
@@ -16,7 +12,7 @@
 #include <utility>
 #include <vector>
 
-#include "frizbee.h"
+#include <frizbee/frizbee.h>
 
 namespace frizbee {
 
@@ -28,8 +24,8 @@ using Match = frizbee_match_t;
 inline Config default_config() { return frizbee_config_default(); }
 
 /// Needle length up to which scores are guaranteed to fit within the
-/// `uint16_t` score. Longer needles still match, but their scores may
-/// saturate at `UINT16_MAX`
+/// `uint16_t` score. Longer needles still match, but their scores may saturate
+/// at `UINT16_MAX`
 inline std::size_t max_needle_len(const Scoring &scoring) {
   return frizbee_scoring_max_needle_len(&scoring);
 }
@@ -52,8 +48,7 @@ inline frizbee_str_t to_str(std::string_view s) {
 // Accepts any range of string_view-convertibles (std::string, const char*, ...).
 // The range must yield lvalue references (or std::string_view by value): the
 // haystack bytes are only borrowed until the C call returns, so a range that
-// materializes temporary owning strings (e.g. a transform returning
-// std::string) would dangle
+// materializes temporary owning strings would dangle
 template <typename Range>
 std::vector<frizbee_str_t> to_strs(const Range &haystacks) {
   using std::begin;
@@ -63,8 +58,7 @@ std::vector<frizbee_str_t> to_strs(const Range &haystacks) {
           std::is_same_v<std::remove_cv_t<std::remove_reference_t<element_t>>,
                          std::string_view>,
       "this range yields temporary owning strings whose bytes die before "
-      "frizbee reads them; materialize it (e.g. into a "
-      "std::vector<std::string>) first");
+      "frizbee reads them; materialize it first");
   std::vector<frizbee_str_t> out;
   for (const auto &haystack : haystacks)
     out.push_back(to_str(std::string_view(haystack)));
@@ -72,43 +66,40 @@ std::vector<frizbee_str_t> to_strs(const Range &haystacks) {
 }
 
 // Frees the C result buffer on scope exit, so a throwing std::vector
-// constructor (bad_alloc) cannot leak it
+// constructor cannot leak it
 struct matches_owner {
-  frizbee_matches_t &m;
-  ~matches_owner() { frizbee_matches_free(&m); }
-};
-struct match_indices_list_owner {
-  frizbee_match_indices_list_t &m;
-  ~match_indices_list_owner() { frizbee_match_indices_list_free(&m); }
+  frizbee_matches_t &matches;
+  ~matches_owner() { frizbee_matches_free(&matches); }
 };
 
 inline std::vector<Match> collect(frizbee_matches_t &matches) {
   matches_owner owner{matches};
+  if (matches.len == 0)
+    return {};
   return std::vector<Match>(matches.items, matches.items + matches.len);
 }
 
 } // namespace detail
 
 /// RAII wrapper over `frizbee_matcher_t`. Move-only.
-///
-/// Compiles the pattern once, allocates memory for the Smith Waterman matrix, and
-/// reuses the selected SIMD backend across calls. Ideally, only construct these at
-/// most once per list
 class Matcher {
 public:
   /// Matches `needle` literally, as in `frizbee_matcher_new`
-  explicit Matcher(std::string_view needle, const Config &config = default_config())
+  explicit Matcher(std::string_view needle,
+                   const Config &config = default_config())
       : handle_(frizbee_matcher_new(detail::to_str(needle), &config)) {}
 
-  /// Parses a query of whitespace separated atoms (`foo`, `^foo`, `foo$`, `'foo`,
-  /// `^foo$`, `!foo`), as in `frizbee_matcher_from_query`
-  static Matcher from_query(std::string_view query, const Config &config = default_config()) {
+  /// Parses a query of whitespace separated atoms, as in
+  /// `frizbee_matcher_from_query`
+  static Matcher from_query(std::string_view query,
+                            const Config &config = default_config()) {
     return Matcher(query_tag{}, query, config);
   }
 
   ~Matcher() { frizbee_matcher_free(handle_); }
 
-  Matcher(Matcher &&other) noexcept : handle_(std::exchange(other.handle_, nullptr)) {}
+  Matcher(Matcher &&other) noexcept
+      : handle_(std::exchange(other.handle_, nullptr)) {}
   Matcher &operator=(Matcher &&other) noexcept {
     std::swap(handle_, other.handle_);
     return *this;
@@ -116,50 +107,61 @@ public:
   Matcher(const Matcher &) = delete;
   Matcher &operator=(const Matcher &) = delete;
 
-  /// Matches a range of string_view-convertibles, ordered by the config's
-  /// sort strategy
+  /// Matches a range of string_view-convertibles, ordered by the config's sort
+  /// strategy
   template <typename Range>
   std::vector<Match> match_list(const Range &haystacks) {
     const auto strs = detail::to_strs(haystacks);
-    frizbee_matches_t out = frizbee_match_list(handle_, strs.data(), strs.size());
+    frizbee_matches_t out =
+        frizbee_matcher_match_list(handle_, strs.data(), strs.size());
     return detail::collect(out);
   }
-  std::vector<Match> match_list(std::initializer_list<std::string_view> haystacks) {
+  std::vector<Match>
+  match_list(std::initializer_list<std::string_view> haystacks) {
     return match_list<>(haystacks);
   }
 
   /// Like `match_list`, matching in parallel on `threads` real threads
   /// (`0` = available CPU cores - 2)
   template <typename Range>
-  std::vector<Match> match_list_parallel(const Range &haystacks, std::size_t threads) {
+  std::vector<Match> match_list_parallel(const Range &haystacks,
+                                         std::size_t threads) {
     const auto strs = detail::to_strs(haystacks);
-    frizbee_matches_t out =
-        frizbee_match_list_parallel(handle_, strs.data(), strs.size(), threads);
+    frizbee_matches_t out = frizbee_matcher_match_list_parallel(
+        handle_, strs.data(), strs.size(), threads);
     return detail::collect(out);
   }
-  std::vector<Match> match_list_parallel(std::initializer_list<std::string_view> haystacks,
-                                         std::size_t threads) {
+  std::vector<Match>
+  match_list_parallel(std::initializer_list<std::string_view> haystacks,
+                      std::size_t threads) {
     return match_list_parallel<>(haystacks, threads);
   }
 
   /// Like `match_list`, but each match includes the indices of the chars in the
-  /// haystack that matched the needle. Not optimized for performance: intended
-  /// for small lists, e.g. the visible portion of results
+  /// haystack that matched the needle
   template <typename Range>
   std::vector<MatchIndices> match_list_indices(const Range &haystacks) {
     const auto strs = detail::to_strs(haystacks);
-    frizbee_match_indices_list_t out =
-        frizbee_match_list_indices(handle_, strs.data(), strs.size());
-    detail::match_indices_list_owner owner{out};
+    frizbee_matches_t out =
+        frizbee_matcher_match_list(handle_, strs.data(), strs.size());
+    const auto matches = detail::collect(out);
 
     std::vector<MatchIndices> result;
-    result.reserve(out.len);
-    for (std::size_t i = 0; i < out.len; i++) {
-      const frizbee_match_indices_t &item = out.items[i];
-      const std::uint32_t *start = out.indices + item.indices_start;
-      result.push_back(MatchIndices{
-          item.score, item.index, item.exact,
-          std::vector<std::uint32_t>(start, start + item.indices_len)});
+    result.reserve(matches.size());
+    for (const Match &match : matches) {
+      std::size_t indices_len = 0;
+      frizbee_match_t metadata{};
+      const frizbee_str_t haystack = strs[match.index];
+      if (!frizbee_matcher_match_one_indices(handle_, haystack, match.index,
+                                             &metadata, nullptr, 0,
+                                             &indices_len))
+        continue;
+
+      std::vector<std::uint32_t> indices(indices_len);
+      frizbee_matcher_match_one_indices(handle_, haystack, match.index, nullptr,
+                                        indices.data(), indices.size(), nullptr);
+      result.push_back(MatchIndices{metadata.score, metadata.index,
+                                    metadata.exact, std::move(indices)});
     }
     return result;
   }
@@ -168,12 +170,12 @@ public:
     return match_list_indices<>(haystacks);
   }
 
-  /// Matches a single haystack; `index` is echoed into the match. Consider using
-  /// `match_list` if you have more than one haystack to match, as it performs
-  /// significantly better
-  std::optional<Match> match_one(std::string_view haystack, std::uint32_t index) {
+  /// Matches a single haystack; `index` is echoed into the match
+  std::optional<Match> match_one(std::string_view haystack,
+                                 std::uint32_t index) {
     Match out{};
-    if (!frizbee_match_one(handle_, detail::to_str(haystack), index, &out))
+    if (!frizbee_matcher_match_one(handle_, detail::to_str(haystack), index,
+                                   &out))
       return std::nullopt;
     return out;
   }

@@ -51,7 +51,6 @@ jobs:
         include:
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-gnu
-          # musl defaults to +crt-static, which the cdylib cannot link against
           - os: ubuntu-24.04
             target: x86_64-unknown-linux-musl
             rustflags: "-C target-feature=-crt-static"
@@ -79,40 +78,18 @@ jobs:
         if: contains(matrix.target, 'musl')
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
-      - name: Build
-        run: cargo build --release -p frizbee-c --target ${{ matrix.target }}
+      - name: Install cargo-c
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-c@0.10.19
+
+      - name: Build and package
+        shell: bash
         env:
           RUSTFLAGS: ${{ matrix.rustflags || '' }}
-
-      - name: Package
-        shell: bash
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
-          NAME="frizbee-${VERSION}-${{ matrix.target }}"
-          OUT="target/${{ matrix.target }}/release"
-
-          mkdir -p "dist/$NAME/lib/pkgconfig"
-          cp -r bindings/frizbee-c/include "dist/$NAME/include"
-          # staticlib + cdylib; names vary per platform
-          for f in libfrizbee.a libfrizbee.so libfrizbee.dylib \
-                   frizbee.dll frizbee.dll.lib frizbee.lib; do
-            [ -f "$OUT/$f" ] && cp "$OUT/$f" "dist/$NAME/lib/"
-          done
-
-          # pkg-config file with a placeholder prefix; consumers relocate it
-          cat > "dist/$NAME/lib/pkgconfig/frizbee.pc" <<EOF
-          prefix=/usr/local
-          exec_prefix=\${prefix}
-          libdir=\${exec_prefix}/lib
-          includedir=\${prefix}/include
-
-          Name: frizbee
-          Description: C bindings for frizbee, SIMD fuzzy string matching
-          Version: ${VERSION}
-          Libs: -L\${libdir} -lfrizbee
-          Libs.private: -lpthread -ldl -lm
-          Cflags: -I\${includedir}
-          EOF
+          PACKAGE=$(bindings/frizbee-c/package.sh "${{ matrix.target }}" dist)
+          NAME=$(basename "$PACKAGE")
 
           cd dist
           if [ "$RUNNER_OS" = "Windows" ]; then

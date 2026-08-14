@@ -11,5 +11,24 @@ repository.workspace = true
 crate-type = ["staticlib", "cdylib"]
 name = "frizbee"
 
+[features]
+capi = []
+
 [dependencies]
 frizbee = { path = "../..", default-features = false, features = ["std"] }
+
+[package.metadata.capi]
+min_version = "0.10.19"
+
+[package.metadata.capi.header]
+name = "frizbee"
+subdirectory = "frizbee"
+generation = true
+
+[package.metadata.capi.pkg_config]
+name = "frizbee"
+filename = "frizbee"
+strip_include_path_components = 1
+
+[package.metadata.capi.library]
+name = "frizbee"

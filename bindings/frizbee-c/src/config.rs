@@ -113,9 +113,7 @@ pub struct frizbee_scoring_t {
 
 /// Obtain defaults from `frizbee_config_default`
 ///
-/// The enum-valued fields are carried as plain `int32_t` so that out-of-range
-/// values from C cannot cause undefined behavior; any value outside the named
-/// constants falls back to that field's default
+/// Any value outside the named constants falls back to that field's default
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
 pub struct frizbee_config_t {
@@ -152,8 +150,7 @@ pub struct frizbee_config_t {
 
 /// Generates the private `*_to_core`/`*_from_core` conversions for enums
 ///
-/// Out-of-range values fall back to the core default rather than being
-/// undefined behavior
+/// Out-of-range values fallback to the default
 macro_rules! convert_enum {
     ($c:ident => $core:ident, $to_core:ident, $from_core:ident,
      { $($c_variant:ident => $core_variant:ident),+ $(,)? }) => {
@@ -227,7 +224,7 @@ fn scoring_from_core(scoring: &Scoring) -> frizbee_scoring_t {
     }
 }
 
-pub(crate) fn config_to_core(config: &frizbee_config_t) -> Config {
+fn config_to_core(config: &frizbee_config_t) -> Config {
     Config {
         // Negative means unlimited
         max_typos: (config.max_typos >= 0).then(|| config.max_typos.min(u16::MAX.into()) as u16),
@@ -236,6 +233,15 @@ pub(crate) fn config_to_core(config: &frizbee_config_t) -> Config {
         matching: matching_to_core(config.matching),
         sort: sort_strategy_to_core(config.sort),
         scoring: scoring_to_core(&config.scoring),
+    }
+}
+
+/// SAFETY: when non-NULL, `config` must point to a valid `frizbee_config_t`
+pub(crate) unsafe fn config_or_default(config: *const frizbee_config_t) -> Config {
+    if config.is_null() {
+        Config::default()
+    } else {
+        config_to_core(unsafe { &*config })
     }
 }
 
@@ -258,10 +264,14 @@ pub extern "C" fn frizbee_config_default() -> frizbee_config_t {
 
 /// Needle length up to which scores are guaranteed to fit within the `uint16_t`
 /// score. Longer needles still match, but their scores may saturate at
-/// `UINT16_MAX`. `scoring` must not be NULL
+/// `UINT16_MAX`. If `scoring` is NULL, returns the limit for default scoring.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn frizbee_scoring_max_needle_len(
     scoring: *const frizbee_scoring_t,
 ) -> usize {
-    scoring_to_core(unsafe { &*scoring }).max_needle_len()
+    if scoring.is_null() {
+        Scoring::default().max_needle_len()
+    } else {
+        scoring_to_core(unsafe { &*scoring }).max_needle_len()
+    }
 }

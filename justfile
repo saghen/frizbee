@@ -14,10 +14,8 @@ test-rust:
 
 [group('test')]
 test-c:
-    cd bindings/frizbee-c && cbindgen --crate frizbee-c --output include/frizbee.h && git diff --exit-code include/frizbee.h
-    cargo build -p frizbee-c
-    cd bindings/frizbee-c && cc -std=c11 -Wall -Wextra -Werror examples/smoke.c -Iinclude ../../target/debug/libfrizbee.a -lpthread -ldl -lm -o ../../target/smoke-c && ../../target/smoke-c
-    cd bindings/frizbee-c && c++ -std=c++17 -Wall -Wextra -Werror examples/smoke.cpp -Iinclude ../../target/debug/libfrizbee.a -lpthread -ldl -lm -o ../../target/smoke-cpp && ../../target/smoke-cpp
+    cd bindings/frizbee-c && cbindgen --crate frizbee-c --output ../../target/generated-frizbee.h && cmp include/frizbee/frizbee.h ../../target/generated-frizbee.h
+    bindings/frizbee-c/test-package.sh
 
 [group('test')]
 test-py:
@@ -40,7 +38,7 @@ build-rust:
 
 [group('build')]
 build-c:
-    cd bindings/frizbee-c && cbindgen --crate frizbee-c --output include/frizbee.h
+    cd bindings/frizbee-c && cbindgen --crate frizbee-c --output include/frizbee/frizbee.h
     cargo build --release -p frizbee-c
 
 [group('build')]
@@ -63,7 +61,8 @@ bench-rust:
 
 [group('bench')]
 bench-c: build-c
-    cd bindings/frizbee-c && cc -O2 -std=c11 bench/bench.c -Iinclude ../../target/release/libfrizbee.a -lpthread -ldl -lm -o ../../target/bench-c && ../../target/bench-c
+    cc -O2 -std=c11 bindings/frizbee-c/bench/bench.c -Ibindings/frizbee-c/include target/release/libfrizbee.a -lpthread -ldl -lm -o target/bench-c
+    target/bench-c
 
 [group('bench')]
 bench-py: build-py

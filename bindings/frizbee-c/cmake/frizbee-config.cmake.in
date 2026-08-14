@@ -1,0 +1,51 @@
+get_filename_component(_frizbee_prefix "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
+
+if(WIN32)
+  set(_frizbee_static "${_frizbee_prefix}/lib/frizbee.lib")
+  set(_frizbee_shared "${_frizbee_prefix}/bin/frizbee.dll")
+  set(_frizbee_implib "${_frizbee_prefix}/lib/frizbee.dll.lib")
+elseif(APPLE)
+  set(_frizbee_static "${_frizbee_prefix}/lib/libfrizbee.a")
+  set(_frizbee_shared "${_frizbee_prefix}/lib/libfrizbee.dylib")
+else()
+  set(_frizbee_static "${_frizbee_prefix}/lib/libfrizbee.a")
+  set(_frizbee_shared "${_frizbee_prefix}/lib/libfrizbee.so")
+endif()
+
+if(NOT TARGET frizbee::frizbee)
+  add_library(frizbee::frizbee SHARED IMPORTED)
+  set_target_properties(frizbee::frizbee PROPERTIES
+    IMPORTED_LOCATION "${_frizbee_shared}"
+    INTERFACE_INCLUDE_DIRECTORIES "${_frizbee_prefix}/include"
+  )
+  if(WIN32)
+    set_property(TARGET frizbee::frizbee PROPERTY IMPORTED_IMPLIB
+      "${_frizbee_implib}"
+    )
+  endif()
+endif()
+
+if(NOT TARGET frizbee::static)
+  add_library(frizbee::static STATIC IMPORTED)
+  set_target_properties(frizbee::static PROPERTIES
+    IMPORTED_LOCATION "${_frizbee_static}"
+    INTERFACE_INCLUDE_DIRECTORIES "${_frizbee_prefix}/include"
+  )
+
+  if(WIN32)
+    set_property(TARGET frizbee::static PROPERTY INTERFACE_LINK_LIBRARIES
+      "ws2_32;userenv;bcrypt;ntdll"
+    )
+  elseif(UNIX AND NOT APPLE)
+    include(CMakeFindDependencyMacro)
+    find_dependency(Threads)
+    set_property(TARGET frizbee::static PROPERTY INTERFACE_LINK_LIBRARIES
+      "Threads::Threads;${CMAKE_DL_LIBS};m"
+    )
+  endif()
+endif()
+
+unset(_frizbee_implib)
+unset(_frizbee_prefix)
+unset(_frizbee_shared)
+unset(_frizbee_static)

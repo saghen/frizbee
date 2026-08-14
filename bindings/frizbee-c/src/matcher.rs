@@ -5,7 +5,7 @@ use std::ptr;
 
 use frizbee::Matcher;
 
-use crate::config::{config_to_core, frizbee_config_t, frizbee_str_t};
+use crate::config::{config_or_default, frizbee_config_t, frizbee_str_t};
 
 /// Primary entrypoint for fuzzy matching
 ///
@@ -45,36 +45,15 @@ pub struct frizbee_matches_t {
     pub len: usize,
 }
 
-/// Like `frizbee_match_t` but includes the indices of the chars in the haystack
-/// that matched the needle in reverse order. Match `i` of
-/// `frizbee_match_indices_list_t` owns
-/// `indices[items[i].indices_start .. items[i].indices_start +
-/// items[i].indices_len]`
-#[repr(C)]
-#[derive(Debug, Clone, Copy)]
-pub struct frizbee_match_indices_t {
-    pub score: u16,
-    /// Index of the match in the original list of haystacks
-    pub index: u32,
-    /// Matched the needle exactly (e.g. "foo" on "foo")
-    pub exact: bool,
-    /// Start of this match's slice of the shared `indices` buffer
-    pub indices_start: u32,
-    /// Length of this match's slice of the shared `indices` buffer
-    pub indices_len: u32,
-}
-
-/// A list of matches with indices, owned by frizbee. All matches share the one
-/// `indices` buffer.
-///
-/// Release with `frizbee_match_indices_list_free`
-#[repr(C)]
-#[derive(Debug)]
-pub struct frizbee_match_indices_list_t {
-    pub items: *mut frizbee_match_indices_t,
-    pub len: usize,
-    pub indices: *mut u32,
-    pub indices_len: usize,
+impl From<Vec<frizbee::Match>> for frizbee_matches_t {
+    fn from(matches: Vec<frizbee::Match>) -> Self {
+        let items = matches
+            .into_iter()
+            .map(frizbee_match_t::from)
+            .collect::<Box<[_]>>();
+        let (items, len) = box_into_raw_parts(items);
+        frizbee_matches_t { items, len }
+    }
 }
 
 /// SAFETY: the caller promises `s.ptr` points to `s.len` bytes of valid UTF-8
@@ -114,38 +93,56 @@ unsafe fn haystacks_from_c<'a>(
     unsafe { std::slice::from_raw_parts(haystacks.cast(), len) }
 }
 
-/// The buffers cross the ABI as boxed slices so the free functions can rebuild
-/// them from pointer + length alone, without carrying capacities in the structs
-fn box_into_raw_parts<T>(slice: Box<[T]>) -> (*mut T, usize) {
-    let len = slice.len();
-    (Box::into_raw(slice) as *mut T, len)
+/// SAFETY: `matcher` must point to a live `frizbee_matcher_t`
+unsafe fn matcher_from_c<'a>(matcher: *mut frizbee_matcher_t) -> &'a mut Matcher {
+    assert!(!matcher.is_null(), "matcher must not be NULL");
+    unsafe { &mut (*matcher).inner }
 }
 
-fn match_to_c(m: &frizbee::Match) -> frizbee_match_t {
-    frizbee_match_t {
-        score: m.score,
-        index: m.index,
-        exact: m.exact,
+/// The buffers cross the ABI as boxed slices so the free functions can rebuild
+/// them from pointer + length alone, without carrying capacities in the
+/// structs. Returns (null, 0) for empty slices to avoid exposing dangling
+/// pointers to C.
+fn box_into_raw_parts<T>(slice: Box<[T]>) -> (*mut T, usize) {
+    let len = slice.len();
+    if len == 0 {
+        (ptr::null_mut(), 0)
+    } else {
+        (Box::into_raw(slice) as *mut T, len)
     }
 }
 
-fn matches_to_c(matches: Vec<frizbee::Match>) -> frizbee_matches_t {
-    let items = matches.iter().map(match_to_c).collect::<Box<[_]>>();
-    let (items, len) = box_into_raw_parts(items);
-    frizbee_matches_t { items, len }
+impl From<frizbee::Match> for frizbee_match_t {
+    fn from(m: frizbee::Match) -> Self {
+        frizbee_match_t {
+            score: m.score,
+            index: m.index,
+            exact: m.exact,
+        }
+    }
+}
+
+impl From<&frizbee::MatchIndices> for frizbee_match_t {
+    fn from(m: &frizbee::MatchIndices) -> Self {
+        frizbee_match_t {
+            score: m.score,
+            index: m.index,
+            exact: m.exact,
+        }
+    }
 }
 
 /// Creates a matcher that matches `needle` literally (no query syntax); use
 /// `frizbee_matcher_from_query` for query syntax and multi-pattern queries.
-/// Never returns NULL. `config` must not be NULL. Destroy the matcher with
-/// `frizbee_matcher_free`
+/// Never returns NULL. Pass NULL for `config` to use default configuration.
+/// Destroy the matcher with `frizbee_matcher_free`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn frizbee_matcher_new(
     needle: frizbee_str_t,
     config: *const frizbee_config_t,
 ) -> *mut frizbee_matcher_t {
     let needle = unsafe { str_from_c(needle) };
-    let config = config_to_core(unsafe { &*config });
+    let config = unsafe { config_or_default(config) };
     let inner = Matcher::new(needle, &config);
     Box::into_raw(Box::new(frizbee_matcher_t { inner }))
 }
@@ -159,14 +156,15 @@ pub unsafe extern "C" fn frizbee_matcher_new(
 /// Any special character can be escaped with a backslash, e.g. `\!foo` or
 /// `foo\$` match the literal leading/trailing character, and `foo\ bar` matches
 /// the literal space. Atoms with an empty needle, e.g. `!` or `^$`, are
-/// dropped. Otherwise identical to `frizbee_matcher_new`
+/// dropped. Pass NULL for `config` to use default configuration. Otherwise
+/// identical to `frizbee_matcher_new`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn frizbee_matcher_from_query(
     query: frizbee_str_t,
     config: *const frizbee_config_t,
 ) -> *mut frizbee_matcher_t {
     let query = unsafe { str_from_c(query) };
-    let config = config_to_core(unsafe { &*config });
+    let config = unsafe { config_or_default(config) };
     let inner = Matcher::from_query(query, &config);
     Box::into_raw(Box::new(frizbee_matcher_t { inner }))
 }
@@ -182,43 +180,44 @@ pub unsafe extern "C" fn frizbee_matcher_free(matcher: *mut frizbee_matcher_t) {
 /// Matches `haystacks_len` haystacks against the matcher's pattern, returning
 /// the matches ordered by the config's sort strategy. This API provides the
 /// most performant path when matching on lists. The result is owned by frizbee:
-/// release it with `frizbee_matches_free`
+/// release it with `frizbee_matches_free`. `matcher` must not be NULL.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn frizbee_match_list(
+pub unsafe extern "C" fn frizbee_matcher_match_list(
     matcher: *mut frizbee_matcher_t,
     haystacks: *const frizbee_str_t,
     haystacks_len: usize,
 ) -> frizbee_matches_t {
-    let matcher = unsafe { &mut *matcher };
+    let matcher = unsafe { matcher_from_c(matcher) };
     let haystacks = unsafe { haystacks_from_c(haystacks, haystacks_len) };
-    matches_to_c(matcher.inner.match_list(haystacks))
+    matcher.match_list(haystacks).into()
 }
 
-/// Like `frizbee_match_list`, matching in parallel on `threads` real threads
-/// (`0` = available CPU cores - 2). Threads work on 2048 item chunks, and the
-/// final result is identical to the sequential version
+/// Like `frizbee_matcher_match_list`, matching in parallel on `threads` real
+/// threads (`0` = available CPU cores - 2). Threads work on 2048 item chunks,
+/// and the final result is identical to the sequential version. `matcher` must
+/// not be NULL.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn frizbee_match_list_parallel(
+pub unsafe extern "C" fn frizbee_matcher_match_list_parallel(
     matcher: *mut frizbee_matcher_t,
     haystacks: *const frizbee_str_t,
     haystacks_len: usize,
     threads: usize,
 ) -> frizbee_matches_t {
-    let matcher = unsafe { &mut *matcher };
+    let matcher = unsafe { matcher_from_c(matcher) };
     let haystacks = unsafe { haystacks_from_c(haystacks, haystacks_len) };
-    matches_to_c(matcher.inner.match_list_parallel(haystacks, threads))
+    matcher.match_list_parallel(haystacks, threads).into()
 }
 
-/// Releases a match list returned by `frizbee_match_list` or
-/// `frizbee_match_list_parallel` and zeroes it, so a second free is a no-op.
-/// NULL is a no-op
+/// Releases a match list returned by `frizbee_matcher_match_list` or
+/// `frizbee_matcher_match_list_parallel` and zeroes it, so a second free is a
+/// no-op. NULL is a no-op
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn frizbee_matches_free(matches: *mut frizbee_matches_t) {
     if matches.is_null() {
         return;
     }
     let matches = unsafe { &mut *matches };
-    if !matches.items.is_null() {
+    if !matches.items.is_null() && matches.len > 0 {
         drop(unsafe { Box::from_raw(ptr::slice_from_raw_parts_mut(matches.items, matches.len)) });
     }
     matches.items = ptr::null_mut();
@@ -226,93 +225,67 @@ pub unsafe extern "C" fn frizbee_matches_free(matches: *mut frizbee_matches_t) {
 }
 
 /// Matches a single haystack, returning whether it matched and writing the
-/// match to `out` only when it did (`*out` is untouched otherwise).
+/// match to `out` only when it did (`*out` is untouched otherwise). `out` may
+/// be NULL if only the boolean result is needed. `matcher` must not be NULL.
 ///
-/// This API performs ~10% slower than the `frizbee_match_list` API. Consider
-/// using `frizbee_match_list` if you have more than one haystack to match, as
-/// it performs significantly better.
+/// This API performs ~10% slower than the `frizbee_matcher_match_list` API.
+/// Consider using `frizbee_matcher_match_list` if you have more than one
+/// haystack to match, as it performs significantly better.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn frizbee_match_one(
+pub unsafe extern "C" fn frizbee_matcher_match_one(
     matcher: *mut frizbee_matcher_t,
     haystack: frizbee_str_t,
     index: u32,
     out: *mut frizbee_match_t,
 ) -> bool {
-    let matcher = unsafe { &mut *matcher };
+    let matcher = unsafe { matcher_from_c(matcher) };
     let haystack = unsafe { str_from_c(haystack) };
-    match matcher.inner.match_one(haystack, index) {
+    match matcher.match_one(haystack, index) {
         Some(m) => {
-            unsafe { out.write(match_to_c(&m)) };
+            if !out.is_null() {
+                unsafe { out.write(frizbee_match_t::from(m)) };
+            }
             true
         }
         None => false,
     }
 }
 
-/// Like `frizbee_match_list`, but each match includes the indices of the chars
-/// in the haystack that matched the needle (see `frizbee_match_indices_t` for
-/// the layout). This API has not been optimized for performance, and should
-/// only be used on small lists, e.g. the visible portion of results. Useful for
-/// displaying matched indices in the UI. The result is owned by frizbee:
-/// release it with `frizbee_match_indices_list_free`
+/// Matches a single haystack with indices, returning whether it matched.
+///
+/// If `out_match` is non-NULL and a match occurred, writes the match metadata.
+/// If `out_indices` is non-NULL and `indices_capacity > 0`, copies up to
+/// `indices_capacity` matched byte offsets into `out_indices`.
+/// If `out_indices_len` is non-NULL, writes the total number of matched
+/// indices. `matcher` must not be NULL.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn frizbee_match_list_indices(
+pub unsafe extern "C" fn frizbee_matcher_match_one_indices(
     matcher: *mut frizbee_matcher_t,
-    haystacks: *const frizbee_str_t,
-    haystacks_len: usize,
-) -> frizbee_match_indices_list_t {
-    let matcher = unsafe { &mut *matcher };
-    let haystacks = unsafe { haystacks_from_c(haystacks, haystacks_len) };
-    let matches = matcher.inner.match_list_indices(haystacks);
-
-    // Flatten the per-match indices into one shared buffer
-    let total = matches.iter().map(|m| m.indices.len()).sum();
-    let mut items = Vec::with_capacity(matches.len());
-    let mut indices = Vec::<u32>::with_capacity(total);
-    for m in &matches {
-        items.push(frizbee_match_indices_t {
-            score: m.score,
-            index: m.index,
-            exact: m.exact,
-            indices_start: indices.len() as u32,
-            indices_len: m.indices.len() as u32,
-        });
-        indices.extend_from_slice(&m.indices);
+    haystack: frizbee_str_t,
+    index: u32,
+    out_match: *mut frizbee_match_t,
+    out_indices: *mut u32,
+    indices_capacity: usize,
+    out_indices_len: *mut usize,
+) -> bool {
+    let matcher = unsafe { matcher_from_c(matcher) };
+    let haystack = unsafe { str_from_c(haystack) };
+    match matcher.match_one_indices(haystack, index) {
+        Some(m) => {
+            if !out_match.is_null() {
+                unsafe { out_match.write(frizbee_match_t::from(&m)) };
+            }
+            if !out_indices_len.is_null() {
+                unsafe { out_indices_len.write(m.indices.len()) };
+            }
+            if !out_indices.is_null() && indices_capacity > 0 {
+                let to_copy = m.indices.len().min(indices_capacity);
+                unsafe {
+                    ptr::copy_nonoverlapping(m.indices.as_ptr(), out_indices, to_copy);
+                }
+            }
+            true
+        }
+        None => false,
     }
-
-    let (items, len) = box_into_raw_parts(items.into_boxed_slice());
-    let (indices, indices_len) = box_into_raw_parts(indices.into_boxed_slice());
-    frizbee_match_indices_list_t {
-        items,
-        len,
-        indices,
-        indices_len,
-    }
-}
-
-/// Releases a list returned by `frizbee_match_list_indices` and zeroes it, so a
-/// second free is a no-op. NULL is a no-op
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn frizbee_match_indices_list_free(
-    matches: *mut frizbee_match_indices_list_t,
-) {
-    if matches.is_null() {
-        return;
-    }
-    let matches = unsafe { &mut *matches };
-    if !matches.items.is_null() {
-        drop(unsafe { Box::from_raw(ptr::slice_from_raw_parts_mut(matches.items, matches.len)) });
-    }
-    if !matches.indices.is_null() {
-        drop(unsafe {
-            Box::from_raw(ptr::slice_from_raw_parts_mut(
-                matches.indices,
-                matches.indices_len,
-            ))
-        });
-    }
-    matches.items = ptr::null_mut();
-    matches.len = 0;
-    matches.indices = ptr::null_mut();
-    matches.indices_len = 0;
 }
