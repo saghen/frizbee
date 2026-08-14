@@ -15,6 +15,7 @@ repository = "https://github.com/saghen/frizbee"
 [package]
 name = "frizbee"
 description = "Fast typo-resistant fuzzy matching via SIMD smith waterman, similar algorithm to FZF"
+include = ["src/**", "Cargo.toml", "README.md", "LICENSE"]
 license.workspace = true
 version.workspace = true
 edition.workspace = true

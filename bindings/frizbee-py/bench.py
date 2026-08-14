@@ -17,7 +17,7 @@ DATA_PATH = os.path.join(
 WARMUP = 20
 ITERS = 100
 THREADS = 8
-MAX_ITEMS = 1000
+LIMIT = 1000
 
 
 def bench(name, func):
@@ -39,12 +39,12 @@ def main():
     with open(DATA_PATH, encoding="utf-8") as f:
         haystacks = f.read().splitlines()
 
-    matcher = frizbee.Matcher("linux", max_items=MAX_ITEMS)
+    matcher = frizbee.Matcher("linux", limit=LIMIT)
     # report match count and warm CPython's one-time UTF-8 cache
-    matches = matcher.match_list(haystacks)
+    matches = matcher.match(haystacks)
     print(
         f"chromium: {len(haystacks)} haystacks -> {len(matches)} matches, "
-        f'needle "linux", max_items = {MAX_ITEMS}'
+        f'needle "linux", limit = {LIMIT}'
     )
 
     start = time.perf_counter_ns()
@@ -53,15 +53,15 @@ def main():
         f"{'new Haystacks(string[]):':<36}{(time.perf_counter_ns() - start) / 1e6:8.2f} ms"
     )
 
-    bench("match_list (string[])", lambda: matcher.match_list(haystacks))
-    bench("match_list (Haystacks)", lambda: matcher.match_list(owned))
+    bench("match (string[])", lambda: matcher.match(haystacks))
+    bench("match (Haystacks)", lambda: matcher.match(owned))
     bench(
-        f"match_list_parallel({THREADS}) (string[])",
-        lambda: matcher.match_list_parallel(haystacks, THREADS),
+        f"match(threads={THREADS}) (string[])",
+        lambda: matcher.match(haystacks, threads=THREADS),
     )
     bench(
-        f"match_list_parallel({THREADS}) (Haystacks)",
-        lambda: matcher.match_list_parallel(owned, THREADS),
+        f"match(threads={THREADS}) (Haystacks)",
+        lambda: matcher.match(owned, threads=THREADS),
     )
 
 

@@ -1,8 +1,8 @@
-//! Per call zero-copy borrowed `&str`s under the GIL
-//! (`collect_haystacks`/`with_haystacks`), or copied once into the Rust-owned
-//! `Haystacks` arena and matched with the GIL released.
+//! Per-call zero-copy borrowed `&str`s under the GIL
+//! (`collect_haystacks`/`with_haystacks`), or strings copied once into
+//! Rust-owned `Haystacks` and matched with the GIL released.
 
-use pyo3::exceptions::PyTypeError;
+use pyo3::exceptions::{PyIndexError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyString, PyTuple};
 
@@ -21,7 +21,11 @@ pub(crate) fn collect_haystacks<'py>(
         })
     }
 
-    if let Ok(list) = haystacks.cast::<PyList>() {
+    if haystacks.cast::<PyString>().is_ok() {
+        Err(PyTypeError::new_err(
+            "haystacks must be an iterable of str, not str",
+        ))
+    } else if let Ok(list) = haystacks.cast::<PyList>() {
         list.iter().map(as_string).collect()
     } else if let Ok(tuple) = haystacks.cast::<PyTuple>() {
         tuple.iter().map(as_string).collect()
@@ -50,7 +54,7 @@ pub(crate) fn with_haystacks<R>(
 /// Match indices refer to this list's order
 #[pyclass(name = "Haystacks", module = "frizbee")]
 pub(crate) struct PyHaystacks {
-    /// Concatenated utf-8 bytes of every haystack
+    /// Concatenated UTF-8 bytes of every haystack
     bytes: Vec<u8>,
     /// Haystack `i` spans `bytes[offsets[i]..offsets[i + 1]]`; always `len + 1`
     /// entries, starting at 0
@@ -101,8 +105,14 @@ impl PyHaystacks {
 
     /// Appends every haystack in the iterable (list/tuple are the fast paths)
     fn extend(&mut self, items: &Bound<'_, PyAny>) -> PyResult<()> {
-        for item in collect_haystacks(items)? {
-            self.append(item.to_str()?);
+        let owners = collect_haystacks(items)?;
+        // Validate everything before mutating so extension remains atomic
+        for item in &owners {
+            item.to_str()?;
+        }
+        self.offsets.reserve(owners.len());
+        for item in owners {
+            self.append(item.to_str().expect("haystack was validated above"));
         }
         Ok(())
     }
@@ -115,6 +125,18 @@ impl PyHaystacks {
 
     fn __len__(&self) -> usize {
         self.offsets.len() - 1
+    }
+
+    fn __getitem__(&self, index: isize) -> PyResult<&str> {
+        let len = (self.offsets.len() - 1) as isize;
+        let index = if index < 0 { index + len } else { index };
+        if !(0..len).contains(&index) {
+            return Err(PyIndexError::new_err("Haystacks index out of range"));
+        }
+        let index = index as usize;
+        let span = &self.offsets[index..index + 2];
+        // SAFETY: the arena only ever holds bytes copied from `&str`s
+        Ok(unsafe { core::str::from_utf8_unchecked(&self.bytes[span[0]..span[1]]) })
     }
 
     fn __repr__(&self) -> String {

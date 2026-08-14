@@ -65,10 +65,11 @@ str_enum!(parse_sort, sort_to_str, SortStrategy, "sort", {
     frozen,
     get_all,
     eq,
+    hash,
     from_py_object,
     module = "frizbee"
 )]
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) struct PyScoring {
     /// Score for a matching character between needle and haystack
     match_score: u16,
@@ -132,7 +133,8 @@ impl PyScoring {
     #[new]
     #[pyo3(signature = (*, match_score = None, mismatch_penalty = None, gap_open_penalty = None,
         gap_extend_penalty = None, prefix_bonus = None, capitalization_bonus = None,
-        matching_case_bonus = None, exact_match_bonus = None, delimiter_bonus = None))]
+        matching_case_bonus = None, exact_match_bonus = None, delimiter_bonus = None),
+        text_signature = "(*, match_score=12, mismatch_penalty=6, gap_open_penalty=5, gap_extend_penalty=1, prefix_bonus=12, capitalization_bonus=4, matching_case_bonus=4, exact_match_bonus=8, delimiter_bonus=4)")]
     #[allow(clippy::too_many_arguments)]
     fn new(
         match_score: Option<u16>,
@@ -175,6 +177,15 @@ impl PyScoring {
             self.delimiter_bonus,
         )
     }
+
+    /// Needle length up to which scores are guaranteed to fit within the 16-bit
+    /// score.
+    ///
+    /// Longer needles still match, but their scores may saturate at `0xffff`.
+    #[getter]
+    fn max_needle_len(&self) -> usize {
+        frizbee::Scoring::from(self.clone()).max_needle_len()
+    }
 }
 
 /// Builds a core config from the kwargs shared by every `Matcher` constructor
@@ -205,16 +216,4 @@ pub(crate) fn build_config(
         sort: sort.map(parse_sort).transpose()?.unwrap_or(default.sort),
         scoring: scoring.map_or(default.scoring, Into::into),
     })
-}
-
-/// Needle length up to which scores are guaranteed to fit within the 16-bit
-/// score (the core default `Scoring` when omitted). Longer needles still match,
-/// but their scores may saturate at `0xffff`
-#[pyfunction]
-#[pyo3(signature = (scoring = None))]
-pub(crate) fn max_needle_len(scoring: Option<PyScoring>) -> usize {
-    scoring
-        .map(frizbee::Scoring::from)
-        .unwrap_or_default()
-        .max_needle_len()
 }

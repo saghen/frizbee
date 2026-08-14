@@ -31,6 +31,8 @@ class Haystacks:
         """Empties the list, keeping the allocation for reuse."""
 
     def __len__(self) -> int: ...
+    def __getitem__(self, index: int) -> str:
+        """Returns a haystack by index"""
 
 @final
 class Scoring:
@@ -99,7 +101,16 @@ class Scoring:
         E.g. "hw" on "hello_world" will give a bonus on "w".
         """
 
+    @property
+    def max_needle_len(self) -> int:
+        """Needle length up to which scores are guaranteed to fit within the
+        16-bit score.
+
+        Longer needles still match, but their scores may saturate at ``0xffff``.
+        """
+
     def __eq__(self, other: object) -> bool: ...
+    def __hash__(self) -> int: ...
 
 @final
 class Match:
@@ -123,7 +134,7 @@ class Match:
 @final
 class MatchIndices:
     """Like `Match` but includes the indices of the chars in the haystack that
-    matched the needle in reverse order."""
+    matched the needle in ascending order."""
 
     @property
     def score(self) -> int:
@@ -138,17 +149,17 @@ class MatchIndices:
         """Matched the needle exactly (e.g. "foo" on "foo")."""
 
     @property
-    def indices(self) -> list[int]:
-        """Indices of the chars in the haystack that matched the needle in reverse order."""
+    def indices(self) -> tuple[int, ...]:
+        """Ascending Python character indices in the haystack that matched the needle."""
 
     def __eq__(self, other: object) -> bool: ...
     def __hash__(self) -> int: ...
 
 @final
 class Pattern:
-    """A single pattern to match, parsed from syntax like ``!^foo``.
+    """A single pattern to match.
 
-    ``pattern`` and ``needle`` are read-only (make a new ``Pattern`` instead).
+    ``needle`` is read-only (make a new ``Pattern`` instead).
     """
 
     def __init__(
@@ -162,30 +173,6 @@ class Pattern:
         unicode: Unicode | None = None,
         scoring: Scoring | None = None,
     ) -> None: ...
-    @staticmethod
-    def from_query(query: str) -> list[Pattern]:
-        """Parses a query of whitespace separated atoms.
-
-        See `Matcher.from_query` for the atom syntax. E.g. ``foo !^bar`` matches
-        haystacks that fuzzy match ``foo`` and don't start with ``bar``. Escape
-        a literal space with a backslash, e.g. ``foo\\ bar`` is a single atom.
-        Atoms with an empty needle, e.g. ``!`` or ``^$``, are dropped.
-
-        The returned patterns carry only the ``matching`` mode derived from the
-        syntax. Any other per-pattern override is left as ``None`` and inherits
-        the matcher's config. Set fields on the results to override per-pattern.
-        For example, setting the max typos based on needle length::
-
-            patterns = Pattern.from_query("foo longerneedle")
-            for p in patterns:
-                p.max_typos = len(p.needle) // 4
-            matcher = Matcher.from_patterns(patterns)
-        """
-
-    @property
-    def pattern(self) -> str:
-        """Raw atom text, e.g. ``!^foo`` when parsed from a query."""
-
     @property
     def needle(self) -> str:
         """Text to match with the syntax stripped, e.g. ``foo``."""
@@ -207,9 +194,9 @@ class Pattern:
         """Per-pattern override for ``max_typos``; ``None`` inherits the matcher
         config.
 
-        Config's ``max_typos`` is itself optional, so there is no way to request
-        unlimited typos for a single pattern while the matcher's config sets a
-        limit. Instead, just set it to ``0xFFFF``.
+        The matcher's ``max_typos`` is itself optional, so there is no way to
+        request unlimited typos for a single pattern while the matcher's config
+        sets a limit. Instead, just set it to ``0xFFFF``.
         """
 
     @max_typos.setter
@@ -237,11 +224,30 @@ class Pattern:
     def scoring(self, value: Scoring | None) -> None: ...
     def __eq__(self, other: object) -> bool: ...
 
+def parse_query(query: str) -> list[Pattern]:
+    """Parses a query of whitespace separated atoms.
+
+    See `Matcher.from_query` for the atom syntax. E.g. ``foo !^bar`` matches
+    haystacks that fuzzy match ``foo`` and don't start with ``bar``. Escape
+    a literal space with a backslash, e.g. ``foo\\ bar`` is a single atom.
+    Atoms with an empty needle, e.g. ``!`` or ``^$``, are dropped.
+
+    The returned patterns carry only the ``matching`` mode derived from the
+    syntax. Any other per-pattern override is left as ``None`` and inherits
+    the matcher's config. Set fields on the results to override per-pattern.
+    For example, setting the max typos based on needle length::
+
+        patterns = parse_query("foo longerneedle")
+        for p in patterns:
+            p.max_typos = len(p.needle) // 4
+        matcher = Matcher(patterns)
+    """
+
 @final
 class Matcher:
     """Primary entrypoint for fuzzy matching.
 
-    `Matcher` compiles the pattern once, allocates memory for the Smith
+    `Matcher` compiles the patterns once, allocates memory for the Smith
     Waterman matrix, and reuses the selected SIMD backend.
 
     Ideally, only construct these at most once per list. They're cheap to
@@ -251,20 +257,22 @@ class Matcher:
 
     def __init__(
         self,
-        needle: str | Pattern,
+        patterns: str | Pattern | Sequence[str | Pattern],
         *,
         max_typos: int | None = 0,
-        max_items: int | None = None,
+        limit: int | None = None,
         casing: Casing | None = None,
         unicode: Unicode | None = None,
         matching: Matching | None = None,
         sort: Sort | None = None,
         scoring: Scoring | None = None,
     ) -> None:
-        """Creates a matcher from a single pattern (string or `Pattern`).
+        """Creates a matcher from one or more patterns (string or `Pattern`),
+        matched independently.
 
-        Strings convert into a pattern that matches literally. Use `from_query`
-        for query syntax and `from_patterns` for multi-pattern queries.
+        Strings convert into patterns that match literally. Use `from_query`
+        for query syntax. A haystack matches when all of the patterns match,
+        where the score is the sum of each pattern's score.
         """
 
     @classmethod
@@ -273,17 +281,17 @@ class Matcher:
         query: str,
         *,
         max_typos: int | None = 0,
-        max_items: int | None = None,
+        limit: int | None = None,
         casing: Casing | None = None,
         unicode: Unicode | None = None,
         matching: Matching | None = None,
         sort: Sort | None = None,
         scoring: Scoring | None = None,
     ) -> Matcher:
-        """Parses a single query atom, where special syntax changes the
-        matching mode:
+        """Parses whitespace-separated query atoms, where special syntax
+        changes each atom's matching mode:
 
-        - ``foo`` - defers to matching Config, which defaults to fuzzy
+        - ``foo`` - defers to matcher config, which defaults to fuzzy
         - ``^foo`` - prefix
         - ``foo$`` - suffix
         - ``'foo`` - substring
@@ -295,47 +303,26 @@ class Matcher:
         character, and ``foo\\ bar`` matches the literal space.
         """
 
-    @classmethod
-    def from_patterns(
-        cls,
-        patterns: Sequence[str | Pattern],
+    def match(
+        self,
+        haystacks: Iterable[str] | Haystacks,
         *,
-        max_typos: int | None = 0,
-        max_items: int | None = None,
-        casing: Casing | None = None,
-        unicode: Unicode | None = None,
-        matching: Matching | None = None,
-        sort: Sort | None = None,
-        scoring: Scoring | None = None,
-    ) -> Matcher:
-        """Creates a matcher from a list of patterns (string or `Pattern`),
-        matched independently.
-
-        A haystack matches when all of the patterns match, where the score is
-        the sum of each pattern's score.
-        """
-
-    def match_list(self, haystacks: Sequence[str] | Haystacks) -> list[Match]:
+        threads: int | None = None,
+    ) -> list[Match]:
         """Matches a list of haystacks.
 
-        This API provides the most performant path when matching on lists. The
-        GIL is released while matching if passed a `Haystacks`.
+        When ``threads`` is set, matches in parallel on multiple real threads.
+        When ``threads == 0``, the matcher will default to available CPU cores -
+        2.
+
+        This API provides the most performant path when matching on lists.
+        Ordinary iterables are copied into Rust memory before parallel matching;
+        matching then runs with the GIL released for every input type. Sequential
+        matching releases the GIL when passed a `Haystacks`.
         """
 
-    def match_list_parallel(
-        self, haystacks: Sequence[str] | Haystacks, threads: int
-    ) -> list[Match]:
-        """Matches a list of haystacks in parallel on multiple real threads.
-
-        If ``threads == 0``, the matcher will default to available CPU
-        cores - 2.
-
-        This API provides the most performant path when matching on lists. The
-        GIL is released while matching if passed a `Haystacks`.
-        """
-
-    def match_list_indices(
-        self, haystacks: Sequence[str] | Haystacks
+    def match_indices(
+        self, haystacks: Iterable[str] | Haystacks
     ) -> list[MatchIndices]:
         """Matches a list of haystacks, returning a list of `MatchIndices`
         which are equivalent to `Match` except they include the indices of the
@@ -343,50 +330,41 @@ class Matcher:
 
         This API has not been optimized for performance, and should only be
         used on small lists or after matching a list of haystacks with
-        `match_list`. Useful for displaying matched indices in the UI.
+        `match`. Useful for displaying matched indices in the UI.
 
         The GIL is released while matching if passed a `Haystacks`.
         """
 
-    def match_one(self, haystack: str, index: int) -> Match | None:
+    def match_one(self, haystack: str, index: int = 0) -> Match | None:
         """Matches a single haystack, returning its `Match` if it passes.
 
-        This API performs much slower than the `match_list` API with
+        This API performs much slower than the `match` API with
         `Haystacks`.
         """
 
-    def match_one_indices(self, haystack: str, index: int) -> MatchIndices | None:
+    def match_one_indices(
+        self, haystack: str, index: int = 0
+    ) -> MatchIndices | None:
         """Like `match_one` but includes the indices of the chars in the
         haystack that matched the needle. Useful for displaying matched indices
         in the UI."""
 
-    def set_pattern(self, pattern: str | Pattern) -> None:
-        """Updates the pattern (str or Pattern), keeping the config.
-
-        Skipped if the pattern is the same as the previous one.
-        """
-
-    def set_patterns(self, patterns: Sequence[str | Pattern]) -> None:
-        """Updates the patterns (str or Pattern items), keeping the config.
-
-        Skipped if the patterns are the same as the previous ones.
-        """
-
-    def set_config(
+    def update(
         self,
         *,
-        max_typos: int | None = 0,
-        max_items: int | None = None,
+        patterns: str | Pattern | Sequence[str | Pattern] | None = None,
+        max_typos: int | None = ...,
+        limit: int | None = ...,
         casing: Casing | None = None,
         unicode: Unicode | None = None,
         matching: Matching | None = None,
         sort: Sort | None = None,
         scoring: Scoring | None = None,
     ) -> None:
-        """Updates the config, rebuilding it from the kwargs.
+        """Updates any combination of patterns, matcher options, and result limit.
 
-        Omitted kwargs reset to their defaults (this is not a merge with the
-        current config). Skipped if the config is the same as the previous one.
+        Omitted values remain unchanged. ``None`` means unlimited for
+        ``max_typos`` and ``limit``.
         """
 
     @property
@@ -399,8 +377,8 @@ class Matcher:
         haystack is filtered out. ``None`` means unlimited."""
 
     @property
-    def max_items(self) -> int | None:
-        """Max matches returned from the ``match_list`` APIs. ``None`` means unlimited."""
+    def limit(self) -> int | None:
+        """Max matches returned from the ``match`` APIs. ``None`` means unlimited."""
 
     @property
     def casing(self) -> Casing:
@@ -424,11 +402,3 @@ class Matcher:
     def scoring(self) -> Scoring:
         """The scoring used by the smith waterman algorithm. Pay close attention to the
         documentation for each property, as small changes can lead to poor matching."""
-
-def max_needle_len(scoring: Scoring | None = None) -> int:
-    """Needle length up to which scores are guaranteed to fit within the 16-bit
-    score.
-
-    Uses the core default `Scoring` when omitted. Longer needles still match,
-    but their scores may saturate at ``0xffff``.
-    """

@@ -5,7 +5,7 @@ use crate::config::{
     unicode_to_str,
 };
 
-/// A single pattern to match, parsed from syntax like `!^foo`
+/// A single pattern to match
 #[pyclass(name = "Pattern", eq, from_py_object, module = "frizbee")]
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct PyPattern {
@@ -38,35 +38,6 @@ impl PyPattern {
         })
     }
 
-    /// Parses a query of whitespace separated atoms (see `Matcher.from_query`
-    /// for the atom syntax), e.g. `foo !^bar` matches haystacks that fuzzy
-    /// match `foo` and don't start with `bar`. Escape a literal space with a
-    /// backslash, e.g. `foo\ bar` is a single atom. Atoms with an empty needle,
-    /// e.g. `!` or `^$`, are dropped.
-    ///
-    /// The returned patterns carry only the matching mode derived from the
-    /// syntax. Any other per-pattern override is left as `None` and inherits
-    /// the matcher's config. Set fields on the results to override per-pattern.
-    /// For example, setting the max typos based on needle length::
-    ///
-    ///     patterns = Pattern.from_query("foo longerneedle")
-    ///     for p in patterns:
-    ///         p.max_typos = len(p.needle) // 4
-    ///     matcher = Matcher.from_patterns(patterns)
-    #[staticmethod]
-    fn from_query(query: &str) -> Vec<Self> {
-        frizbee::Pattern::parse_query(query)
-            .into_iter()
-            .map(|inner| Self { inner })
-            .collect()
-    }
-
-    /// Raw atom text, e.g. `!^foo` when parsed from a query
-    #[getter]
-    fn pattern(&self) -> &str {
-        &self.inner.pattern
-    }
-
     /// Text to match with the syntax stripped, e.g. `foo`
     #[getter]
     fn needle(&self) -> &str {
@@ -97,11 +68,11 @@ impl PyPattern {
     }
 
     /// Per-pattern override for `max_typos`
-    /// `None` inherits the matcher `Config`
+    /// `None` inherits the matcher option
     ///
-    /// Config's `max_typos` is itself optional, so there is no way to request
-    /// unlimited typos for a single pattern while the matcher's config sets a
-    /// limit. Instead, just set it to 0xFFFF.
+    /// The matcher's `max_typos` is itself optional, so there is no way to
+    /// request unlimited typos for a single pattern while the matcher's
+    /// config sets a limit. Instead, just set it to 0xFFFF.
     #[getter]
     fn max_typos(&self) -> Option<u16> {
         self.inner.config.max_typos
@@ -113,7 +84,7 @@ impl PyPattern {
     }
 
     /// Per-pattern override for `casing`
-    /// `None` inherits the matcher `Config`
+    /// `None` inherits the matcher option
     #[getter]
     fn casing(&self) -> Option<&'static str> {
         self.inner.config.casing.map(casing_to_str)
@@ -126,7 +97,7 @@ impl PyPattern {
     }
 
     /// Per-pattern override for `unicode`
-    /// `None` inherits the matcher `Config`
+    /// `None` inherits the matcher option
     #[getter]
     fn unicode(&self) -> Option<&'static str> {
         self.inner.config.unicode.map(unicode_to_str)
@@ -139,7 +110,7 @@ impl PyPattern {
     }
 
     /// Per-pattern override for `scoring`
-    /// `None` inherits the matcher `Config`
+    /// `None` inherits the matcher option
     #[getter]
     fn scoring(&self) -> Option<PyScoring> {
         self.inner.config.scoring.clone().map(Into::into)
@@ -174,6 +145,29 @@ impl PyPattern {
         repr.push(')');
         repr
     }
+}
+
+/// Parses a query of whitespace separated atoms (see `Matcher.from_query`
+/// for the atom syntax), e.g. `foo !^bar` matches haystacks that fuzzy
+/// match `foo` and don't start with `bar`. Escape a literal space with a
+/// backslash, e.g. `foo\ bar` is a single atom. Atoms with an empty needle,
+/// e.g. `!` or `^$`, are dropped.
+///
+/// The returned patterns carry only the matching mode derived from the
+/// syntax. Any other per-pattern override is left as `None` and inherits
+/// the matcher's config. Set fields on the results to override per-pattern.
+/// For example, setting the max typos based on needle length::
+///
+///     patterns = parse_query("foo longerneedle")
+///     for p in patterns:
+///         p.max_typos = len(p.needle) // 4
+///     matcher = Matcher(patterns)
+#[pyfunction]
+pub(crate) fn parse_query(query: &str) -> Vec<PyPattern> {
+    frizbee::Pattern::parse_query(query)
+        .into_iter()
+        .map(|inner| PyPattern { inner })
+        .collect()
 }
 
 /// Accepts either a `str` (matched literally, like the core `impl
