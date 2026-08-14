@@ -119,13 +119,13 @@ fn matches_indices_to_js(matches: &[frizbee::MatchIndices]) -> MatchIndicesArray
 pub struct Matcher {
     inner: frizbee::Matcher,
     /// Truncates the `matchList` results after sorting; `None` means unlimited
-    max_items: Option<u32>,
+    limit: Option<u32>,
 }
 
 impl Matcher {
     fn truncate<T>(&self, matches: &mut Vec<T>) {
-        if let Some(max_items) = self.max_items {
-            matches.truncate(max_items as usize);
+        if let Some(limit) = self.limit {
+            matches.truncate(limit as usize);
         }
     }
 }
@@ -137,9 +137,9 @@ impl Matcher {
     /// queries
     #[wasm_bindgen(constructor)]
     pub fn new(needle: &str, config: Option<ConfigObject>) -> Result<Matcher, JsError> {
-        let (config, max_items) = config_from_js(config)?;
+        let (config, limit) = config_from_js(config)?;
         let inner = frizbee::Matcher::new(needle, &config);
-        Ok(Matcher { inner, max_items })
+        Ok(Matcher { inner, limit })
     }
 
     /// Parses a single query atom, where special syntax changes the matching
@@ -157,9 +157,9 @@ impl Matcher {
     /// character, and `foo\ bar` matches the literal space.
     #[wasm_bindgen(js_name = fromQuery)]
     pub fn from_query(query: &str, config: Option<ConfigObject>) -> Result<Matcher, JsError> {
-        let (config, max_items) = config_from_js(config)?;
+        let (config, limit) = config_from_js(config)?;
         let inner = frizbee::Matcher::from_query(query, &config);
-        Ok(Matcher { inner, max_items })
+        Ok(Matcher { inner, limit })
     }
 
     /// Creates a matcher from a list of patterns, matched independently. A
@@ -170,10 +170,10 @@ impl Matcher {
         patterns: PatternArray,
         config: Option<ConfigObject>,
     ) -> Result<Matcher, JsError> {
-        let (config, max_items) = config_from_js(config)?;
+        let (config, limit) = config_from_js(config)?;
         let patterns = patterns_from_js(patterns)?;
         let inner = frizbee::Matcher::from_patterns(&patterns, &config);
-        Ok(Matcher { inner, max_items })
+        Ok(Matcher { inner, limit })
     }
 
     /// Matches a list of haystacks, returning a list of `Match` values. This
@@ -268,9 +268,9 @@ impl Matcher {
     /// config is the same as the previous one
     #[wasm_bindgen(js_name = setConfig)]
     pub fn set_config(&mut self, config: ConfigObject) -> Result<(), JsError> {
-        let (config, max_items) = config_from_js(Some(config))?;
+        let (config, limit) = config_from_js(Some(config))?;
         self.inner.set_config(config);
-        self.max_items = max_items;
+        self.limit = limit;
         Ok(())
     }
 }

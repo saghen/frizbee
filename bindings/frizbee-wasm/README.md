@@ -38,7 +38,7 @@ matcher = Matcher.fromPatterns(patterns)
 
 ## Performance
 
-Matching runs on WASM SIMD128 (16 byte lanes), roughly 60% slower than the native crate's AVX-512 throughput. The `string[]` path re-encodes every string on every call, so prefer an owned `Haystacks` when matching the same list repeatedly (e.g. per keystroke). Limiting `maxItems` is essential for performance, as creating 100k `Match` instances costs >100ms. On the Chromium file list (1.4M haystacks, needle "linux", maxItems 1000):
+Matching runs on WASM SIMD128 (16 byte lanes), roughly 60% slower than the native crate's AVX-512 throughput. The `string[]` path re-encodes every string on every call, so prefer an owned `Haystacks` when matching the same list repeatedly (e.g. per keystroke). Setting `limit` is essential for performance, as creating 100k `Match` instances costs >100ms. On the Chromium file list (1.4M haystacks, needle "linux", limit 1000):
 
 ```
 new Haystacks(string[]):    156 ms (one-time copy)

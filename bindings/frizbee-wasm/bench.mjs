@@ -42,12 +42,12 @@ function bench(name, fn) {
   console.log(`${pad(name)}${fmt(mean)} ms/iter (min ${fmt(Math.min(...times))} ms)`)
 }
 
-const matcher = new Matcher('linux', { maxItems: MAX_ITEMS })
+const matcher = new Matcher('linux', { limit: MAX_ITEMS })
 // report match count
 const matches = matcher.matchList(haystacks)
 console.log(
   `chromium: ${haystacks.length} haystacks -> ${matches.length} matches, ` +
-    `needle "linux", max_items = ${MAX_ITEMS}`,
+    `needle "linux", limit = ${MAX_ITEMS}`,
 )
 
 const start = performance.now()

@@ -55,10 +55,10 @@ export interface Config {
   maxTypos?: number;
   /**
    * Maximum number of matches returned from the `matchList` APIs, applied after sorting
-   * (so with the default sort, the best `maxItems` matches are returned). `Infinity`
+   * (so with the default sort, the best `limit` matches are returned). `Infinity`
    * and `undefined` mean unlimited
    */
-  maxItems?: number;
+  limit?: number;
   /** Controls how case sensitivity/insensitivity is handled while matching */
   casing?: CaseMatching;
   /** Controls how unicode is handled while matching */
@@ -291,7 +291,7 @@ pub(crate) fn parse_max_typos(value: f64) -> Result<Option<u16>, JsError> {
 }
 
 /// `Infinity` means unlimited
-fn parse_max_items(value: f64) -> Result<Option<u32>, JsError> {
+fn parse_limit(value: f64) -> Result<Option<u32>, JsError> {
     if value.is_infinite() && value.is_sign_positive() {
         return Ok(None);
     }
@@ -299,11 +299,11 @@ fn parse_max_items(value: f64) -> Result<Option<u32>, JsError> {
         return Ok(Some(value as u32));
     }
     Err(JsError::new(
-        "invalid maxItems: expected a non-negative integer or Infinity for unlimited",
+        "invalid limit: expected a non-negative integer or Infinity for unlimited",
     ))
 }
 
-/// Returns the core config plus the binding-level `maxItems` limit (`None` =
+/// Returns the core config plus the binding-level `limit` (`None` =
 /// unlimited)
 pub(crate) fn config_from_js(
     config: Option<ConfigObject>,
@@ -317,8 +317,8 @@ pub(crate) fn config_from_js(
         return Err(JsError::new("invalid config: expected an object"));
     }
 
-    let max_items = opt_f64(&config, "maxItems")?
-        .map(parse_max_items)
+    let limit = opt_f64(&config, "limit")?
+        .map(parse_limit)
         .transpose()?
         .flatten();
     let config = frizbee::Config {
@@ -344,7 +344,7 @@ pub(crate) fn config_from_js(
             .map(|scoring| scoring.to_core())
             .unwrap_or(default.scoring),
     };
-    Ok((config, max_items))
+    Ok((config, limit))
 }
 
 /// Needle length up to which scores are guaranteed to fit within the 16-bit
