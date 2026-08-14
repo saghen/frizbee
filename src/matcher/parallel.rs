@@ -9,6 +9,9 @@ use crate::k_merge::{
 use crate::sort::radix_sort_matches;
 use crate::{Match, SortStrategy};
 
+const ITEMS_PER_THREAD: usize = if cfg!(miri) { 4 } else { 2000 };
+const CHUNK_SIZE: usize = if cfg!(miri) { 8 } else { 2048 };
+
 impl Matcher {
     /// Matches a list of haystacks in parallel on multiple real threads,
     /// returning a list of [`Match`] values.
@@ -33,7 +36,9 @@ impl Matcher {
         }
 
         // Limit threads based on the number of haystacks
-        let threads = threads.min(haystacks.len().div_ceil(2000)).max(1);
+        let threads = threads
+            .min(haystacks.len().div_ceil(ITEMS_PER_THREAD))
+            .max(1);
 
         if haystacks.is_empty() || self.patterns.is_empty() || threads == 1 {
             return self.match_list(haystacks);
@@ -41,8 +46,7 @@ impl Matcher {
 
         // Smaller chunks enable better load balancing via stealing
         // but too small increases atomic contention
-        let chunk_size = 2048;
-        let num_chunks = haystacks.len().div_ceil(chunk_size);
+        let num_chunks = haystacks.len().div_ceil(CHUNK_SIZE);
         let next_chunk = AtomicUsize::new(0);
 
         let matcher = &*self;
@@ -61,8 +65,8 @@ impl Matcher {
                                 break;
                             }
 
-                            let start = chunk_idx * chunk_size;
-                            let end = (start + chunk_size).min(haystacks.len());
+                            let start = chunk_idx * CHUNK_SIZE;
+                            let end = (start + CHUNK_SIZE).min(haystacks.len());
                             let haystacks_chunk = &haystacks[start..end];
 
                             matcher.match_list_into(
@@ -100,11 +104,12 @@ impl Matcher {
 
 #[cfg(test)]
 mod tests {
+    use super::CHUNK_SIZE;
     use crate::{Config, Matcher};
 
     fn thread_counts() -> &'static [usize] {
         if cfg!(miri) {
-            &[1, 2, 8]
+            &[2]
         } else {
             &[1, 2, 3, 4, 5, 6, 7, 8]
         }
@@ -112,17 +117,17 @@ mod tests {
 
     #[test]
     fn sorted_matches_sequential_across_chunk_boundaries() {
-        let mut haystacks = (0..4101)
+        let mut haystacks = (0..2 * CHUNK_SIZE + 5)
             .map(|index| format!("nomatch-{index}"))
             .collect::<Vec<_>>();
         for (index, value) in [
             (0, "abc"),
-            (2047, "xabc"),
-            (2048, "abxc"),
-            (2049, "alpha/beta/abc"),
-            (4095, "ABC"),
-            (4096, "a_b_c"),
-            (4100, "zabc"),
+            (CHUNK_SIZE - 1, "xabc"),
+            (CHUNK_SIZE, "abxc"),
+            (CHUNK_SIZE + 1, "alpha/beta/abc"),
+            (2 * CHUNK_SIZE - 1, "ABC"),
+            (2 * CHUNK_SIZE, "a_b_c"),
+            (2 * CHUNK_SIZE + 4, "zabc"),
         ] {
             haystacks[index] = value.to_string();
         }
@@ -150,19 +155,19 @@ mod tests {
     fn multi_pattern_matches_sequential_across_chunk_boundaries() {
         use crate::{Matcher, Pattern, SortStrategy};
 
-        let mut haystacks = (0..4101)
+        let mut haystacks = (0..2 * CHUNK_SIZE + 5)
             .map(|index| format!("nomatch-{index}"))
             .collect::<Vec<_>>();
         for (index, value) in [
             (0, "abc"),
             (1, "abcxyz"),
-            (2047, "xabc"),
-            (2048, "abxc"),
-            (2049, "alpha/beta/abc"),
-            (2050, "xyz/abc"),
-            (4095, "ABC"),
-            (4096, "a_b_c"),
-            (4100, "zabc"),
+            (CHUNK_SIZE - 1, "xabc"),
+            (CHUNK_SIZE, "abxc"),
+            (CHUNK_SIZE + 1, "alpha/beta/abc"),
+            (CHUNK_SIZE + 2, "xyz/abc"),
+            (2 * CHUNK_SIZE - 1, "ABC"),
+            (2 * CHUNK_SIZE, "a_b_c"),
+            (2 * CHUNK_SIZE + 4, "zabc"),
         ] {
             haystacks[index] = value.to_string();
         }

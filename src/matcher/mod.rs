@@ -597,11 +597,16 @@ mod tests {
 
     #[test]
     fn long_needles_saturate_instead_of_panicking() {
-        let config = Config::default();
-        let needle = "a".repeat(8000);
-        let mut matcher = Matcher::new(needle.as_str(), &config);
+        let scoring = Scoring {
+            match_score: u16::MAX / 4 + 1,
+            ..Scoring::default()
+        };
+        let needle = "aaaa";
+        assert!(needle.len() > scoring.max_needle_len());
+        let config = Config::default().scoring(scoring);
+        let mut matcher = Matcher::new(needle, &config);
 
-        let haystacks = [needle.as_str(), "aaa", "zzz"];
+        let haystacks = [needle, "aaa", "zzzz"];
         let matches = matcher.match_list(&haystacks);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].index, 0);
@@ -610,12 +615,18 @@ mod tests {
 
     #[test]
     fn long_needles_saturate_on_the_literal_path() {
-        let config = Config::default().matching(crate::Matching::Prefix);
-        let needle = "a".repeat(2 * u16::MAX as usize);
-        let haystack = "a".repeat(2 * u16::MAX as usize + 5);
-        let mut matcher = Matcher::new(needle.as_str(), &config);
+        let scoring = Scoring {
+            match_score: u16::MAX / 4 + 1,
+            ..Scoring::default()
+        };
+        let needle = "aaaa";
+        assert!(needle.len() > scoring.max_needle_len());
+        let config = Config::default()
+            .matching(crate::Matching::Prefix)
+            .scoring(scoring);
+        let mut matcher = Matcher::new(needle, &config);
 
-        let matches = matcher.match_list(&[haystack.as_str(), "b"]);
+        let matches = matcher.match_list(&["aaaaa", "bbbb"]);
         assert_eq!(matches.len(), 1);
         assert_eq!(matches[0].score, u16::MAX);
     }

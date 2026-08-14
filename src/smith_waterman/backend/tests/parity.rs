@@ -25,7 +25,7 @@ impl BackendCase {
             .len(test_bound(96, 32), &[1, 7, 8, 15, 16, 31, 32, 63, 64])
             .max(1);
         let haystack_len = cursor.len(
-            test_bound(768, 128),
+            test_bound(768, 72),
             &[0, 1, 7, 8, 15, 16, 31, 32, 63, 64, 1023, 1024, 1025],
         );
         let max_typos = match cursor.next() % 5 {

@@ -95,7 +95,7 @@ fn assert_public_api_case(case: &ApiCase) {
         Matcher::new(&case.needle, &case.config).match_list_parallel(&case.haystacks, 1);
     assert_match_views_eq("parallel threads=1", &parallel_one, &one_shot);
 
-    for threads in [2, 3, 8] {
+    for &threads in PARALLEL_THREAD_COUNTS {
         let parallel =
             Matcher::new(&case.needle, &case.config).match_list_parallel(&case.haystacks, threads);
         if case.config.sort == SortStrategy::ScoreThenIndexAsc {
@@ -239,6 +239,10 @@ fn haystacks_with(len: usize, patches: &[(usize, &str)]) -> Vec<String> {
     }
     haystacks
 }
+
+const PARALLEL_CHUNK_SIZE: usize = if cfg!(miri) { 8 } else { 2048 };
+const PARALLEL_THREAD_COUNTS: &[usize] = if cfg!(miri) { &[2] } else { &[2, 3, 8] };
+const BOUNDARY_TEST_THREADS: usize = if cfg!(miri) { 2 } else { 8 };
 
 #[derive(Debug, Clone)]
 struct MultiPatternCase {
@@ -408,7 +412,7 @@ fn assert_multi_pattern_case(case: &MultiPatternCase) {
         "multi-pattern sorted multiset mismatch for {case:?}"
     );
 
-    for threads in [2, 3, 8] {
+    for &threads in PARALLEL_THREAD_COUNTS {
         let parallel = matcher.match_list_parallel(&case.haystacks, threads);
         assert_match_views_eq("multi-pattern parallel", &parallel, &sorted);
     }
@@ -609,9 +613,13 @@ fn case_matching_modes_apply_to_matches_and_indices() {
 fn long_needle_scores_saturate() {
     // Needles past `max_needle_len` match with scores capped at u16::MAX instead
     // of panicking
-    let long_needle = "a".repeat(5000);
-    let matches =
-        Matcher::new(&long_needle, &Config::default()).match_list(&[long_needle.as_str()]);
+    let scoring = Scoring {
+        match_score: u16::MAX / 4 + 1,
+        ..Scoring::default()
+    };
+    let needle = "aaaa";
+    assert!(needle.len() > scoring.max_needle_len());
+    let matches = Matcher::new(needle, &Config::default().scoring(scoring)).match_list(&[needle]);
     assert_eq!(matches.len(), 1);
     assert_eq!(matches[0].score, u16::MAX);
 }
@@ -626,16 +634,17 @@ fn zero_parallel_threads_uses_available_parallelism() {
 
 #[test]
 fn parallel_chunk_boundaries_match_sequential() {
+    let chunk_size = PARALLEL_CHUNK_SIZE;
     let haystacks = haystacks_with(
-        4101,
+        2 * chunk_size + 5,
         &[
             (0, "abc"),
-            (2047, "xabc"),
-            (2048, "abxc"),
-            (2049, "alpha/beta/abc"),
-            (4095, "ABC"),
-            (4096, "a_b_c"),
-            (4100, "zabc"),
+            (chunk_size - 1, "xabc"),
+            (chunk_size, "abxc"),
+            (chunk_size + 1, "alpha/beta/abc"),
+            (2 * chunk_size - 1, "ABC"),
+            (2 * chunk_size, "a_b_c"),
+            (2 * chunk_size + 4, "zabc"),
         ],
     );
 
@@ -644,12 +653,14 @@ fn parallel_chunk_boundaries_match_sequential() {
     let parallel_one = Matcher::new("abc", &sorted).match_list_parallel(&haystacks, 1);
     assert_match_views_eq("single-thread chunk boundary", &parallel_one, &sequential);
 
-    let parallel = Matcher::new("abc", &sorted).match_list_parallel(&haystacks, 8);
+    let parallel =
+        Matcher::new("abc", &sorted).match_list_parallel(&haystacks, BOUNDARY_TEST_THREADS);
     assert_match_views_eq("sorted chunk boundary", &parallel, &sequential);
 
     let unsorted = Config::default().sort(SortStrategy::IndexAsc);
     let sequential = Matcher::new("abc", &unsorted).match_list(&haystacks);
-    let parallel = Matcher::new("abc", &unsorted).match_list_parallel(&haystacks, 8);
+    let parallel =
+        Matcher::new("abc", &unsorted).match_list_parallel(&haystacks, BOUNDARY_TEST_THREADS);
     assert_eq!(
         sorted_match_views(&parallel),
         sorted_match_views(&sequential)
@@ -658,13 +669,29 @@ fn parallel_chunk_boundaries_match_sequential() {
 
 #[test]
 fn sorted_parallel_equal_scores_use_index_tiebreaking_across_chunks() {
-    let haystacks = haystacks_with(4097, &[(2047, "abc"), (2048, "abc"), (4096, "abc")]);
+    let chunk_size = PARALLEL_CHUNK_SIZE;
+    let haystacks = haystacks_with(
+        2 * chunk_size + 1,
+        &[
+            (chunk_size - 1, "abc"),
+            (chunk_size, "abc"),
+            (2 * chunk_size, "abc"),
+        ],
+    );
 
     let config = Config::default();
     let sequential = Matcher::new("abc", &config).match_list(&haystacks);
-    assert_eq!(match_indices(&sequential), vec![2047, 2048, 4096]);
+    assert_eq!(
+        match_indices(&sequential),
+        vec![
+            (chunk_size - 1) as u32,
+            chunk_size as u32,
+            (2 * chunk_size) as u32
+        ]
+    );
 
-    let parallel = Matcher::new("abc", &config).match_list_parallel(&haystacks, 8);
+    let parallel =
+        Matcher::new("abc", &config).match_list_parallel(&haystacks, BOUNDARY_TEST_THREADS);
     assert_match_views_eq("equal-score chunk tie", &parallel, &sequential);
 }
 
@@ -690,15 +717,16 @@ fn merges_by_score_then_index_desc() {
 
 #[test]
 fn score_prefer_higher_index_matches_sequential_and_parallel() {
+    let chunk_size = PARALLEL_CHUNK_SIZE;
     let haystacks = haystacks_with(
-        4101,
+        2 * chunk_size + 5,
         &[
             (0, "abc"),
             (1, "xabc"),
-            (2047, "abc"),
-            (2048, "a_b_c"),
-            (4096, "abc"),
-            (4100, "zabc"),
+            (chunk_size - 1, "abc"),
+            (chunk_size, "a_b_c"),
+            (2 * chunk_size, "abc"),
+            (2 * chunk_size + 4, "zabc"),
         ],
     );
     let config = Config::default().sort(SortStrategy::ScoreThenIndexDesc);
@@ -710,21 +738,22 @@ fn score_prefer_higher_index_matches_sequential_and_parallel() {
             || (pair[0].score == pair[1].score && pair[0].index > pair[1].index)
     }));
 
-    let parallel = matcher.match_list_parallel(&haystacks, 8);
+    let parallel = matcher.match_list_parallel(&haystacks, BOUNDARY_TEST_THREADS);
     assert_match_views_eq("prefer higher index", &parallel, &sequential);
 }
 
 #[test]
 fn reverse_index_matches_sequential_and_parallel() {
+    let chunk_size = PARALLEL_CHUNK_SIZE;
     let haystacks = haystacks_with(
-        4101,
+        2 * chunk_size + 5,
         &[
             (0, "abc"),
             (1, "xabc"),
-            (2047, "abc"),
-            (2048, "a_b_c"),
-            (4096, "abc"),
-            (4100, "zabc"),
+            (chunk_size - 1, "abc"),
+            (chunk_size, "a_b_c"),
+            (2 * chunk_size, "abc"),
+            (2 * chunk_size + 4, "zabc"),
         ],
     );
     let config = Config::default().sort(SortStrategy::IndexDesc);
@@ -737,7 +766,7 @@ fn reverse_index_matches_sequential_and_parallel() {
             .all(|pair| pair[0].index > pair[1].index)
     );
 
-    let parallel = matcher.match_list_parallel(&haystacks, 8);
+    let parallel = matcher.match_list_parallel(&haystacks, BOUNDARY_TEST_THREADS);
     assert_match_views_eq("reverse index", &parallel, &sequential);
 }
 

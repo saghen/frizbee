@@ -13,6 +13,10 @@ test-rust:
     cargo test
 
 [group('test')]
+test-rust-miri:
+    cargo miri test
+
+[group('test')]
 test-c:
     cd bindings/frizbee-c && cbindgen --crate frizbee-c --output ../../target/generated-frizbee.h && cmp include/frizbee/frizbee.h ../../target/generated-frizbee.h
     bindings/frizbee-c/test-package.sh

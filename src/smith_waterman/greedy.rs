@@ -99,15 +99,13 @@ mod tests {
     const CHAR_SCORE: u16 = MATCH_SCORE + MATCHING_CASE_BONUS;
 
     fn get_score(needle: &str, haystack: &str) -> u16 {
-        match_greedy(
-            needle.as_bytes(),
-            haystack.as_bytes(),
-            &Scoring::default(),
-            false,
-            true,
-        )
-        .map(|(score, _)| score)
-        .unwrap_or_default()
+        get_score_with(needle, haystack, &Scoring::default())
+    }
+
+    fn get_score_with(needle: &str, haystack: &str, scoring: &Scoring) -> u16 {
+        match_greedy(needle.as_bytes(), haystack.as_bytes(), scoring, false, true)
+            .map(|(score, _)| score)
+            .unwrap_or_default()
     }
 
     #[test]
@@ -158,8 +156,11 @@ mod tests {
     fn huge_gap_saturates_instead_of_overflowing() {
         // the gap penalty exceeds u16::MAX, so the score saturates to 0 before the case
         // bonus
-        let haystack = format!("a{}b", "x".repeat(70000));
-        assert_eq!(get_score("ab", &haystack), MATCHING_CASE_BONUS);
+        let scoring = Scoring {
+            gap_extend_penalty: u16::MAX / 2 + 1,
+            ..Scoring::default()
+        };
+        assert_eq!(get_score_with("ab", "axxxb", &scoring), MATCHING_CASE_BONUS);
     }
 
     #[test]
