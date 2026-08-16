@@ -1,16 +1,30 @@
 use crate::Match;
-use alloc::vec;
+use alloc::{vec, vec::Vec};
 
-/// Sorts a slice of [`Match`] values in-place by descending `score` using a
+/// Sorts a [`Vec`] of [`Match`] values in-place by descending `score` using a
 /// stable radix sort. This assumes that the matches are already sorted by
 /// index.
 #[inline]
-pub fn radix_sort_matches(matches: &mut [Match]) {
+pub fn radix_sort_matches(matches: &mut Vec<Match>) {
+    let (matches_b, high_radices) = radix_sort_first_pass(matches);
+
+    if high_radices == 0 {
+        *matches = matches_b;
+        return;
+    }
+
+    radix_sort_second_pass(matches_b, matches);
+}
+
+#[inline(always)]
+fn radix_sort_first_pass(matches: &[Match]) -> (Vec<Match>, u8) {
     // pass 1
     let mut histogram = [0u32; 256];
+    let mut high_radices = 0u8;
     for m in matches.iter() {
         let radix = m.score & 0xFF;
         histogram[radix as usize] += 1;
+        high_radices |= (m.score >> 8) as u8;
     }
     let mut offsets = [0u32; 256];
     for idx in (1..256).rev() {
@@ -20,17 +34,23 @@ pub fn radix_sort_matches(matches: &mut [Match]) {
     let mut matches_b = vec![Match::default(); matches.len()];
     for m in matches.iter() {
         let radix = m.score & 0xFF;
-        matches_b[offsets[radix as usize] as usize] = *m;
+        let output_idx = offsets[radix as usize] as usize;
+        matches_b[output_idx] = *m;
         offsets[radix as usize] += 1;
     }
 
+    (matches_b, high_radices)
+}
+
+#[inline(always)]
+fn radix_sort_second_pass(matches_b: Vec<Match>, matches: &mut [Match]) {
     // pass 2
     let mut histogram = [0u32; 256];
     for m in matches_b.iter() {
         let radix = (m.score >> 8) & 0xFF;
         histogram[radix as usize] += 1;
     }
-    offsets[255] = 0;
+    let mut offsets = [0u32; 256];
     for idx in (1..256).rev() {
         offsets[idx - 1] = offsets[idx] + histogram[idx];
     }
