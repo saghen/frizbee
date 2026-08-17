@@ -18,7 +18,7 @@ test-rust-miri:
 
 [group('test')]
 test-c:
-    cd bindings/frizbee-c && cbindgen --crate frizbee-c --output ../../target/generated-frizbee.h && cmp include/frizbee/frizbee.h ../../target/generated-frizbee.h
+    cd bindings/frizbee-c && cbindgen --crate frizbee-c --output ../../target/generated-frizbee.h && git diff --no-index --exit-code --ignore-cr-at-eol include/frizbee/frizbee.h ../../target/generated-frizbee.h
     bindings/frizbee-c/test-package.sh
 
 [group('test')]
