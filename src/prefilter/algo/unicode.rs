@@ -102,17 +102,19 @@ impl<B: Backend> Prefilter<B> {
         };
 
         // check the case flipped version
-        mask = mask.or(unsafe {
-            Self::char_variant_mask(
-                (chunk, chunk_mask),
-                B::splat(needle_char.flipped_chars[char_len - 1]),
-                start,
-                len,
-                haystack,
-                char_len,
-                needle_char.flipped_chars,
-            )
-        });
+        if needle_char.has_flip {
+            mask = mask.or(unsafe {
+                Self::char_variant_mask(
+                    (chunk, chunk_mask),
+                    B::splat(needle_char.flipped_chars[char_len - 1]),
+                    start,
+                    len,
+                    haystack,
+                    char_len,
+                    needle_char.flipped_chars,
+                )
+            });
+        }
         mask
     }
 
@@ -161,17 +163,19 @@ impl<B: Backend> Prefilter<B> {
                 };
 
                 // check the case flipped version
-                mask = mask.or(unsafe {
-                    Self::char_variant_mask(
-                        (chunk, chunk_mask),
-                        last_needle_char_bytes.1,
-                        start,
-                        len,
-                        haystack,
-                        needle_char.len,
-                        needle_char.flipped_chars,
-                    )
-                });
+                if needle_char.has_flip {
+                    mask = mask.or(unsafe {
+                        Self::char_variant_mask(
+                            (chunk, chunk_mask),
+                            last_needle_char_bytes.1,
+                            start,
+                            len,
+                            haystack,
+                            needle_char.len,
+                            needle_char.flipped_chars,
+                        )
+                    });
+                }
 
                 if mask.is_zero() {
                     break;
@@ -243,25 +247,34 @@ impl<B: Backend> Prefilter<B> {
             // could have matched. this can result in a false positive, but that's fine for
             // this stage since this just controls bounds, and bounds being too large hurt
             // performance, not correctness.
-            let mut mask = unsafe { B::eq(chunk, last_bytes.0).or(B::eq(chunk, last_bytes.1)) }
-                .and(chunk_mask);
+            let mut mask = unsafe {
+                let mut mask = B::eq(chunk, last_bytes.0);
+                if needle_char.has_flip {
+                    mask = mask.or(B::eq(chunk, last_bytes.1));
+                }
+                mask
+            }
+            .and(chunk_mask);
 
             if !mask.is_zero() && char_len > 1 {
                 mask = mask.and(unsafe {
-                    Self::match_unicode_char_prefix(
+                    let mut prefix = Self::match_unicode_char_prefix(
                         start,
                         len,
                         haystack,
                         char_len,
                         needle_char.chars,
-                    )
-                    .or(Self::match_unicode_char_prefix(
-                        start,
-                        len,
-                        haystack,
-                        char_len,
-                        needle_char.flipped_chars,
-                    ))
+                    );
+                    if needle_char.has_flip {
+                        prefix = prefix.or(Self::match_unicode_char_prefix(
+                            start,
+                            len,
+                            haystack,
+                            char_len,
+                            needle_char.flipped_chars,
+                        ));
+                    }
+                    prefix
                 });
             }
 
