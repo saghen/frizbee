@@ -107,8 +107,8 @@ pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
     fn new(needle: &str, case_sensitive: bool) -> Self;
     fn is_available() -> bool;
 
-    fn match_haystack(&self, haystack: &[u8]) -> Window;
-    fn match_haystack_unicode(&self, haystack: &[u8]) -> Window;
+    fn match_haystack(&mut self, haystack: &[u8]) -> Window;
+    fn match_haystack_unicode(&mut self, haystack: &[u8]) -> Window;
     fn match_haystack_1_typo(&self, haystack: &[u8]) -> Window;
     fn match_haystack_unicode_1_typo(&self, haystack: &[u8]) -> Window;
     fn match_haystack_2_typos(&self, haystack: &[u8]) -> Window;
@@ -129,12 +129,12 @@ impl<B: Backend> Kernel for Prefilter<B> {
     }
 
     #[inline(always)]
-    fn match_haystack(&self, haystack: &[u8]) -> Window {
+    fn match_haystack(&mut self, haystack: &[u8]) -> Window {
         unsafe { self.match_haystack(haystack) }
     }
 
     #[inline(always)]
-    fn match_haystack_unicode(&self, haystack: &[u8]) -> Window {
+    fn match_haystack_unicode(&mut self, haystack: &[u8]) -> Window {
         unsafe { self.match_haystack_unicode(haystack) }
     }
 

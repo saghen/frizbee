@@ -52,9 +52,12 @@ impl Kernel for PrefilterAVX {
     }
 
     #[inline(always)]
-    fn match_haystack(&self, haystack: &[u8]) -> Window {
+    fn match_haystack(&mut self, haystack: &[u8]) -> Window {
         let len = haystack.len();
         if len == 0 {
+            return (false, 0, len);
+        }
+        if unsafe { self.inner.rare_ascii_rejects(haystack) } {
             return (false, 0, len);
         }
 
@@ -166,7 +169,7 @@ impl Kernel for PrefilterAVX {
     }
 
     #[inline(always)]
-    fn match_haystack_unicode(&self, haystack: &[u8]) -> Window {
+    fn match_haystack_unicode(&mut self, haystack: &[u8]) -> Window {
         unsafe { self.inner.match_haystack_unicode(haystack) }
     }
 

@@ -4,10 +4,17 @@ use crate::prefilter::backend::{Backend, BitMaskOps};
 impl<B: Backend> Prefilter<B> {
     #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
     #[cfg_attr(target_arch = "wasm32", inline(never))]
-    pub unsafe fn match_haystack(&self, haystack: &[u8]) -> (bool, usize, usize) {
+    pub unsafe fn match_haystack(&mut self, haystack: &[u8]) -> (bool, usize, usize) {
         let len = haystack.len();
         if len == 0 {
             return (false, 0, 0);
+        }
+
+        // Samples the haystack to check if any of the needle bytes are
+        // particularly rare (<20%). If so, perform a first-pass using only that
+        // rare needle byte.
+        if unsafe { self.rare_ascii.rejects(haystack) } {
+            return (false, 0, len);
         }
 
         let mut can_skip_chunks = true;
