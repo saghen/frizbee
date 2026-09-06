@@ -51,7 +51,8 @@ impl Backend for PrefilterScalarBackend {
     unsafe fn occ(chunk: Self::Chunk, needle: (Self::Chunk, Self::Chunk)) -> Self::Mask {
         let mut mask = 0u16;
         for (idx, &byte) in chunk.iter().enumerate() {
-            if byte == needle.0[idx] || byte == needle.1[idx] {
+            // use `|` because `||` prevents auto-vectorization
+            if (byte == needle.0[idx]) | (byte == needle.1[idx]) {
                 mask |= 1u16 << idx;
             }
         }
