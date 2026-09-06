@@ -73,51 +73,6 @@ impl<B: Backend> Prefilter<B> {
         mask
     }
 
-    #[inline(always)]
-    pub(super) unsafe fn unicode_char_mask(
-        start: usize,
-        len: usize,
-        haystack: &[u8],
-        needle_char: &UnicodeChar,
-    ) -> B::Mask {
-        let char_len = needle_char.len;
-        debug_assert!(char_len <= 4 && char_len > 0);
-        if start + char_len > len {
-            return B::Mask::zero();
-        }
-
-        let (chunk, chunk_mask) = unsafe { load_window::<B>(haystack, start + char_len - 1, len) };
-
-        // check the regular needle
-        let mut mask = unsafe {
-            Self::char_variant_mask(
-                (chunk, chunk_mask),
-                B::splat(needle_char.chars[char_len - 1]),
-                start,
-                len,
-                haystack,
-                char_len,
-                needle_char.chars,
-            )
-        };
-
-        // check the case flipped version
-        if needle_char.has_flip {
-            mask = mask.or(unsafe {
-                Self::char_variant_mask(
-                    (chunk, chunk_mask),
-                    B::splat(needle_char.flipped_chars[char_len - 1]),
-                    start,
-                    len,
-                    haystack,
-                    char_len,
-                    needle_char.flipped_chars,
-                )
-            });
-        }
-        mask
-    }
-
     #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
     #[cfg_attr(target_arch = "wasm32", inline(never))]
     pub unsafe fn match_haystack_unicode(&mut self, haystack: &[u8]) -> (bool, usize, usize) {

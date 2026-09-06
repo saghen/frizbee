@@ -8,6 +8,11 @@
 //! produce score-level false positives, but it cannot reject a haystack that
 //! Smith-Waterman could accept.
 //!
+//! Two walks implement it: a chunk-by-chunk greedy walk with early exits
+//! ([`algo::Prefilter::match_haystack`]) for 0 typos and a branch-free
+//! bit-parallel walk over whole blocks of haystack bytes ([`algo::block`])
+//! for every typo budget.
+//!
 //! Matcher chooses the prefilter backend via runtime feature detection.
 //! Matching assumes that needle.len() > 0, but backends may be constructed for
 //! empty needles so `Matcher` can still select a backend up front.
@@ -109,10 +114,10 @@ pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
 
     fn match_haystack(&mut self, haystack: &[u8]) -> Window;
     fn match_haystack_unicode(&mut self, haystack: &[u8]) -> Window;
-    fn match_haystack_1_typo(&self, haystack: &[u8]) -> Window;
-    fn match_haystack_unicode_1_typo(&self, haystack: &[u8]) -> Window;
-    fn match_haystack_2_typos(&self, haystack: &[u8]) -> Window;
-    fn match_haystack_unicode_2_typos(&self, haystack: &[u8]) -> Window;
+    fn match_haystack_1_typo(&mut self, haystack: &[u8]) -> Window;
+    fn match_haystack_unicode_1_typo(&mut self, haystack: &[u8]) -> Window;
+    fn match_haystack_2_typos(&mut self, haystack: &[u8]) -> Window;
+    fn match_haystack_unicode_2_typos(&mut self, haystack: &[u8]) -> Window;
     fn match_haystack_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window;
     fn match_haystack_unicode_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window;
 }
@@ -139,33 +144,33 @@ impl<B: Backend> Kernel for Prefilter<B> {
     }
 
     #[inline(always)]
-    fn match_haystack_1_typo(&self, haystack: &[u8]) -> Window {
-        unsafe { self.match_haystack_1_typo(haystack) }
+    fn match_haystack_1_typo(&mut self, haystack: &[u8]) -> Window {
+        unsafe { self.match_haystack_typos::<1, false>(haystack) }
     }
 
     #[inline(always)]
-    fn match_haystack_unicode_1_typo(&self, haystack: &[u8]) -> Window {
-        unsafe { self.match_haystack_unicode_1_typo(haystack) }
+    fn match_haystack_unicode_1_typo(&mut self, haystack: &[u8]) -> Window {
+        unsafe { self.match_haystack_typos::<1, true>(haystack) }
     }
 
     #[inline(always)]
-    fn match_haystack_2_typos(&self, haystack: &[u8]) -> Window {
-        unsafe { self.match_haystack_2_typos(haystack) }
+    fn match_haystack_2_typos(&mut self, haystack: &[u8]) -> Window {
+        unsafe { self.match_haystack_typos::<2, false>(haystack) }
     }
 
     #[inline(always)]
-    fn match_haystack_unicode_2_typos(&self, haystack: &[u8]) -> Window {
-        unsafe { self.match_haystack_unicode_2_typos(haystack) }
+    fn match_haystack_unicode_2_typos(&mut self, haystack: &[u8]) -> Window {
+        unsafe { self.match_haystack_typos::<2, true>(haystack) }
     }
 
     #[inline(always)]
     fn match_haystack_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
-        unsafe { self.match_haystack_many_typos(haystack, max_typos) }
+        unsafe { self.match_haystack_typos_dyn::<false>(haystack, max_typos as usize) }
     }
 
     #[inline(always)]
     fn match_haystack_unicode_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
-        unsafe { self.match_haystack_unicode_many_typos(haystack, max_typos) }
+        unsafe { self.match_haystack_typos_dyn::<true>(haystack, max_typos as usize) }
     }
 }
 
@@ -212,6 +217,15 @@ mod tests {
                 "needle={needle:?} haystack={haystack:?} max_typos={max_typos}"
             );
         }
+    }
+
+    #[test]
+    fn large_typo_budget_on_long_haystack() {
+        let needle = "ab".repeat(40);
+        let haystack = "a_".repeat(100);
+        assert!(matched(&needle, &haystack, 70));
+        assert!(matched(&needle, &haystack, 63));
+        assert!(!matched(&needle, &"_".repeat(200), 63));
     }
 
     #[test]
