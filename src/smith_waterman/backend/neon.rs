@@ -151,18 +151,9 @@ impl BytesVec for NeonBytes {
                 8.. => vld1_u8(ptr),
                 1..=7 if can_overread(ptr, 8) => {
                     let lo = vld1_u8(ptr);
-                    // Build a per-byte mask: bytes 0..remaining = 0xFF, rest = 0x00.
-                    let mask_bytes: [u8; 8] = [
-                        if 0 < remaining { 0xFF } else { 0 },
-                        if 1 < remaining { 0xFF } else { 0 },
-                        if 2 < remaining { 0xFF } else { 0 },
-                        if 3 < remaining { 0xFF } else { 0 },
-                        if 4 < remaining { 0xFF } else { 0 },
-                        if 5 < remaining { 0xFF } else { 0 },
-                        if 6 < remaining { 0xFF } else { 0 },
-                        if 7 < remaining { 0xFF } else { 0 },
-                    ];
-                    vand_u8(lo, vld1_u8(mask_bytes.as_ptr()))
+                    let indices = vld1_u8([0, 1, 2, 3, 4, 5, 6, 7].as_ptr());
+                    let mask = vclt_u8(indices, vdup_n_u8(remaining as u8));
+                    vand_u8(lo, mask)
                 }
                 _ => Self::load_partial_safe(ptr, remaining),
             })
@@ -448,26 +439,10 @@ impl BytesVec for NeonU8Bytes {
                 16.. => vld1q_u8(ptr),
                 1..=15 if can_overread(ptr, 16) => {
                     let loaded = vld1q_u8(ptr);
-                    // Mask off bytes >= remaining.
-                    let mask_bytes: [u8; 16] = [
-                        if 0 < remaining { 0xFF } else { 0 },
-                        if 1 < remaining { 0xFF } else { 0 },
-                        if 2 < remaining { 0xFF } else { 0 },
-                        if 3 < remaining { 0xFF } else { 0 },
-                        if 4 < remaining { 0xFF } else { 0 },
-                        if 5 < remaining { 0xFF } else { 0 },
-                        if 6 < remaining { 0xFF } else { 0 },
-                        if 7 < remaining { 0xFF } else { 0 },
-                        if 8 < remaining { 0xFF } else { 0 },
-                        if 9 < remaining { 0xFF } else { 0 },
-                        if 10 < remaining { 0xFF } else { 0 },
-                        if 11 < remaining { 0xFF } else { 0 },
-                        if 12 < remaining { 0xFF } else { 0 },
-                        if 13 < remaining { 0xFF } else { 0 },
-                        if 14 < remaining { 0xFF } else { 0 },
-                        if 15 < remaining { 0xFF } else { 0 },
-                    ];
-                    vandq_u8(loaded, vld1q_u8(mask_bytes.as_ptr()))
+                    let indices =
+                        vld1q_u8([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].as_ptr());
+                    let mask = vcltq_u8(indices, vdupq_n_u8(remaining as u8));
+                    vandq_u8(loaded, mask)
                 }
                 _ => Self::load_partial_safe(ptr, remaining),
             })
