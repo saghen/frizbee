@@ -261,13 +261,14 @@ unsafe fn unicode_scalar_masks<B: Backend>(
 
 #[inline(always)]
 unsafe fn valid_haystack_lanes<B: Backend>(haystack_len: usize, start: usize) -> B::Mask {
+    const INDICES: [u8; 64] = [
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+        48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+    ];
     unsafe {
         let valid_lanes = haystack_len.saturating_sub(start).min(B::LANES);
-        let mut bytes = [0u8; 64];
-        for byte in bytes.iter_mut().take(valid_lanes) {
-            *byte = u8::MAX;
-        }
-        let valid_bytes = B::Bytes::load_partial(bytes.as_ptr(), 0, B::LANES);
-        valid_bytes.gt(B::Bytes::splat(0))
+        let indices = B::Bytes::load_partial(INDICES.as_ptr(), 0, B::LANES);
+        indices.lt(B::Bytes::splat(valid_lanes as u8))
     }
 }
