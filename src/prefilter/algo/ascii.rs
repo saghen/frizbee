@@ -17,9 +17,32 @@ impl<B: Backend> Prefilter<B> {
             return (false, 0, len);
         }
 
+        // Branchless prefilter when the haystack fits within one SIMD vector
+        let needle = self.needle_ascii.as_slice();
+        if len <= B::LANES {
+            let (chunk, mut chunk_mask) = unsafe { load_window::<B>(haystack, 0, len) };
+            let mut first = B::Mask::first_n(0);
+            let mut last = B::Mask::first_n(0);
+            for (i, &needle_char) in needle.iter().enumerate() {
+                let mask = unsafe { B::occ(chunk, needle_char) }.and(chunk_mask);
+                if i == 0 {
+                    first = mask;
+                }
+                last = mask;
+                chunk_mask = chunk_mask.clear_through_lowest(mask);
+            }
+            if last.is_zero() {
+                return (false, 0, len);
+            }
+            return (
+                true,
+                first.trailing_zeros(),
+                B::LANES - last.leading_zeros(),
+            );
+        }
+
         let mut can_skip_chunks = true;
         let mut match_start_pos = 0usize;
-        let needle = self.needle_ascii.as_slice();
         let mut needle_iter = needle.iter();
         let mut needle_char = *needle_iter.next().unwrap();
         let mut start = 0usize;
