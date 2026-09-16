@@ -152,10 +152,6 @@ impl MaskVec for WasmBytes {
         Self(v128_not(self.0))
     }
     #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        (u8x16_bitmask(self.0) & 0x00ff) == 0
-    }
-    #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         // low 8 bytes = [prev[7], self[0..7]], ignore upper 8 bytes
         Self(u8x16_shuffle::<
@@ -379,10 +375,6 @@ impl MaskVec for WasmU8Bytes {
     #[inline(always)]
     unsafe fn not(self) -> Self {
         Self(v128_not(self.0))
-    }
-    #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        !v128_any_true(self.0)
     }
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {

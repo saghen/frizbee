@@ -229,7 +229,9 @@ unsafe fn unicode_char_match_mask<B: Backend>(
             .eq(B::Bytes::splat(chars[char_len - 1]))
             .and(scalar_start_mask);
 
-        if char_len > 1 && !mask.is_zero() {
+        // Always verify the leading bytes, regardless of whether we matched to
+        // avoid branch misprediction
+        if char_len > 1 {
             for byte_idx in 0..(char_len - 1) {
                 let haystack_bytes = haystack_chunks[3 - byte_idx];
                 mask = mask.and(haystack_bytes.eq(B::Bytes::splat(chars[byte_idx])));

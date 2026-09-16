@@ -249,12 +249,6 @@ pub trait MaskVec: Copy + core::fmt::Debug {
     /// The backend's target features must be enabled at the call site.
     unsafe fn not(self) -> Self;
 
-    /// Whether every lane is false.
-    ///
-    /// # Safety
-    /// The backend's target features must be enabled at the call site.
-    unsafe fn is_zero(self) -> bool;
-
     /// Shift right by 1 lane, filling lane 0 with the highest meaningful lane
     /// of `prev`.
     ///

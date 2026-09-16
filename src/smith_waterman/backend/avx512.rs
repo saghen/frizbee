@@ -196,10 +196,6 @@ impl MaskVec for Avx512Mask {
         Self(!self.0)
     }
     #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        self.0 == 0
-    }
-    #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         // Lane i = bit i. shift_right_padded_1 places prev's highest lane
         // (bit 31) into lane 0 of the result, and shifts every other lane up
@@ -240,10 +236,6 @@ impl MaskVec for Avx512U8Mask {
     #[inline(always)]
     unsafe fn not(self) -> Self {
         Self(!self.0)
-    }
-    #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        self.0 == 0
     }
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {

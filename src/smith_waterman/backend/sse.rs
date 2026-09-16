@@ -163,10 +163,6 @@ impl MaskVec for SseBytes {
         unsafe { Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1))) }
     }
     #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        unsafe { (_mm_movemask_epi8(self.0) & 0x00ff) == 0 }
-    }
-    #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         unsafe {
             // Want low 8 bytes = [prev[7], self[0..7]].
@@ -371,10 +367,6 @@ impl MaskVec for SseU8Bytes {
     #[inline(always)]
     unsafe fn not(self) -> Self {
         unsafe { Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1))) }
-    }
-    #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        unsafe { _mm_movemask_epi8(self.0) == 0 }
     }
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {

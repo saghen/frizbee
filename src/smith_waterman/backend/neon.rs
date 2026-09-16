@@ -142,10 +142,6 @@ impl MaskVec for NeonBytes {
         unsafe { Self(vmvn_u8(self.0)) }
     }
     #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        unsafe { vmaxv_u8(self.0) == 0 }
-    }
-    #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         // vext_u8(prev, self, 7) takes bytes 7..15 of (prev || self)
         //   = [prev[7], self[0], self[1], ..., self[6]]
@@ -381,10 +377,6 @@ impl MaskVec for NeonU8Bytes {
     #[inline(always)]
     unsafe fn not(self) -> Self {
         unsafe { Self(vmvnq_u8(self.0)) }
-    }
-    #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        unsafe { vmaxvq_u8(self.0) == 0 }
     }
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {

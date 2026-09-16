@@ -176,10 +176,6 @@ impl MaskVec for AvxBytes {
         unsafe { Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1))) }
     }
     #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        unsafe { _mm_movemask_epi8(self.0) == 0 }
-    }
-    #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         unsafe { Self(_mm_alignr_epi8::<15>(self.0, prev.0)) }
     }
@@ -394,10 +390,6 @@ impl MaskVec for AvxU8Bytes {
     #[inline(always)]
     unsafe fn not(self) -> Self {
         unsafe { Self(_mm256_xor_si256(self.0, _mm256_set1_epi32(-1))) }
-    }
-    #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        unsafe { _mm256_movemask_epi8(self.0) == 0 }
     }
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {

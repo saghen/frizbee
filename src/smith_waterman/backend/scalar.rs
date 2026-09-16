@@ -132,11 +132,6 @@ impl<const LANES: usize> MaskVec for ScalarBytes<LANES> {
     }
 
     #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        self.0.iter().all(|&v| v == 0)
-    }
-
-    #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         let mut out = [0u8; LANES];
         out[0] = prev.0[LANES - 1];
