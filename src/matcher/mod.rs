@@ -307,7 +307,10 @@ impl Matcher {
     }
 
     /// Returns an iterator over [`Match`] values for an iterator of strings.
-    /// This API performs ~10% slower than the [`Matcher::match_list`] API.
+    ///
+    /// Haystacks are pulled from the source in blocks and matched through the
+    /// same path as [`Matcher::match_list`], so it performs about the same
+    /// (minus the sort).
     ///
     /// You may also use the [`iter::FuzzyMatchExt`] API which provides a more
     /// convenient API for when re-using the [`Matcher`] isn't necessary.
@@ -325,14 +328,8 @@ impl Matcher {
         &mut self,
         haystacks: impl IntoIterator<Item = S>,
     ) -> impl Iterator<Item = Match> {
-        haystacks
-            .into_iter()
-            .enumerate()
-            .filter_map(move |(index, haystack)| {
-                let index = u32::try_from(index)
-                    .expect("too many items in haystack, will overflow the u32 index");
-                self.match_one(haystack, index)
-            })
+        let mut blocks = iter::Blocks::new(haystacks.into_iter());
+        core::iter::from_fn(move || blocks.next_match(self))
     }
 
     /// Returns an iterator over [`MatchIndices`] values for an iterator of
