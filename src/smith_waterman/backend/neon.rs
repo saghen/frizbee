@@ -1,5 +1,4 @@
 use crate::prefilter::algo::can_overread;
-use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
 use core::arch::aarch64::*;
 
 use super::{Backend, BytesVec, MaskVec, ScoreVec};
@@ -30,55 +29,7 @@ impl Backend for BackendNEON {
         unsafe { NeonScore(vreinterpretq_u16_s16(vmovl_s8(vreinterpret_s8_u8(m.0)))) }
     }
 
-    #[inline(always)]
-    unsafe fn propagate_horizontal_gaps(
-        row: Self::Score,
-        adjacent_row: Self::Score,
-        match_mask: Self::Score,
-        adjacent_match_mask: Self::Score,
-        gap_open_penalty: Self::Score,
-        gap_extend_penalty: Self::Score,
-    ) -> Self::Score {
-        unsafe {
-            ascii_gap::propagate_8_lane::<BackendNEON>(
-                row,
-                adjacent_row,
-                match_mask,
-                adjacent_match_mask,
-                gap_open_penalty,
-                gap_extend_penalty,
-            )
-        }
-    }
-
-    #[inline(always)]
-    unsafe fn propagate_horizontal_unicode_gaps(
-        row: Self::Score,
-        adjacent_row: Self::Score,
-        pending_gap_open_mask: Self::Score,
-        adjacent_pending_gap_open_mask: Self::Score,
-        continuation_gap_extend_penalty: Self::Score,
-        adjacent_continuation_gap_extend_penalty: Self::Score,
-        scalar_end_mask: Self::Score,
-        adjacent_scalar_end_mask: Self::Score,
-        gap_open_penalty: Self::Score,
-        gap_extend_penalty: Self::Score,
-    ) -> (Self::Score, Self::Score) {
-        unsafe {
-            unicode_gap::propagate_unicode_8_lane::<BackendNEON>(
-                row,
-                adjacent_row,
-                pending_gap_open_mask,
-                adjacent_pending_gap_open_mask,
-                continuation_gap_extend_penalty,
-                adjacent_continuation_gap_extend_penalty,
-                scalar_end_mask,
-                adjacent_scalar_end_mask,
-                gap_open_penalty,
-                gap_extend_penalty,
-            )
-        }
-    }
+    gap_dispatch!(8);
 }
 
 impl NeonBytes {
@@ -329,55 +280,7 @@ impl Backend for BackendNEONU8 {
         NeonU8Score(m.0)
     }
 
-    #[inline(always)]
-    unsafe fn propagate_horizontal_gaps(
-        row: Self::Score,
-        adjacent_row: Self::Score,
-        match_mask: Self::Score,
-        adjacent_match_mask: Self::Score,
-        gap_open_penalty: Self::Score,
-        gap_extend_penalty: Self::Score,
-    ) -> Self::Score {
-        unsafe {
-            ascii_gap::propagate_16_lane::<BackendNEONU8>(
-                row,
-                adjacent_row,
-                match_mask,
-                adjacent_match_mask,
-                gap_open_penalty,
-                gap_extend_penalty,
-            )
-        }
-    }
-
-    #[inline(always)]
-    unsafe fn propagate_horizontal_unicode_gaps(
-        row: Self::Score,
-        adjacent_row: Self::Score,
-        pending_gap_open_mask: Self::Score,
-        adjacent_pending_gap_open_mask: Self::Score,
-        continuation_gap_extend_penalty: Self::Score,
-        adjacent_continuation_gap_extend_penalty: Self::Score,
-        scalar_end_mask: Self::Score,
-        adjacent_scalar_end_mask: Self::Score,
-        gap_open_penalty: Self::Score,
-        gap_extend_penalty: Self::Score,
-    ) -> (Self::Score, Self::Score) {
-        unsafe {
-            unicode_gap::propagate_unicode_16_lane::<BackendNEONU8>(
-                row,
-                adjacent_row,
-                pending_gap_open_mask,
-                adjacent_pending_gap_open_mask,
-                continuation_gap_extend_penalty,
-                adjacent_continuation_gap_extend_penalty,
-                scalar_end_mask,
-                adjacent_scalar_end_mask,
-                gap_open_penalty,
-                gap_extend_penalty,
-            )
-        }
-    }
+    gap_dispatch!(16);
 }
 
 impl NeonU8Bytes {
