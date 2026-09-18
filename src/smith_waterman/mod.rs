@@ -97,21 +97,6 @@ macro_rules! kernel {
                 <$kernel>::score_inline::<UNICODE>(self, haystack, haystack_start_pos)
             }
 
-            #[inline(always)]
-            fn score_indices_inline<const UNICODE: bool>(
-                &mut self,
-                haystack: &[u8],
-                haystack_start_pos: usize,
-                max_typos: Option<u16>,
-            ) -> (u16, Vec<u32>) {
-                <$kernel>::score_indices_inline::<UNICODE>(
-                    self,
-                    haystack,
-                    haystack_start_pos,
-                    max_typos,
-                )
-            }
-
             #[inline(never)]
             $(#[target_feature(enable = $feature)])?
             unsafe fn score<const UNICODE: bool>(
@@ -285,14 +270,6 @@ pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
         haystack: &[u8],
         haystack_start_pos: usize,
     ) -> u16;
-
-    /// Inlined like [`Kernel::score_inline`]
-    fn score_indices_inline<const UNICODE: bool>(
-        &mut self,
-        haystack: &[u8],
-        haystack_start_pos: usize,
-        max_typos: Option<u16>,
-    ) -> (u16, Vec<u32>);
 
     /// Outlined (`inline(never)`), so the kernel is built once per backend
     /// rather than once per caller
