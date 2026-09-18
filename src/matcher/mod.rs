@@ -31,23 +31,13 @@ macro_rules! dispatch {
             #[cfg(target_arch = "x86_64")]
             MatcherBackend::AVX512($m) => $body,
             #[cfg(target_arch = "x86_64")]
-            MatcherBackend::AVXU8($m) => $body,
-            #[cfg(target_arch = "x86_64")]
             MatcherBackend::AVX($m) => $body,
-            #[cfg(target_arch = "x86_64")]
-            MatcherBackend::SSEU8($m) => $body,
             #[cfg(target_arch = "x86_64")]
             MatcherBackend::SSE($m) => $body,
             #[cfg(target_arch = "aarch64")]
-            MatcherBackend::NEONU8($m) => $body,
-            #[cfg(target_arch = "aarch64")]
             MatcherBackend::NEON($m) => $body,
             #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-            MatcherBackend::WasmU8($m) => $body,
-            #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
             MatcherBackend::Wasm($m) => $body,
-            #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
-            MatcherBackend::ScalarU8($m) => $body,
             #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
             MatcherBackend::Scalar($m) => $body,
             #[cfg(target_arch = "x86_64")]
@@ -471,51 +461,34 @@ impl Matcher {
             return Self::get_literal_backend(needle, config);
         }
 
-        let use_u8 = score_fits_in_u8(needle.len(), &config.scoring);
-
         #[cfg(target_arch = "x86_64")]
         {
-            if use_u8 {
+            if score_fits_in_u8(needle.len(), &config.scoring) {
                 if MatcherAVX512U8::is_available() {
                     return MatcherBackend::AVX512U8(unsafe {
                         MatcherAVX512U8::build(needle, config)
                     });
                 }
-                if MatcherAVXU8::is_available() {
-                    return MatcherBackend::AVXU8(unsafe { MatcherAVXU8::build(needle, config) });
-                }
-                if MatcherSSEU8::is_available() {
-                    return MatcherBackend::SSEU8(unsafe { MatcherSSEU8::build(needle, config) });
-                }
-            } else {
-                if MatcherAVX512::is_available() {
-                    return MatcherBackend::AVX512(unsafe { MatcherAVX512::build(needle, config) });
-                }
-                if MatcherAVX::is_available() {
-                    return MatcherBackend::AVX(unsafe { MatcherAVX::build(needle, config) });
-                }
-                if MatcherSSE::is_available() {
-                    return MatcherBackend::SSE(unsafe { MatcherSSE::build(needle, config) });
-                }
+            } else if MatcherAVX512::is_available() {
+                return MatcherBackend::AVX512(unsafe { MatcherAVX512::build(needle, config) });
+            }
+            if MatcherAVX::is_available() {
+                return MatcherBackend::AVX(unsafe { MatcherAVX::build(needle, config) });
+            }
+            if MatcherSSE::is_available() {
+                return MatcherBackend::SSE(unsafe { MatcherSSE::build(needle, config) });
             }
         }
 
         #[cfg(target_arch = "aarch64")]
         {
-            if use_u8 {
-                if MatcherNEONU8::is_available() {
-                    return MatcherBackend::NEONU8(unsafe { MatcherNEONU8::build(needle, config) });
-                }
-            } else if MatcherNEON::is_available() {
+            if MatcherNEON::is_available() {
                 return MatcherBackend::NEON(unsafe { MatcherNEON::build(needle, config) });
             }
         }
 
         #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
         {
-            if use_u8 && MatcherWasmU8::is_available() {
-                return MatcherBackend::WasmU8(unsafe { MatcherWasmU8::build(needle, config) });
-            }
             if MatcherWasm::is_available() {
                 return MatcherBackend::Wasm(unsafe { MatcherWasm::build(needle, config) });
             }
@@ -524,11 +497,7 @@ impl Matcher {
 
         #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
         {
-            if use_u8 {
-                MatcherBackend::ScalarU8(unsafe { MatcherScalarU8::build(needle, config) })
-            } else {
-                MatcherBackend::Scalar(unsafe { MatcherScalar::build(needle, config) })
-            }
+            MatcherBackend::Scalar(unsafe { MatcherScalar::build(needle, config) })
         }
     }
 
@@ -846,26 +815,34 @@ mod tests {
         assert_eq!(indices[1].index, 1);
     }
 
+    fn is_u8(backend: &MatcherBackend) -> bool {
+        use crate::smith_waterman::ScoreWidth;
+        match backend {
+            #[cfg(target_arch = "x86_64")]
+            MatcherBackend::AVX512U8(_) => true,
+            #[cfg(target_arch = "x86_64")]
+            MatcherBackend::AVX512(_) => false,
+            #[cfg(target_arch = "x86_64")]
+            MatcherBackend::AVX(m) => matches!(m.smith_waterman, ScoreWidth::U8(_)),
+            #[cfg(target_arch = "x86_64")]
+            MatcherBackend::SSE(m) => matches!(m.smith_waterman, ScoreWidth::U8(_)),
+            #[cfg(target_arch = "aarch64")]
+            MatcherBackend::NEON(m) => matches!(m.smith_waterman, ScoreWidth::U8(_)),
+            #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+            MatcherBackend::Wasm(m) => matches!(m.smith_waterman, ScoreWidth::U8(_)),
+            #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+            MatcherBackend::Scalar(m) => matches!(m.smith_waterman, ScoreWidth::U8(_)),
+            _ => panic!("expected a fuzzy backend"),
+        }
+    }
+
     #[test]
     fn u8_path_selected_for_short_needle() {
         let matcher = Matcher::new("abc", &Config::default());
         let CompiledPatterns::Single(pattern) = &matcher.patterns else {
             panic!("expected a single pattern");
         };
-        let is_u8 = match &pattern.backend {
-            #[cfg(target_arch = "x86_64")]
-            MatcherBackend::AVX512U8(_) | MatcherBackend::AVXU8(_) | MatcherBackend::SSEU8(_) => {
-                true
-            }
-            #[cfg(target_arch = "aarch64")]
-            MatcherBackend::NEONU8(_) => true,
-            #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-            MatcherBackend::WasmU8(_) => true,
-            #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
-            MatcherBackend::ScalarU8(_) => true,
-            _ => false,
-        };
-        assert!(is_u8);
+        assert!(is_u8(&pattern.backend));
     }
 
     #[test]
@@ -874,18 +851,7 @@ mod tests {
         let CompiledPatterns::Single(pattern) = &matcher.patterns else {
             panic!("expected a single pattern");
         };
-        let is_u16 = match &pattern.backend {
-            #[cfg(target_arch = "x86_64")]
-            MatcherBackend::AVX512(_) | MatcherBackend::AVX(_) | MatcherBackend::SSE(_) => true,
-            #[cfg(target_arch = "aarch64")]
-            MatcherBackend::NEON(_) => true,
-            #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-            MatcherBackend::Wasm(_) => true,
-            #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
-            MatcherBackend::Scalar(_) => true,
-            _ => false,
-        };
-        assert!(is_u16);
+        assert!(!is_u8(&pattern.backend));
     }
 
     #[test]
