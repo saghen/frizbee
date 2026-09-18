@@ -73,8 +73,7 @@ mod matrix;
 
 use alignment_iter::AlignmentPathIter;
 
-/// Defines the kernel for one backend. Its outlined entry points are built
-/// once, with the backend's `#[target_feature]` (omitted for scalar backends)
+/// Builds the kernel for one SIMD tier with `#[target_feature]`
 macro_rules! kernel {
     ($name:ident, $kernel:ty $(, target_feature = $feature:literal)?) => {
         pub type $name = $kernel;
@@ -131,6 +130,8 @@ macro_rules! kernel {
     };
 }
 
+// The u8 and u16 AVX-512 kernels need different features (VBMI), so they
+// stay separate tiers. Every other tier picks the width at construction
 #[cfg(target_arch = "x86_64")]
 kernel!(
     SmithWatermanAVX512U8,
@@ -145,56 +146,33 @@ kernel!(
 );
 #[cfg(target_arch = "x86_64")]
 kernel!(
-    SmithWatermanSSE,
-    SmithWaterman<BackendSSE>,
-    target_feature = "sse2,ssse3,sse4.1"
-);
-#[cfg(target_arch = "x86_64")]
-kernel!(
-    SmithWatermanSSEU8,
-    SmithWaterman<BackendSSEU8>,
-    target_feature = "sse2,ssse3,sse4.1"
-);
-#[cfg(target_arch = "x86_64")]
-kernel!(
     SmithWatermanAVX,
-    SmithWaterman<BackendAVX>,
+    ScoreWidth<BackendAVXU8, BackendAVX>,
     target_feature = "avx2"
 );
 #[cfg(target_arch = "x86_64")]
 kernel!(
-    SmithWatermanAVXU8,
-    SmithWaterman<BackendAVXU8>,
-    target_feature = "avx2"
+    SmithWatermanSSE,
+    ScoreWidth<BackendSSEU8, BackendSSE>,
+    target_feature = "sse2,ssse3,sse4.1"
 );
 #[cfg(target_arch = "aarch64")]
 kernel!(
     SmithWatermanNEON,
-    SmithWaterman<BackendNEON>,
-    target_feature = "neon"
-);
-#[cfg(target_arch = "aarch64")]
-kernel!(
-    SmithWatermanNEONU8,
-    SmithWaterman<BackendNEONU8>,
+    ScoreWidth<BackendNEONU8, BackendNEON>,
     target_feature = "neon"
 );
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 kernel!(
     SmithWatermanWasm,
-    SmithWaterman<BackendWasm>,
+    ScoreWidth<BackendWasmU8, BackendWasm>,
     target_feature = "simd128"
 );
-#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
 kernel!(
-    SmithWatermanWasmU8,
-    SmithWaterman<BackendWasmU8>,
-    target_feature = "simd128"
+    SmithWatermanScalar,
+    ScoreWidth<BackendScalar16U8, BackendScalar8>
 );
-#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
-kernel!(SmithWatermanScalar, SmithWaterman<BackendScalar8>);
-#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
-kernel!(SmithWatermanScalarU8, SmithWaterman<BackendScalar16U8>);
 
 /// Returns true if every possible Smith-Waterman matrix cell value for this
 /// needle length and scoring config fits in a u8. The u8 backends are otherwise
@@ -258,7 +236,64 @@ pub(crate) struct SmithWaterman<B: Backend> {
     haystack_chunks: usize,
 }
 
-/// The Smith Waterman kernel of one SIMD backend
+/// Picks u8 or u16 kernel based on the max possible score (see
+/// [`score_fits_in_u8`]). Using u8 over u16 doubles our lanes.
+#[derive(Debug, Clone)]
+pub(crate) enum ScoreWidth<B8: Backend, B16: Backend> {
+    U8(SmithWaterman<B8>),
+    U16(SmithWaterman<B16>),
+}
+
+macro_rules! either {
+    ($self:expr, $sw:ident => $body:expr) => {
+        match $self {
+            ScoreWidth::U8($sw) => $body,
+            ScoreWidth::U16($sw) => $body,
+        }
+    };
+}
+
+impl<B8: Backend, B16: Backend> ScoreWidth<B8, B16> {
+    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self {
+        if score_fits_in_u8(needle.len(), scoring) {
+            Self::U8(SmithWaterman::new(needle, scoring, case_sensitive))
+        } else {
+            Self::U16(SmithWaterman::new(needle, scoring, case_sensitive))
+        }
+    }
+
+    fn is_available() -> bool {
+        B8::is_available() && B16::is_available()
+    }
+
+    #[inline(always)]
+    fn score_inline<const UNICODE: bool>(
+        &mut self,
+        haystack: &[u8],
+        haystack_start_pos: usize,
+    ) -> u16 {
+        either!(self, sw => sw.score_inline::<UNICODE>(haystack, haystack_start_pos))
+    }
+
+    #[inline(always)]
+    fn score_indices_inline<const UNICODE: bool>(
+        &mut self,
+        haystack: &[u8],
+        haystack_start_pos: usize,
+        max_typos: Option<u16>,
+    ) -> (u16, Vec<u32>) {
+        either!(self, sw => {
+            sw.score_indices_inline::<UNICODE>(haystack, haystack_start_pos, max_typos)
+        })
+    }
+
+    #[cfg(feature = "match_end_col")]
+    fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16 {
+        either!(self, sw => sw.match_end_col(haystack, unicode))
+    }
+}
+
+/// The Smith Waterman kernel of one SIMD tier
 pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
     fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self;
     fn is_available() -> bool;
@@ -270,7 +305,7 @@ pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
         haystack_start_pos: usize,
     ) -> u16;
 
-    /// Outlined (`inline(never)`), so the kernel is built once per backend
+    /// Outlined (`inline(never)`), so the kernel is built once per tier
     /// rather than once per caller
     ///
     /// # Safety
@@ -661,6 +696,16 @@ mod tests {
                 "len={len}"
             );
         }
+    }
+
+    #[test]
+    fn score_width_follows_the_needle_length() {
+        type Width = ScoreWidth<backend::BackendScalar16U8, BackendScalar8>;
+        let scoring = Scoring::default();
+        let short = Width::new("abc", &scoring, false);
+        assert!(matches!(short, ScoreWidth::U8(_)));
+        let long = Width::new("abcdefghijklmnopqrst", &scoring, false);
+        assert!(matches!(long, ScoreWidth::U16(_)));
     }
 
     #[test]
