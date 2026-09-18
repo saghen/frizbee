@@ -55,29 +55,21 @@ macro_rules! impl_specialized_literal {
             }
 
             $(#[target_feature(enable = $feature)])?
-            unsafe fn match_list_indices<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
+            unsafe fn match_one<const TYPOS: u16, const UNICODE: bool>(
                 &mut self,
-                haystacks: &[H],
-            ) -> Vec<MatchIndices> {
-                unsafe { self.match_list_indices_impl::<UNICODE, H>(haystacks) }
-            }
-
-            $(#[target_feature(enable = $feature)])?
-            unsafe fn match_one<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
-                &mut self,
-                haystack: H,
+                haystack: &str,
                 index: u32,
             ) -> Option<Match> {
-                unsafe { self.match_one_impl::<UNICODE, H>(haystack, index) }
+                unsafe { self.match_one_impl::<UNICODE>(haystack, index) }
             }
 
             $(#[target_feature(enable = $feature)])?
-            unsafe fn match_one_indices<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
+            unsafe fn match_one_indices<const UNICODE: bool>(
                 &mut self,
-                haystack: H,
+                haystack: &str,
                 index: u32,
             ) -> Option<MatchIndices> {
-                unsafe { self.match_one_indices_impl::<UNICODE, H>(haystack, index) }
+                unsafe { self.match_one_indices_impl::<UNICODE>(haystack, index) }
             }
         }
     };
@@ -118,13 +110,13 @@ mod backend_parity {
         let mut matcher = unsafe { T::build(needle, config) };
         let (m, i) = if config.unicode.respects_unicode_for(needle) {
             (
-                unsafe { matcher.match_one::<0, true, &str>(haystack, 0) },
-                unsafe { matcher.match_one_indices::<0, true, &str>(haystack, 0) },
+                unsafe { matcher.match_one::<0, true>(haystack, 0) },
+                unsafe { matcher.match_one_indices::<true>(haystack, 0) },
             )
         } else {
             (
-                unsafe { matcher.match_one::<0, false, &str>(haystack, 0) },
-                unsafe { matcher.match_one_indices::<0, false, &str>(haystack, 0) },
+                unsafe { matcher.match_one::<0, false>(haystack, 0) },
+                unsafe { matcher.match_one_indices::<false>(haystack, 0) },
             )
         };
         (m.map(|m| (m.score, m.exact)), i.map(|i| i.indices))

@@ -3,7 +3,7 @@ use crate::prefilter::algo::load_window;
 use crate::prefilter::backend::{Backend, BitMaskOps};
 use crate::prefilter::{UnicodeChar, case_needle, case_needle_unicode};
 use crate::{Config, Match, MatchIndices, Matching, Scoring};
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 
 /// Literal matching: exact / prefix / suffix / substring
 /// Specialized for one SIMD [`crate::prefilter::backend::Backend`] supporting
@@ -93,19 +93,19 @@ impl<B: Backend> LiteralImpl<B> {
         matches: &mut Vec<Match>,
     ) {
         for (index, haystack) in (haystack_index_offset..).zip(haystacks.iter()) {
-            if let Some(m) = unsafe { self.match_one_impl::<UNICODE, &H>(haystack, index) } {
+            if let Some(m) = unsafe { self.match_one_impl::<UNICODE>(haystack.as_ref(), index) } {
                 matches.push(m);
             }
         }
     }
 
     #[inline(always)]
-    pub(super) unsafe fn match_one_impl<const UNICODE: bool, H: AsRef<str>>(
+    pub(super) unsafe fn match_one_impl<const UNICODE: bool>(
         &self,
-        haystack: H,
+        haystack: &str,
         index: u32,
     ) -> Option<Match> {
-        let haystack = haystack.as_ref().as_bytes();
+        let haystack = haystack.as_bytes();
         let (pos, score) = unsafe { self.find::<UNICODE>(haystack) }?;
         let exact = pos == 0 && self.needle_len == haystack.len();
         Some(Match {
@@ -120,28 +120,12 @@ impl<B: Backend> LiteralImpl<B> {
     }
 
     #[inline(always)]
-    pub(super) unsafe fn match_list_indices_impl<const UNICODE: bool, H: AsRef<str>>(
+    pub(super) unsafe fn match_one_indices_impl<const UNICODE: bool>(
         &self,
-        haystacks: &[H],
-    ) -> Vec<MatchIndices> {
-        let mut matches = vec![];
-        for (index, haystack) in haystacks.iter().enumerate() {
-            if let Some(m) =
-                unsafe { self.match_one_indices_impl::<UNICODE, &H>(haystack, index as u32) }
-            {
-                matches.push(m);
-            }
-        }
-        matches
-    }
-
-    #[inline(always)]
-    pub(super) unsafe fn match_one_indices_impl<const UNICODE: bool, H: AsRef<str>>(
-        &self,
-        haystack: H,
+        haystack: &str,
         index: u32,
     ) -> Option<MatchIndices> {
-        let haystack = haystack.as_ref().as_bytes();
+        let haystack = haystack.as_bytes();
         let (pos, score) = unsafe { self.find::<UNICODE>(haystack) }?;
         let exact = pos == 0 && self.needle_len == haystack.len();
         // Every byte of the matched run is a matched index, but add in reverse order to
