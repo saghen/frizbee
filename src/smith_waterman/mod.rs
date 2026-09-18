@@ -161,6 +161,75 @@ pub(crate) struct SmithWaterman<B: Backend> {
     haystack_chunks: usize,
 }
 
+/// Picks the score width at construction: the u8 kernels have twice the lanes
+/// of the u16 kernels, so they're used whenever every possible score fits
+/// (see [`score_fits_in_u8`])
+#[derive(Debug, Clone)]
+pub(crate) enum ScoreWidth<U8, U16> {
+    U8(U8),
+    U16(U16),
+}
+
+macro_rules! either {
+    ($self:expr, $sw:ident => $body:expr) => {
+        match $self {
+            ScoreWidth::U8($sw) => $body,
+            ScoreWidth::U16($sw) => $body,
+        }
+    };
+}
+
+impl<U8: Kernel, U16: Kernel> Kernel for ScoreWidth<U8, U16> {
+    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self {
+        if score_fits_in_u8(needle.len(), scoring) {
+            Self::U8(U8::new(needle, scoring, case_sensitive))
+        } else {
+            Self::U16(U16::new(needle, scoring, case_sensitive))
+        }
+    }
+
+    fn is_available() -> bool {
+        U8::is_available() && U16::is_available()
+    }
+
+    #[inline(always)]
+    fn score_haystack_indices(
+        &mut self,
+        haystack: &[u8],
+        haystack_start_pos: usize,
+        max_typos: Option<u16>,
+    ) -> (u16, Vec<u32>) {
+        either!(self, sw => sw.score_haystack_indices(haystack, haystack_start_pos, max_typos))
+    }
+
+    #[inline(always)]
+    fn score_haystack_unicode_indices(
+        &mut self,
+        haystack: &[u8],
+        haystack_start_pos: usize,
+        max_typos: Option<u16>,
+    ) -> (u16, Vec<u32>) {
+        either!(self, sw => {
+            sw.score_haystack_unicode_indices(haystack, haystack_start_pos, max_typos)
+        })
+    }
+
+    #[inline(always)]
+    fn score_haystack(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16 {
+        either!(self, sw => sw.score_haystack(haystack, haystack_start_pos))
+    }
+
+    #[inline(always)]
+    fn score_haystack_unicode(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16 {
+        either!(self, sw => sw.score_haystack_unicode(haystack, haystack_start_pos))
+    }
+
+    #[cfg(feature = "match_end_col")]
+    fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16 {
+        either!(self, sw => sw.match_end_col(haystack, unicode))
+    }
+}
+
 pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
     fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self;
     fn is_available() -> bool;

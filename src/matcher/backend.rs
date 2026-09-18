@@ -1,6 +1,7 @@
 //! Definitions for all target feature-specific implementations of the matcher
 
 use super::algo::{MatcherImpl, Scorer, Specialized};
+use crate::smith_waterman::ScoreWidth;
 use crate::{Config, Match, MatchIndices};
 use alloc::vec::Vec;
 
@@ -37,26 +38,21 @@ use crate::smith_waterman::{SmithWatermanWasm, SmithWatermanWasmU8};
 pub type MatcherAVX512U8 = MatcherImpl<PrefilterAVX512, SmithWatermanAVX512U8>;
 #[cfg(target_arch = "x86_64")]
 pub type MatcherAVX512 = MatcherImpl<PrefilterAVX512, SmithWatermanAVX512>;
+// The u8 and u16 AVX-512 kernels need different features (VBMI), so they
+// stay separate backends; every other tier picks the width at construction
 #[cfg(target_arch = "x86_64")]
-pub type MatcherAVXU8 = MatcherImpl<PrefilterAVX, SmithWatermanAVXU8>;
+pub type MatcherAVX = MatcherImpl<PrefilterAVX, ScoreWidth<SmithWatermanAVXU8, SmithWatermanAVX>>;
 #[cfg(target_arch = "x86_64")]
-pub type MatcherAVX = MatcherImpl<PrefilterAVX, SmithWatermanAVX>;
-#[cfg(target_arch = "x86_64")]
-pub type MatcherSSEU8 = MatcherImpl<PrefilterSSE, SmithWatermanSSEU8>;
-#[cfg(target_arch = "x86_64")]
-pub type MatcherSSE = MatcherImpl<PrefilterSSE, SmithWatermanSSE>;
+pub type MatcherSSE = MatcherImpl<PrefilterSSE, ScoreWidth<SmithWatermanSSEU8, SmithWatermanSSE>>;
 #[cfg(target_arch = "aarch64")]
-pub type MatcherNEONU8 = MatcherImpl<PrefilterNEON, SmithWatermanNEONU8>;
-#[cfg(target_arch = "aarch64")]
-pub type MatcherNEON = MatcherImpl<PrefilterNEON, SmithWatermanNEON>;
+pub type MatcherNEON =
+    MatcherImpl<PrefilterNEON, ScoreWidth<SmithWatermanNEONU8, SmithWatermanNEON>>;
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-pub type MatcherWasmU8 = MatcherImpl<PrefilterWasm, SmithWatermanWasmU8>;
-#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-pub type MatcherWasm = MatcherImpl<PrefilterWasm, SmithWatermanWasm>;
+pub type MatcherWasm =
+    MatcherImpl<PrefilterWasm, ScoreWidth<SmithWatermanWasmU8, SmithWatermanWasm>>;
 #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
-pub type MatcherScalar = MatcherImpl<PrefilterScalar, SmithWatermanScalar>;
-#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
-pub type MatcherScalarU8 = MatcherImpl<PrefilterScalar, SmithWatermanScalarU8>;
+pub type MatcherScalar =
+    MatcherImpl<PrefilterScalar, ScoreWidth<SmithWatermanScalarU8, SmithWatermanScalar>>;
 
 #[derive(Debug, Clone)]
 pub enum MatcherBackend {
@@ -64,28 +60,18 @@ pub enum MatcherBackend {
     AVX512U8(MatcherAVX512U8),
     #[cfg(target_arch = "x86_64")]
     AVX512(MatcherAVX512),
-    #[cfg(target_arch = "x86_64")]
-    AVXU8(MatcherAVXU8),
     #[allow(clippy::upper_case_acronyms)]
     #[cfg(target_arch = "x86_64")]
     AVX(MatcherAVX),
-    #[cfg(target_arch = "x86_64")]
-    SSEU8(MatcherSSEU8),
     #[allow(clippy::upper_case_acronyms)]
     #[cfg(target_arch = "x86_64")]
     SSE(MatcherSSE),
     #[cfg(target_arch = "aarch64")]
-    NEONU8(MatcherNEONU8),
-    #[cfg(target_arch = "aarch64")]
     NEON(MatcherNEON),
-    #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-    WasmU8(MatcherWasmU8),
     #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
     Wasm(MatcherWasm),
     // simd128 cannot be runtime-detected, so when it's statically enabled the scalar
     // fallback is unreachable
-    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
-    ScalarU8(MatcherScalarU8),
     #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
     Scalar(MatcherScalar),
 
@@ -181,34 +167,31 @@ impl_specialized!(
     target_feature = "avx512f,avx512bw,bmi1,bmi2"
 );
 #[cfg(target_arch = "x86_64")]
-impl_specialized!(PrefilterAVX, SmithWatermanAVXU8, target_feature = "avx2");
-#[cfg(target_arch = "x86_64")]
-impl_specialized!(PrefilterAVX, SmithWatermanAVX, target_feature = "avx2");
-#[cfg(target_arch = "x86_64")]
 impl_specialized!(
-    PrefilterSSE,
-    SmithWatermanSSEU8,
-    target_feature = "sse2,ssse3,sse4.1"
+    PrefilterAVX,
+    ScoreWidth<SmithWatermanAVXU8, SmithWatermanAVX>,
+    target_feature = "avx2"
 );
 #[cfg(target_arch = "x86_64")]
 impl_specialized!(
     PrefilterSSE,
-    SmithWatermanSSE,
+    ScoreWidth<SmithWatermanSSEU8, SmithWatermanSSE>,
     target_feature = "sse2,ssse3,sse4.1"
 );
 #[cfg(target_arch = "aarch64")]
-impl_specialized!(PrefilterNEON, SmithWatermanNEONU8, target_feature = "neon");
-#[cfg(target_arch = "aarch64")]
-impl_specialized!(PrefilterNEON, SmithWatermanNEON, target_feature = "neon");
+impl_specialized!(
+    PrefilterNEON,
+    ScoreWidth<SmithWatermanNEONU8, SmithWatermanNEON>,
+    target_feature = "neon"
+);
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 impl_specialized!(
     PrefilterWasm,
-    SmithWatermanWasmU8,
+    ScoreWidth<SmithWatermanWasmU8, SmithWatermanWasm>,
     target_feature = "simd128"
 );
-#[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-impl_specialized!(PrefilterWasm, SmithWatermanWasm, target_feature = "simd128");
 #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
-impl_specialized!(PrefilterScalar, SmithWatermanScalarU8);
-#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
-impl_specialized!(PrefilterScalar, SmithWatermanScalar);
+impl_specialized!(
+    PrefilterScalar,
+    ScoreWidth<SmithWatermanScalarU8, SmithWatermanScalar>
+);
