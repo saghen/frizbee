@@ -1,4 +1,3 @@
-use crate::smith_waterman::Kernel;
 use crate::{
     Scoring,
     prefilter::{case_needle, case_needle_unicode},
@@ -6,10 +5,10 @@ use crate::{
 };
 use alloc::{string::ToString, vec, vec::Vec};
 
-use super::SmithWaterman;
 use super::alignment_iter::Alignment;
 use super::backend::{Backend, BytesVec, ScoreVec};
 use super::matrix::Matrix;
+use super::{ScoringVecs, SmithWaterman};
 
 mod ascii;
 pub(crate) mod ascii_gap;
@@ -18,8 +17,8 @@ pub(crate) mod unicode_gap;
 
 pub(crate) const MAX_HAYSTACK_LEN: usize = 1024;
 
-impl<B: Backend> Kernel for SmithWaterman<B> {
-    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self {
+impl<B: Backend> SmithWaterman<B> {
+    pub(crate) fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self {
         let needle_simd = case_needle(needle.as_bytes(), case_sensitive)
             .iter()
             .map(|(c1, c2)| unsafe { (B::Bytes::splat(*c1), B::Bytes::splat(*c2)) })
@@ -29,12 +28,30 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         let unicode_pending_gap_open_masks = (0..(needle_unicode.len() + 1))
             .map(|_| unsafe { B::Score::zero() })
             .collect();
+        let scoring_vecs = unsafe {
+            ScoringVecs {
+                gap_extend_penalty: B::Score::splat(scoring.gap_extend_penalty),
+                gap_open_penalty: B::Score::splat(
+                    scoring
+                        .gap_open_penalty
+                        .saturating_sub(scoring.gap_extend_penalty),
+                ),
+                match_score: B::Score::splat(
+                    scoring.match_score.saturating_add(scoring.mismatch_penalty),
+                ),
+                mismatch_penalty: B::Score::splat(scoring.mismatch_penalty),
+                matching_case_bonus: B::Score::splat(scoring.matching_case_bonus),
+                capitalization_bonus: B::Score::splat(scoring.capitalization_bonus),
+                delimiter_bonus: B::Score::splat(scoring.delimiter_bonus),
+            }
+        };
         Self {
             needle: needle.to_string(),
             needle_simd,
             needle_unicode,
             case_sensitive,
             scoring: scoring.clone(),
+            scoring_vecs,
             score_matrix: Matrix::new(needle_len, MAX_HAYSTACK_LEN),
             match_masks: Matrix::new(needle_len, MAX_HAYSTACK_LEN),
             unicode_pending_gap_open_masks,
@@ -42,13 +59,12 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         }
     }
 
-    fn is_available() -> bool {
+    pub(crate) fn is_available() -> bool {
         B::is_available()
     }
 
-    #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
-    #[cfg_attr(target_arch = "wasm32", inline(never))]
-    fn score_haystack_indices(
+    #[inline(always)]
+    pub(crate) fn score_haystack_indices(
         &mut self,
         haystack: &[u8],
         haystack_start_pos: usize,
@@ -95,9 +111,8 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         (score, indices)
     }
 
-    #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
-    #[cfg_attr(target_arch = "wasm32", inline(never))]
-    fn score_haystack_unicode_indices(
+    #[inline(always)]
+    pub(crate) fn score_haystack_unicode_indices(
         &mut self,
         haystack: &[u8],
         haystack_start_pos: usize,
@@ -155,20 +170,35 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         (score, indices)
     }
 
-    #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
-    #[cfg_attr(target_arch = "wasm32", inline(never))]
-    fn score_haystack(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16 {
-        SmithWaterman::score_haystack(self, haystack, haystack_start_pos == 0)
+    #[inline(always)]
+    pub(crate) fn score_inline<const UNICODE: bool>(
+        &mut self,
+        haystack: &[u8],
+        haystack_start_pos: usize,
+    ) -> u16 {
+        if UNICODE {
+            self.score_haystack_unicode(haystack, haystack_start_pos == 0)
+        } else {
+            self.score_haystack(haystack, haystack_start_pos == 0)
+        }
     }
 
-    #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
-    #[cfg_attr(target_arch = "wasm32", inline(never))]
-    fn score_haystack_unicode(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16 {
-        SmithWaterman::score_haystack_unicode(self, haystack, haystack_start_pos == 0)
+    #[inline(always)]
+    pub(crate) fn score_indices_inline<const UNICODE: bool>(
+        &mut self,
+        haystack: &[u8],
+        haystack_start_pos: usize,
+        max_typos: Option<u16>,
+    ) -> (u16, Vec<u32>) {
+        if UNICODE {
+            self.score_haystack_unicode_indices(haystack, haystack_start_pos, max_typos)
+        } else {
+            self.score_haystack_indices(haystack, haystack_start_pos, max_typos)
+        }
     }
 
     #[cfg(feature = "match_end_col")]
-    fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16 {
+    pub(crate) fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16 {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(
                 self.needle.as_bytes(),

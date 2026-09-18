@@ -73,30 +73,143 @@ mod matrix;
 
 use alignment_iter::AlignmentPathIter;
 
+/// Defines the kernel for one backend. Its outlined entry points are built
+/// once, with the backend's `#[target_feature]` (omitted for scalar backends)
+macro_rules! kernel {
+    ($name:ident, $kernel:ty $(, target_feature = $feature:literal)?) => {
+        pub type $name = $kernel;
+
+        impl Kernel for $name {
+            fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self {
+                <$kernel>::new(needle, scoring, case_sensitive)
+            }
+
+            fn is_available() -> bool {
+                <$kernel>::is_available()
+            }
+
+            #[inline(always)]
+            fn score_inline<const UNICODE: bool>(
+                &mut self,
+                haystack: &[u8],
+                haystack_start_pos: usize,
+            ) -> u16 {
+                <$kernel>::score_inline::<UNICODE>(self, haystack, haystack_start_pos)
+            }
+
+            #[inline(always)]
+            fn score_indices_inline<const UNICODE: bool>(
+                &mut self,
+                haystack: &[u8],
+                haystack_start_pos: usize,
+                max_typos: Option<u16>,
+            ) -> (u16, Vec<u32>) {
+                <$kernel>::score_indices_inline::<UNICODE>(
+                    self,
+                    haystack,
+                    haystack_start_pos,
+                    max_typos,
+                )
+            }
+
+            #[inline(never)]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn score<const UNICODE: bool>(
+                &mut self,
+                haystack: &[u8],
+                haystack_start_pos: usize,
+            ) -> u16 {
+                <$kernel>::score_inline::<UNICODE>(self, haystack, haystack_start_pos)
+            }
+
+            #[inline(never)]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn score_indices<const UNICODE: bool>(
+                &mut self,
+                haystack: &[u8],
+                haystack_start_pos: usize,
+                max_typos: Option<u16>,
+            ) -> (u16, Vec<u32>) {
+                <$kernel>::score_indices_inline::<UNICODE>(
+                    self,
+                    haystack,
+                    haystack_start_pos,
+                    max_typos,
+                )
+            }
+
+            #[cfg(feature = "match_end_col")]
+            fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16 {
+                <$kernel>::match_end_col(self, haystack, unicode)
+            }
+        }
+    };
+}
+
 #[cfg(target_arch = "x86_64")]
-pub type SmithWatermanAVX512U8 = SmithWaterman<BackendAVX512U8>;
+kernel!(
+    SmithWatermanAVX512U8,
+    SmithWaterman<BackendAVX512U8>,
+    target_feature = "avx512f,avx512bw,avx512vbmi,bmi1,bmi2"
+);
 #[cfg(target_arch = "x86_64")]
-pub type SmithWatermanAVX512 = SmithWaterman<BackendAVX512>;
+kernel!(
+    SmithWatermanAVX512,
+    SmithWaterman<BackendAVX512>,
+    target_feature = "avx512f,avx512bw,bmi1,bmi2"
+);
 #[cfg(target_arch = "x86_64")]
-pub type SmithWatermanSSE = SmithWaterman<BackendSSE>;
+kernel!(
+    SmithWatermanSSE,
+    SmithWaterman<BackendSSE>,
+    target_feature = "sse2,ssse3,sse4.1"
+);
 #[cfg(target_arch = "x86_64")]
-pub type SmithWatermanSSEU8 = SmithWaterman<BackendSSEU8>;
+kernel!(
+    SmithWatermanSSEU8,
+    SmithWaterman<BackendSSEU8>,
+    target_feature = "sse2,ssse3,sse4.1"
+);
 #[cfg(target_arch = "x86_64")]
-pub type SmithWatermanAVX = SmithWaterman<BackendAVX>;
+kernel!(
+    SmithWatermanAVX,
+    SmithWaterman<BackendAVX>,
+    target_feature = "avx2"
+);
 #[cfg(target_arch = "x86_64")]
-pub type SmithWatermanAVXU8 = SmithWaterman<BackendAVXU8>;
+kernel!(
+    SmithWatermanAVXU8,
+    SmithWaterman<BackendAVXU8>,
+    target_feature = "avx2"
+);
 #[cfg(target_arch = "aarch64")]
-pub type SmithWatermanNEON = SmithWaterman<BackendNEON>;
+kernel!(
+    SmithWatermanNEON,
+    SmithWaterman<BackendNEON>,
+    target_feature = "neon"
+);
 #[cfg(target_arch = "aarch64")]
-pub type SmithWatermanNEONU8 = SmithWaterman<BackendNEONU8>;
+kernel!(
+    SmithWatermanNEONU8,
+    SmithWaterman<BackendNEONU8>,
+    target_feature = "neon"
+);
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-pub type SmithWatermanWasm = SmithWaterman<BackendWasm>;
+kernel!(
+    SmithWatermanWasm,
+    SmithWaterman<BackendWasm>,
+    target_feature = "simd128"
+);
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-pub type SmithWatermanWasmU8 = SmithWaterman<BackendWasmU8>;
+kernel!(
+    SmithWatermanWasmU8,
+    SmithWaterman<BackendWasmU8>,
+    target_feature = "simd128"
+);
 #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
-pub type SmithWatermanScalar = SmithWaterman<BackendScalar8>;
+kernel!(SmithWatermanScalar, SmithWaterman<BackendScalar8>);
 #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
-pub type SmithWatermanScalarU8 = SmithWaterman<BackendScalar16U8>;
+kernel!(SmithWatermanScalarU8, SmithWaterman<BackendScalar16U8>);
 
 /// Returns true if every possible Smith-Waterman matrix cell value for this
 /// needle length and scoring config fits in a u8. The u8 backends are otherwise
@@ -129,6 +242,20 @@ pub(crate) fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
     max_matrix_score + scoring.mismatch_penalty as usize <= u8::MAX as usize
 }
 
+/// Scoring constants splatted once to save a few instructions per haystack
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ScoringVecs<S> {
+    gap_extend_penalty: S,
+    /// The extra penalty for opening a gap, on top of extending it
+    gap_open_penalty: S,
+    /// Undoes the mismatch penalty, which is applied unconditionally
+    match_score: S,
+    mismatch_penalty: S,
+    matching_case_bonus: S,
+    capitalization_bonus: S,
+    delimiter_bonus: S,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct SmithWaterman<B: Backend> {
     needle: String,
@@ -136,6 +263,7 @@ pub(crate) struct SmithWaterman<B: Backend> {
     needle_unicode: Vec<UnicodeChar>,
     case_sensitive: bool,
     scoring: Scoring,
+    scoring_vecs: ScoringVecs<B::Score>,
     score_matrix: Matrix<B>,
     match_masks: Matrix<B>,
     unicode_pending_gap_open_masks: Vec<B::Score>,
@@ -145,23 +273,48 @@ pub(crate) struct SmithWaterman<B: Backend> {
     haystack_chunks: usize,
 }
 
+/// The Smith Waterman kernel of one SIMD backend
 pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
     fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self;
     fn is_available() -> bool;
-    fn score_haystack_indices(
+
+    /// Inlined into the caller, for loops which score every haystack
+    fn score_inline<const UNICODE: bool>(
+        &mut self,
+        haystack: &[u8],
+        haystack_start_pos: usize,
+    ) -> u16;
+
+    /// Inlined like [`Kernel::score_inline`]
+    fn score_indices_inline<const UNICODE: bool>(
         &mut self,
         haystack: &[u8],
         haystack_start_pos: usize,
         max_typos: Option<u16>,
     ) -> (u16, Vec<u32>);
-    fn score_haystack_unicode_indices(
+
+    /// Outlined (`inline(never)`), so the kernel is built once per backend
+    /// rather than once per caller
+    ///
+    /// # Safety
+    /// The backend's required CPU features must be available
+    unsafe fn score<const UNICODE: bool>(
+        &mut self,
+        haystack: &[u8],
+        haystack_start_pos: usize,
+    ) -> u16;
+
+    /// Outlined like [`Kernel::score`]
+    ///
+    /// # Safety
+    /// The backend's required CPU features must be available
+    unsafe fn score_indices<const UNICODE: bool>(
         &mut self,
         haystack: &[u8],
         haystack_start_pos: usize,
         max_typos: Option<u16>,
     ) -> (u16, Vec<u32>);
-    fn score_haystack(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16;
-    fn score_haystack_unicode(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16;
+
     #[cfg(feature = "match_end_col")]
     fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16;
 }
