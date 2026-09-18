@@ -5,7 +5,7 @@ use alloc::{vec, vec::Vec};
 
 #[cfg(target_arch = "aarch64")]
 use crate::literal::LiteralNEON;
-#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+#[cfg(scalar_fallback)]
 use crate::literal::LiteralScalar;
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 use crate::literal::LiteralWasm;
@@ -38,7 +38,7 @@ macro_rules! dispatch {
             MatcherBackend::NEON($m) => $body,
             #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
             MatcherBackend::Wasm($m) => $body,
-            #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+            #[cfg(scalar_fallback)]
             MatcherBackend::Scalar($m) => $body,
             #[cfg(target_arch = "x86_64")]
             MatcherBackend::LiteralAVX512($m) => $body,
@@ -50,7 +50,7 @@ macro_rules! dispatch {
             MatcherBackend::LiteralNEON($m) => $body,
             #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
             MatcherBackend::LiteralWasm($m) => $body,
-            #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+            #[cfg(scalar_fallback)]
             MatcherBackend::LiteralScalar($m) => $body,
         }
     };
@@ -494,13 +494,14 @@ impl Matcher {
             if MatcherWasm::is_available() {
                 return MatcherBackend::Wasm(unsafe { MatcherWasm::build(needle, config) });
             }
-            unreachable!("simd128 is statically enabled")
         }
 
-        #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+        #[cfg(scalar_fallback)]
         {
             MatcherBackend::Scalar(unsafe { MatcherScalar::build(needle, config) })
         }
+        #[cfg(not(scalar_fallback))]
+        unreachable!("a SIMD backend is statically available")
     }
 
     fn get_literal_backend(needle: &str, config: &Config) -> MatcherBackend {
@@ -531,13 +532,14 @@ impl Matcher {
             if LiteralWasm::is_available() {
                 return MatcherBackend::LiteralWasm(unsafe { LiteralWasm::build(needle, config) });
             }
-            unreachable!("simd128 is statically enabled")
         }
 
-        #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+        #[cfg(scalar_fallback)]
         {
             MatcherBackend::LiteralScalar(unsafe { LiteralScalar::build(needle, config) })
         }
+        #[cfg(not(scalar_fallback))]
+        unreachable!("a SIMD backend is statically available")
     }
 }
 
