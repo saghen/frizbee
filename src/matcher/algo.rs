@@ -95,7 +95,7 @@ where
                 if matched {
                     let (trimmed, start_pos, include_exact) =
                         trim_haystack(haystack, start_pos, end_pos);
-                    matches.push(self.smith_waterman_one::<UNICODE>(
+                    matches.push(self.smith_waterman_one::<TYPOS, UNICODE>(
                         trimmed,
                         index,
                         start_pos,
@@ -131,7 +131,7 @@ where
         }
 
         let (trimmed, start_pos, include_exact) = trim_haystack(haystack, start_pos, end_pos);
-        Some(self.smith_waterman_one::<UNICODE>(trimmed, index, start_pos, include_exact))
+        Some(self.smith_waterman_one::<TYPOS, UNICODE>(trimmed, index, start_pos, include_exact))
     }
 
     /// Single-haystack path for `Matcher::match_iter_indices`, mirroring
@@ -163,7 +163,7 @@ where
         }
 
         let (trimmed, start_pos, include_exact) = trim_haystack(haystack, start_pos, end_pos);
-        Some(self.smith_waterman_indices_one::<UNICODE>(
+        Some(self.smith_waterman_indices_one::<TYPOS, UNICODE>(
             trimmed,
             start_pos,
             index,
@@ -217,7 +217,7 @@ where
                 if matched {
                     let (trimmed, start_pos, include_exact) =
                         trim_haystack(haystack, start_pos, end_pos);
-                    matches.push(self.smith_waterman_indices_one::<UNICODE>(
+                    matches.push(self.smith_waterman_indices_one::<TYPOS, UNICODE>(
                         trimmed,
                         start_pos,
                         index as u32,
@@ -231,19 +231,21 @@ where
     }
 
     #[inline(always)]
-    fn smith_waterman_one<const UNICODE: bool>(
+    fn smith_waterman_one<const TYPOS: u16, const UNICODE: bool>(
         &mut self,
         haystack: &[u8],
         index: u32,
         haystack_start_pos: usize,
         include_exact: bool,
     ) -> Match {
-        let mut score = if UNICODE {
+        let mut score = if Self::inline_kernel::<TYPOS>() {
             self.smith_waterman
-                .score_haystack_unicode(haystack, haystack_start_pos)
+                .score_inline::<UNICODE>(haystack, haystack_start_pos)
         } else {
-            self.smith_waterman
-                .score_haystack(haystack, haystack_start_pos)
+            unsafe {
+                self.smith_waterman
+                    .score::<UNICODE>(haystack, haystack_start_pos)
+            }
         };
 
         let exact = include_exact && self.needle.as_bytes() == haystack;
@@ -267,7 +269,7 @@ where
     }
 
     #[inline(always)]
-    fn smith_waterman_indices_one<const UNICODE: bool>(
+    fn smith_waterman_indices_one<const TYPOS: u16, const UNICODE: bool>(
         &mut self,
         haystack: &[u8],
         haystack_start_pos: usize,
@@ -275,15 +277,20 @@ where
         include_exact: bool,
         max_typos: Option<u16>,
     ) -> MatchIndices {
-        let (mut score, indices) = if UNICODE {
-            self.smith_waterman.score_haystack_unicode_indices(
+        let (mut score, indices) = if Self::inline_kernel::<TYPOS>() {
+            self.smith_waterman.score_indices_inline::<UNICODE>(
                 haystack,
                 haystack_start_pos,
                 max_typos,
             )
         } else {
-            self.smith_waterman
-                .score_haystack_indices(haystack, haystack_start_pos, max_typos)
+            unsafe {
+                self.smith_waterman.score_indices::<UNICODE>(
+                    haystack,
+                    haystack_start_pos,
+                    max_typos,
+                )
+            }
         };
 
         let exact = include_exact && self.needle.as_bytes() == haystack;
@@ -297,6 +304,14 @@ where
             exact,
             indices,
         }
+    }
+
+    /// With no prefilter every haystack is scored, so the kernel stays inline
+    /// with the loop (except on wasm, for size). Otherwise it's outlined and
+    /// shared
+    #[inline(always)]
+    fn inline_kernel<const TYPOS: u16>() -> bool {
+        TYPOS == NO_PREFILTER && !cfg!(target_arch = "wasm32")
     }
 
     /// The runtime typo budget for a `TYPOS` specialization: 0/1/2 encode the
