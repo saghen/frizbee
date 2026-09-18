@@ -1,6 +1,6 @@
 use super::MAX_HAYSTACK_LEN;
 use crate::smith_waterman::{
-    SmithWaterman,
+    ScoringVecs, SmithWaterman,
     backend::{Backend, BytesVec, MaskVec, ScoreVec},
     greedy::match_greedy,
 };
@@ -36,19 +36,15 @@ impl<B: Backend> SmithWaterman<B> {
         let unicode_pending_gap_open_masks = &mut self.unicode_pending_gap_open_masks;
 
         unsafe {
-            // Constants
-            let gap_extend_penalty = B::Score::splat(scoring.gap_extend_penalty);
-            let gap_open_penalty = B::Score::splat(
-                scoring
-                    .gap_open_penalty
-                    .saturating_sub(scoring.gap_extend_penalty),
-            );
-            let match_score =
-                B::Score::splat(scoring.match_score.saturating_add(scoring.mismatch_penalty));
-            let mismatch_penalty = B::Score::splat(scoring.mismatch_penalty);
-            let matching_case_bonus = B::Score::splat(scoring.matching_case_bonus);
-            let capitalization_bonus = B::Score::splat(scoring.capitalization_bonus);
-            let delimiter_bonus = B::Score::splat(scoring.delimiter_bonus);
+            let ScoringVecs {
+                gap_extend_penalty,
+                gap_open_penalty,
+                match_score,
+                mismatch_penalty,
+                matching_case_bonus,
+                capitalization_bonus,
+                delimiter_bonus,
+            } = self.scoring_vecs;
 
             let final_row_idx = self.needle_unicode.len();
             let mut max_scores = B::Score::zero();

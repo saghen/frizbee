@@ -5,7 +5,7 @@ use super::super::Backend;
 use super::super::{BackendScalar8, BackendScalar16U8};
 use super::generator::{ByteCursor, run_generated_inputs, test_bound};
 use crate::Scoring;
-use crate::smith_waterman::{Kernel, SmithWaterman, score_fits_in_u8};
+use crate::smith_waterman::{SmithWaterman, score_fits_in_u8};
 
 /// randomized matcher invocation: which needle, haystack, and config to run
 #[derive(Debug, Clone)]
