@@ -60,3 +60,5 @@ std = ["serde?/std"]
 serde = ["dep:serde"]
 match_end_col = []
 safe_read = []
+# Benchmark-only: honour FRIZBEE_FORCE_BACKEND=avx2|sse|scalar to cap the SIMD tier
+force_backend = ["std"]

@@ -1,17 +1,24 @@
 use core::arch::aarch64::*;
 
-use super::{Backend, BitMaskOps};
+use super::{Backend, BitMaskOps, ChunkBlock, eq_block_chunks, load_block_chunks};
 
 /// Four bits per lane, so NEON comparisons only need SHRN to pack their lanes
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 pub(crate) struct NeonMask(u64);
 
-impl BitMaskOps for NeonMask {
+impl From<NeonMask> for u64 {
+    /// One bit per byte instead of four
     #[inline(always)]
-    fn zero() -> Self {
-        Self(0)
+    fn from(mask: NeonMask) -> u64 {
+        let bits = mask.0 & 0x1111_1111_1111_1111;
+        let bits = (bits | (bits >> 3)) & 0x0303_0303_0303_0303;
+        let bits = (bits | (bits >> 6)) & 0x000F_000F_000F_000F;
+        let bits = (bits | (bits >> 12)) & 0x0000_00FF_0000_00FF;
+        (bits | (bits >> 24)) & 0xFFFF
     }
+}
 
+impl BitMaskOps for NeonMask {
     #[inline(always)]
     fn all() -> Self {
         Self(u64::MAX)
@@ -62,6 +69,8 @@ impl Backend for PrefilterNEONBackend {
 
     type Chunk = uint8x16_t;
     type Mask = NeonMask;
+    type Block = u64;
+    type Chunks = ChunkBlock<uint8x16_t, 4>;
 
     fn is_available() -> bool {
         true
@@ -88,6 +97,26 @@ impl Backend for PrefilterNEONBackend {
             let mask = vorrq_u8(vceqq_u8(needle.0, chunk), vceqq_u8(needle.1, chunk));
             movemask_u8(mask)
         }
+    }
+
+    #[inline(always)]
+    unsafe fn load_block(haystack: &[u8]) -> (Self::Chunks, Self::Block) {
+        unsafe { load_block_chunks::<Self, 4>(haystack) }
+    }
+
+    #[inline(always)]
+    unsafe fn fold_block(chunks: &mut Self::Chunks) {
+        unsafe {
+            for chunk in chunks.chunks.iter_mut().take(chunks.count) {
+                let upper = vcltq_u8(vsubq_u8(*chunk, vdupq_n_u8(b'A')), vdupq_n_u8(26));
+                *chunk = vorrq_u8(*chunk, vandq_u8(upper, vdupq_n_u8(0x20)));
+            }
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn eq_block(chunks: &Self::Chunks, needle: Self::Chunk) -> Self::Block {
+        unsafe { eq_block_chunks::<Self, 4>(chunks, needle) }
     }
 }
 
@@ -118,10 +147,11 @@ mod tests {
                 assert_eq!(bits, PrefilterScalarBackend::eq(bytes, [b'a'; 16]));
                 mask
             };
+            assert_eq!(u64::from(mask), bits as u64);
             assert_eq!(mask.is_zero(), bits == 0);
             assert_eq!(mask.trailing_zeros(), bits.trailing_zeros() as usize);
             assert_eq!(mask.leading_zeros(), bits.leading_zeros() as usize);
-            assert_eq!(mask.or(NeonMask::zero()), mask);
+            assert_eq!(mask.or(NeonMask(0)), mask);
             assert_eq!(mask.or(NeonMask::all()), NeonMask::all());
 
             let mut remaining = mask;

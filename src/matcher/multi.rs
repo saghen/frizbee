@@ -28,12 +28,11 @@ pub(super) struct CompiledPattern {
 }
 
 impl Matcher {
-    pub(super) fn match_one_multi<S: AsRef<str>>(
+    pub(super) fn match_one_multi(
         patterns: &mut [CompiledPattern],
-        haystack: S,
+        haystack: &str,
         index: u32,
     ) -> Option<Match> {
-        let haystack = haystack.as_ref();
         let mut combined = Match::from_index(index as usize);
         for pattern in patterns {
             let result = Self::dispatch_pattern_one(pattern, haystack, index);
@@ -54,12 +53,11 @@ impl Matcher {
         Some(combined)
     }
 
-    pub(super) fn match_one_indices_multi<S: AsRef<str>>(
+    pub(super) fn match_one_indices_multi(
         patterns: &mut [CompiledPattern],
-        haystack: S,
+        haystack: &str,
         index: u32,
     ) -> Option<MatchIndices> {
-        let haystack = haystack.as_ref();
         let mut combined = MatchIndices::from_index(index as usize);
         for pattern in patterns {
             if pattern.negated {

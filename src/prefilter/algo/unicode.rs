@@ -73,55 +73,19 @@ impl<B: Backend> Prefilter<B> {
         mask
     }
 
-    #[inline(always)]
-    pub(super) unsafe fn unicode_char_mask(
-        start: usize,
-        len: usize,
-        haystack: &[u8],
-        needle_char: &UnicodeChar,
-    ) -> B::Mask {
-        let char_len = needle_char.len;
-        debug_assert!(char_len <= 4 && char_len > 0);
-        if start + char_len > len {
-            return B::Mask::zero();
-        }
-
-        let (chunk, chunk_mask) = unsafe { load_window::<B>(haystack, start + char_len - 1, len) };
-
-        // check the regular needle
-        let mut mask = unsafe {
-            Self::char_variant_mask(
-                (chunk, chunk_mask),
-                B::splat(needle_char.chars[char_len - 1]),
-                start,
-                len,
-                haystack,
-                char_len,
-                needle_char.chars,
-            )
-        };
-
-        // check the case flipped version
-        mask = mask.or(unsafe {
-            Self::char_variant_mask(
-                (chunk, chunk_mask),
-                B::splat(needle_char.flipped_chars[char_len - 1]),
-                start,
-                len,
-                haystack,
-                char_len,
-                needle_char.flipped_chars,
-            )
-        });
-        mask
-    }
-
     #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
     #[cfg_attr(target_arch = "wasm32", inline(never))]
-    pub unsafe fn match_haystack_unicode(&self, haystack: &[u8]) -> (bool, usize, usize) {
+    pub unsafe fn match_haystack_unicode(&mut self, haystack: &[u8]) -> (bool, usize, usize) {
         let len = haystack.len();
         if len == 0 {
             return (false, 0, 0);
+        }
+
+        // Samples the haystack to check if any of the needle bytes are
+        // particularly rare (<20%). If so, perform a first-pass using only that
+        // rare needle byte.
+        if unsafe { self.rare_unicode.rejects(haystack) } {
+            return (false, 0, len);
         }
 
         let mut can_skip_chunks = true;
@@ -161,17 +125,19 @@ impl<B: Backend> Prefilter<B> {
                 };
 
                 // check the case flipped version
-                mask = mask.or(unsafe {
-                    Self::char_variant_mask(
-                        (chunk, chunk_mask),
-                        last_needle_char_bytes.1,
-                        start,
-                        len,
-                        haystack,
-                        needle_char.len,
-                        needle_char.flipped_chars,
-                    )
-                });
+                if needle_char.has_flip {
+                    mask = mask.or(unsafe {
+                        Self::char_variant_mask(
+                            (chunk, chunk_mask),
+                            last_needle_char_bytes.1,
+                            start,
+                            len,
+                            haystack,
+                            needle_char.len,
+                            needle_char.flipped_chars,
+                        )
+                    });
+                }
 
                 if mask.is_zero() {
                     break;
@@ -243,25 +209,34 @@ impl<B: Backend> Prefilter<B> {
             // could have matched. this can result in a false positive, but that's fine for
             // this stage since this just controls bounds, and bounds being too large hurt
             // performance, not correctness.
-            let mut mask = unsafe { B::eq(chunk, last_bytes.0).or(B::eq(chunk, last_bytes.1)) }
-                .and(chunk_mask);
+            let mut mask = unsafe {
+                let mut mask = B::eq(chunk, last_bytes.0);
+                if needle_char.has_flip {
+                    mask = mask.or(B::eq(chunk, last_bytes.1));
+                }
+                mask
+            }
+            .and(chunk_mask);
 
             if !mask.is_zero() && char_len > 1 {
                 mask = mask.and(unsafe {
-                    Self::match_unicode_char_prefix(
+                    let mut prefix = Self::match_unicode_char_prefix(
                         start,
                         len,
                         haystack,
                         char_len,
                         needle_char.chars,
-                    )
-                    .or(Self::match_unicode_char_prefix(
-                        start,
-                        len,
-                        haystack,
-                        char_len,
-                        needle_char.flipped_chars,
-                    ))
+                    );
+                    if needle_char.has_flip {
+                        prefix = prefix.or(Self::match_unicode_char_prefix(
+                            start,
+                            len,
+                            haystack,
+                            char_len,
+                            needle_char.flipped_chars,
+                        ));
+                    }
+                    prefix
                 });
             }
 

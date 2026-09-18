@@ -3,7 +3,6 @@ use crate::smith_waterman::Kernel as SmithWatermanKernel;
 use crate::{Config, Match, MatchIndices};
 use alloc::{
     string::{String, ToString},
-    vec,
     vec::Vec,
 };
 
@@ -27,20 +26,17 @@ pub(crate) trait Specialized: Sized {
         matches: &mut Vec<Match>,
     );
 
-    unsafe fn match_list_indices<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
+    unsafe fn match_one<const TYPOS: u16, const UNICODE: bool>(
         &mut self,
-        haystacks: &[H],
-    ) -> Vec<MatchIndices>;
-
-    unsafe fn match_one<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
-        &mut self,
-        haystack: H,
+        haystack: &str,
         index: u32,
     ) -> Option<Match>;
 
-    unsafe fn match_one_indices<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
+    /// Off the hot path, so the typo count is read at runtime rather than
+    /// specialized
+    unsafe fn match_one_indices<const UNICODE: bool>(
         &mut self,
-        haystack: H,
+        haystack: &str,
         index: u32,
     ) -> Option<MatchIndices>;
 }
@@ -106,21 +102,15 @@ where
         }
     }
 
-    /// Single-haystack path for `Matcher::match_iter`, which branches on the
-    /// typo/unicode configuration at runtime rather than expanding a hot loop
-    /// per configuration, so it monomorphizes once per backend. Each kernel
-    /// call crosses the `#[target_feature]` boundary instead of inlining into
-    /// a shared loop.
     #[inline(always)]
-    pub(super) fn match_one_impl<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
+    pub(super) fn match_one_impl<const TYPOS: u16, const UNICODE: bool>(
         &mut self,
-        haystack: H,
+        haystack: &str,
         index: u32,
     ) -> Option<Match> {
-        let haystack = haystack.as_ref().as_bytes();
+        let haystack = haystack.as_bytes();
         let max_typos = self.max_typos_runtime::<TYPOS>();
-        let original_len = haystack.len();
-        if original_len < self.min_haystack_len {
+        if haystack.len() < self.min_haystack_len {
             return None;
         }
 
@@ -134,30 +124,22 @@ where
         Some(self.smith_waterman_one::<UNICODE>(trimmed, index, start_pos, include_exact))
     }
 
-    /// Single-haystack path for `Matcher::match_iter_indices`, mirroring
-    /// `match_one_impl` but returning the matched character indices. Like the
-    /// list variant it branches on the typo/unicode configuration at runtime so
-    /// it monomorphizes once per backend.
     #[inline(always)]
-    pub(super) fn match_one_indices_impl<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
+    pub(super) fn match_one_indices_impl<const UNICODE: bool>(
         &mut self,
-        haystack: H,
+        haystack: &str,
         index: u32,
     ) -> Option<MatchIndices> {
-        let haystack = haystack.as_ref().as_bytes();
-        let max_typos = self.max_typos_runtime::<TYPOS>();
-        let max_typos_opt = if TYPOS == NO_PREFILTER {
-            None
-        } else {
-            Some(max_typos)
-        };
-        let original_len = haystack.len();
-        if original_len < self.min_haystack_len {
+        let haystack = haystack.as_bytes();
+        let max_typos = self.config.max_typos;
+        if haystack.len() < self.min_haystack_len {
             return None;
         }
 
-        let (matched, start_pos, end_pos) =
-            self.prefilter_haystack::<TYPOS, UNICODE>(haystack, max_typos);
+        let (matched, start_pos, end_pos) = match max_typos {
+            None => (true, 0, haystack.len()),
+            Some(max_typos) => self.prefilter_haystack::<MANY_TYPOS, UNICODE>(haystack, max_typos),
+        };
         if !matched {
             return None;
         }
@@ -168,7 +150,7 @@ where
             start_pos,
             index,
             include_exact,
-            max_typos_opt,
+            max_typos,
         ))
     }
 
@@ -194,40 +176,6 @@ where
                 .match_haystack_many_typos(haystack, max_typos),
             _ => unreachable!("unsupported typo count specialization"),
         }
-    }
-
-    #[inline(always)]
-    pub(super) fn match_list_indices_impl<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
-        &mut self,
-        haystacks: &[H],
-    ) -> Vec<MatchIndices> {
-        let max_typos = self.max_typos_runtime::<TYPOS>();
-        let max_typos_opt = if TYPOS == NO_PREFILTER {
-            None
-        } else {
-            Some(max_typos)
-        };
-        let mut matches = vec![];
-        for (index, haystack_str) in haystacks.iter().enumerate() {
-            let haystack = haystack_str.as_ref().as_bytes();
-            let original_len = haystack.len();
-            if original_len >= self.min_haystack_len {
-                let (matched, start_pos, end_pos) =
-                    self.prefilter_haystack::<TYPOS, UNICODE>(haystack, max_typos);
-                if matched {
-                    let (trimmed, start_pos, include_exact) =
-                        trim_haystack(haystack, start_pos, end_pos);
-                    matches.push(self.smith_waterman_indices_one::<UNICODE>(
-                        trimmed,
-                        start_pos,
-                        index as u32,
-                        include_exact,
-                        max_typos_opt,
-                    ));
-                }
-            }
-        }
-        matches
     }
 
     #[inline(always)]

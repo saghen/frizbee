@@ -134,29 +134,21 @@ macro_rules! impl_specialized {
             }
 
             $(#[target_feature(enable = $feature)])?
-            unsafe fn match_list_indices<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
+            unsafe fn match_one<const TYPOS: u16, const UNICODE: bool>(
                 &mut self,
-                haystacks: &[H],
-            ) -> Vec<MatchIndices> {
-                self.match_list_indices_impl::<TYPOS, UNICODE, H>(haystacks)
-            }
-
-            $(#[target_feature(enable = $feature)])?
-            unsafe fn match_one<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
-                &mut self,
-                haystack: H,
+                haystack: &str,
                 index: u32,
             ) -> Option<Match> {
-                self.match_one_impl::<TYPOS, UNICODE, H>(haystack, index)
+                self.match_one_impl::<TYPOS, UNICODE>(haystack, index)
             }
 
             $(#[target_feature(enable = $feature)])?
-            unsafe fn match_one_indices<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
+            unsafe fn match_one_indices<const UNICODE: bool>(
                 &mut self,
-                haystack: H,
+                haystack: &str,
                 index: u32,
             ) -> Option<MatchIndices> {
-                self.match_one_indices_impl::<TYPOS, UNICODE, H>(haystack, index)
+                self.match_one_indices_impl::<UNICODE>(haystack, index)
             }
         }
     };

@@ -4,15 +4,45 @@ use crate::prefilter::backend::{Backend, BitMaskOps};
 impl<B: Backend> Prefilter<B> {
     #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
     #[cfg_attr(target_arch = "wasm32", inline(never))]
-    pub unsafe fn match_haystack(&self, haystack: &[u8]) -> (bool, usize, usize) {
+    pub unsafe fn match_haystack(&mut self, haystack: &[u8]) -> (bool, usize, usize) {
         let len = haystack.len();
         if len == 0 {
             return (false, 0, 0);
         }
 
+        // Samples the haystack to check if any of the needle bytes are
+        // particularly rare (<20%). If so, perform a first-pass using only that
+        // rare needle byte.
+        if unsafe { self.rare_ascii.rejects(haystack) } {
+            return (false, 0, len);
+        }
+
+        // Branchless prefilter when the haystack fits within one SIMD vector
+        let needle = self.needle_ascii.as_slice();
+        if len <= B::LANES {
+            let (chunk, mut chunk_mask) = unsafe { load_window::<B>(haystack, 0, len) };
+            let mut first = B::Mask::first_n(0);
+            let mut last = B::Mask::first_n(0);
+            for (i, &needle_char) in needle.iter().enumerate() {
+                let mask = unsafe { B::occ(chunk, needle_char) }.and(chunk_mask);
+                if i == 0 {
+                    first = mask;
+                }
+                last = mask;
+                chunk_mask = chunk_mask.clear_through_lowest(mask);
+            }
+            if last.is_zero() {
+                return (false, 0, len);
+            }
+            return (
+                true,
+                first.trailing_zeros(),
+                B::LANES - last.leading_zeros(),
+            );
+        }
+
         let mut can_skip_chunks = true;
         let mut match_start_pos = 0usize;
-        let needle = self.needle_ascii.as_slice();
         let mut needle_iter = needle.iter();
         let mut needle_char = *needle_iter.next().unwrap();
         let mut start = 0usize;

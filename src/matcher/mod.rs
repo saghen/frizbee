@@ -270,32 +270,11 @@ impl Matcher {
     /// the [`Matcher::match_iter_indices`] or [`iter::FuzzyMatchExt`] API.
     pub fn match_list_indices<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<MatchIndices> {
         Self::guard_against_haystack_overflow(haystacks.len(), 0);
-        let mut matches = match &mut self.patterns {
-            CompiledPatterns::Empty => {
-                if self.config.sort.is_reversed() {
-                    return (0..haystacks.len())
-                        .rev()
-                        .map(MatchIndices::from_index)
-                        .collect();
-                } else {
-                    return (0..haystacks.len()).map(MatchIndices::from_index).collect();
-                }
-            }
-            CompiledPatterns::Single(pattern) => {
-                dispatch!(&mut pattern.backend, matcher => {
-                    dispatch_typos!(pattern.max_typos, pattern.needs_unicode, |TYPOS, UNICODE| {
-                        unsafe { matcher.match_list_indices::<TYPOS, UNICODE, S>(haystacks) }
-                    })
-                })
-            }
-            CompiledPatterns::Multi(patterns) => haystacks
-                .iter()
-                .enumerate()
-                .filter_map(|(index, haystack)| {
-                    Self::match_one_indices_multi(patterns, haystack, index as u32)
-                })
-                .collect(),
-        };
+        let mut matches: Vec<_> = haystacks
+            .iter()
+            .enumerate()
+            .filter_map(|(index, haystack)| self.match_one_indices(haystack, index as u32))
+            .collect();
 
         if self.config.sort.is_reversed() {
             matches.reverse();
@@ -307,7 +286,10 @@ impl Matcher {
     }
 
     /// Returns an iterator over [`Match`] values for an iterator of strings.
-    /// This API performs ~10% slower than the [`Matcher::match_list`] API.
+    ///
+    /// Haystacks are pulled from the source in blocks and matched through the
+    /// same path as [`Matcher::match_list`], so it performs about the same
+    /// (minus the sort).
     ///
     /// You may also use the [`iter::FuzzyMatchExt`] API which provides a more
     /// convenient API for when re-using the [`Matcher`] isn't necessary.
@@ -325,14 +307,8 @@ impl Matcher {
         &mut self,
         haystacks: impl IntoIterator<Item = S>,
     ) -> impl Iterator<Item = Match> {
-        haystacks
-            .into_iter()
-            .enumerate()
-            .filter_map(move |(index, haystack)| {
-                let index = u32::try_from(index)
-                    .expect("too many items in haystack, will overflow the u32 index");
-                self.match_one(haystack, index)
-            })
+        let mut blocks = iter::Blocks::new(haystacks.into_iter());
+        core::iter::from_fn(move || blocks.next_match(self))
     }
 
     /// Returns an iterator over [`MatchIndices`] values for an iterator of
@@ -377,6 +353,7 @@ impl Matcher {
     /// APIs if you have more than one haystack to match, as they perform
     /// significantly better.
     pub fn match_one<S: AsRef<str>>(&mut self, haystack: S, index: u32) -> Option<Match> {
+        let haystack = haystack.as_ref();
         match &mut self.patterns {
             CompiledPatterns::Empty => Some(Match::from_index(index as usize)),
             CompiledPatterns::Single(pattern) => {
@@ -400,6 +377,7 @@ impl Matcher {
         haystack: S,
         index: u32,
     ) -> Option<MatchIndices> {
+        let haystack = haystack.as_ref();
         match &mut self.patterns {
             CompiledPatterns::Empty => Some(MatchIndices::from_index(index as usize)),
             CompiledPatterns::Single(pattern) => {
@@ -451,27 +429,29 @@ impl Matcher {
         })
     }
 
-    fn dispatch_pattern_one<S: AsRef<str>>(
+    fn dispatch_pattern_one(
         pattern: &mut CompiledPattern,
-        haystack: S,
+        haystack: &str,
         index: u32,
     ) -> Option<Match> {
         dispatch!(&mut pattern.backend, matcher => {
             dispatch_typos!(pattern.max_typos, pattern.needs_unicode, |TYPOS, UNICODE| {
-                unsafe { matcher.match_one::<TYPOS, UNICODE, S>(haystack, index) }
+                unsafe { matcher.match_one::<TYPOS, UNICODE>(haystack, index) }
             })
         })
     }
 
-    fn dispatch_pattern_one_indices<S: AsRef<str>>(
+    fn dispatch_pattern_one_indices(
         pattern: &mut CompiledPattern,
-        haystack: S,
+        haystack: &str,
         index: u32,
     ) -> Option<MatchIndices> {
         dispatch!(&mut pattern.backend, matcher => {
-            dispatch_typos!(pattern.max_typos, pattern.needs_unicode, |TYPOS, UNICODE| {
-                unsafe { matcher.match_one_indices::<TYPOS, UNICODE, S>(haystack, index) }
-            })
+            if pattern.needs_unicode {
+                unsafe { matcher.match_one_indices::<true>(haystack, index) }
+            } else {
+                unsafe { matcher.match_one_indices::<false>(haystack, index) }
+            }
         })
     }
 

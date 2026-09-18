@@ -20,6 +20,66 @@
 //!   - WASM:    LANES = 8/16  (scoring u16 x 8 = 128-bit or u8 x 16 = 128-bit)
 //!   - Scalar:  LANES = 8/16 (fallback for non-SIMD systems)
 
+/// Implements a backend's gap propagation entry points by forwarding to the
+/// helpers specialized for its lane count
+macro_rules! gap_dispatch {
+    (8) => { gap_dispatch!(@impl propagate_8_lane, propagate_unicode_8_lane); };
+    (16) => { gap_dispatch!(@impl propagate_16_lane, propagate_unicode_16_lane); };
+    (32) => { gap_dispatch!(@impl propagate_32_lane, propagate_unicode_32_lane); };
+    (64) => { gap_dispatch!(@impl propagate_64_lane, propagate_unicode_64_lane); };
+    (@impl $propagate:ident, $propagate_unicode:ident) => {
+        #[inline(always)]
+        unsafe fn propagate_horizontal_gaps(
+            row: Self::Score,
+            adjacent_row: Self::Score,
+            match_mask: Self::Score,
+            adjacent_match_mask: Self::Score,
+            gap_open_penalty: Self::Score,
+            gap_extend_penalty: Self::Score,
+        ) -> Self::Score {
+            unsafe {
+                crate::smith_waterman::algo::ascii_gap::$propagate::<Self>(
+                    row,
+                    adjacent_row,
+                    match_mask,
+                    adjacent_match_mask,
+                    gap_open_penalty,
+                    gap_extend_penalty,
+                )
+            }
+        }
+
+        #[inline(always)]
+        unsafe fn propagate_horizontal_unicode_gaps(
+            row: Self::Score,
+            adjacent_row: Self::Score,
+            pending_gap_open_mask: Self::Score,
+            adjacent_pending_gap_open_mask: Self::Score,
+            continuation_gap_extend_penalty: Self::Score,
+            adjacent_continuation_gap_extend_penalty: Self::Score,
+            scalar_end_mask: Self::Score,
+            adjacent_scalar_end_mask: Self::Score,
+            gap_open_penalty: Self::Score,
+            gap_extend_penalty: Self::Score,
+        ) -> (Self::Score, Self::Score) {
+            unsafe {
+                crate::smith_waterman::algo::unicode_gap::$propagate_unicode::<Self>(
+                    row,
+                    adjacent_row,
+                    pending_gap_open_mask,
+                    adjacent_pending_gap_open_mask,
+                    continuation_gap_extend_penalty,
+                    adjacent_continuation_gap_extend_penalty,
+                    scalar_end_mask,
+                    adjacent_scalar_end_mask,
+                    gap_open_penalty,
+                    gap_extend_penalty,
+                )
+            }
+        }
+    };
+}
+
 #[cfg(target_arch = "x86_64")]
 mod avx;
 #[cfg(target_arch = "x86_64")]
@@ -188,12 +248,6 @@ pub trait MaskVec: Copy + core::fmt::Debug {
     /// # Safety
     /// The backend's target features must be enabled at the call site.
     unsafe fn not(self) -> Self;
-
-    /// Whether every lane is false.
-    ///
-    /// # Safety
-    /// The backend's target features must be enabled at the call site.
-    unsafe fn is_zero(self) -> bool;
 
     /// Shift right by 1 lane, filling lane 0 with the highest meaningful lane
     /// of `prev`.

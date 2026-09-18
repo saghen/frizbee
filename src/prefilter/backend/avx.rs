@@ -7,7 +7,7 @@ use crate::prefilter::{
     case_needle,
 };
 
-use super::Backend;
+use super::{Backend, ChunkBlock, eq_block_chunks, load_block_chunks};
 
 #[derive(Debug, Clone)]
 pub struct PrefilterAVX {
@@ -52,9 +52,12 @@ impl Kernel for PrefilterAVX {
     }
 
     #[inline(always)]
-    fn match_haystack(&self, haystack: &[u8]) -> Window {
+    fn match_haystack(&mut self, haystack: &[u8]) -> Window {
         let len = haystack.len();
         if len == 0 {
+            return (false, 0, len);
+        }
+        if unsafe { self.inner.rare_ascii_rejects(haystack) } {
             return (false, 0, len);
         }
 
@@ -166,41 +169,39 @@ impl Kernel for PrefilterAVX {
     }
 
     #[inline(always)]
-    fn match_haystack_unicode(&self, haystack: &[u8]) -> Window {
+    fn match_haystack_unicode(&mut self, haystack: &[u8]) -> Window {
         unsafe { self.inner.match_haystack_unicode(haystack) }
     }
 
     #[inline(always)]
-    fn match_haystack_1_typo(&self, haystack: &[u8]) -> Window {
-        unsafe { self.inner.match_haystack_1_typo(haystack) }
+    fn match_haystack_1_typo(&mut self, haystack: &[u8]) -> Window {
+        self.inner.match_haystack_1_typo(haystack)
     }
 
     #[inline(always)]
-    fn match_haystack_unicode_1_typo(&self, haystack: &[u8]) -> Window {
-        unsafe { self.inner.match_haystack_unicode_1_typo(haystack) }
+    fn match_haystack_unicode_1_typo(&mut self, haystack: &[u8]) -> Window {
+        self.inner.match_haystack_unicode_1_typo(haystack)
     }
 
     #[inline(always)]
-    fn match_haystack_2_typos(&self, haystack: &[u8]) -> Window {
-        unsafe { self.inner.match_haystack_2_typos(haystack) }
+    fn match_haystack_2_typos(&mut self, haystack: &[u8]) -> Window {
+        self.inner.match_haystack_2_typos(haystack)
     }
 
     #[inline(always)]
-    fn match_haystack_unicode_2_typos(&self, haystack: &[u8]) -> Window {
-        unsafe { self.inner.match_haystack_unicode_2_typos(haystack) }
+    fn match_haystack_unicode_2_typos(&mut self, haystack: &[u8]) -> Window {
+        self.inner.match_haystack_unicode_2_typos(haystack)
     }
 
     #[inline(always)]
     fn match_haystack_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
-        unsafe { self.inner.match_haystack_many_typos(haystack, max_typos) }
+        self.inner.match_haystack_many_typos(haystack, max_typos)
     }
 
     #[inline(always)]
     fn match_haystack_unicode_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
-        unsafe {
-            self.inner
-                .match_haystack_unicode_many_typos(haystack, max_typos)
-        }
+        self.inner
+            .match_haystack_unicode_many_typos(haystack, max_typos)
     }
 }
 
@@ -212,6 +213,8 @@ impl Backend for PrefilterAVXBackend {
 
     type Chunk = __m256i;
     type Mask = u32;
+    type Block = u128;
+    type Chunks = ChunkBlock<__m256i, 4>;
 
     fn is_available() -> bool {
         crate::cpuid::detect().avx2
@@ -241,5 +244,27 @@ impl Backend for PrefilterAVXBackend {
             );
             _mm256_movemask_epi8(mask) as u32
         }
+    }
+
+    #[inline(always)]
+    unsafe fn load_block(haystack: &[u8]) -> (Self::Chunks, Self::Block) {
+        unsafe { load_block_chunks::<Self, 4>(haystack) }
+    }
+
+    #[inline(always)]
+    unsafe fn fold_block(chunks: &mut Self::Chunks) {
+        unsafe {
+            for chunk in chunks.chunks.iter_mut().take(chunks.count) {
+                let shifted = _mm256_sub_epi8(*chunk, _mm256_set1_epi8(b'A' as i8));
+                let upper =
+                    _mm256_cmpeq_epi8(_mm256_min_epu8(shifted, _mm256_set1_epi8(25)), shifted);
+                *chunk = _mm256_or_si256(*chunk, _mm256_and_si256(upper, _mm256_set1_epi8(0x20)));
+            }
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn eq_block(chunks: &Self::Chunks, needle: Self::Chunk) -> Self::Block {
+        unsafe { eq_block_chunks::<Self, 4>(chunks, needle) }
     }
 }

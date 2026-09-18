@@ -1,5 +1,90 @@
 use super::Matcher;
 use crate::{Config, Match, MatchIndices, Pattern};
+use alloc::vec::Vec;
+
+/// Haystacks pulled from the source iterator per block (see [`Blocks`])
+const BLOCK: usize = 256;
+
+/// Runs an iterator of haystacks through the list path a block at a time,
+/// so haystacks are prefiltered and scored with the same pair kernel as
+/// `match_list`, and yields the matches in iteration order.
+pub(crate) struct Blocks<I: Iterator> {
+    iter: I,
+    /// The block being matched; empty between calls, so cloning needs no
+    /// `I::Item: Clone`
+    haystacks: Vec<I::Item>,
+    matches: Vec<Match>,
+    /// Next match of `matches` to yield
+    next: usize,
+    /// Index of the first haystack of the next block
+    index: usize,
+}
+
+impl<I> Blocks<I>
+where
+    I: Iterator,
+    I::Item: AsRef<str>,
+{
+    pub(crate) fn new(iter: I) -> Self {
+        Self {
+            iter,
+            haystacks: Vec::new(),
+            matches: Vec::new(),
+            next: 0,
+            index: 0,
+        }
+    }
+
+    pub(crate) fn next_match(&mut self, matcher: &mut Matcher) -> Option<Match> {
+        loop {
+            if let Some(m) = self.matches.get(self.next) {
+                self.next += 1;
+                return Some(*m);
+            }
+            self.haystacks.clear();
+            self.haystacks.extend(self.iter.by_ref().take(BLOCK));
+            if self.haystacks.is_empty() {
+                return None;
+            }
+            let offset = u32::try_from(self.index)
+                .expect("too many items in haystack, will overflow the u32 index");
+            self.index += self.haystacks.len();
+            self.matches.clear();
+            self.next = 0;
+            matcher.match_list_into(&self.haystacks, offset, &mut self.matches);
+            self.haystacks.clear();
+        }
+    }
+
+    pub(crate) fn size_hint(&self) -> (usize, Option<usize>) {
+        // Every item is filtered independently, so we can't know how many pass
+        let buffered = self.matches.len() - self.next;
+        (buffered, self.iter.size_hint().1.map(|n| n + buffered))
+    }
+}
+
+impl<I: Iterator + Clone> Clone for Blocks<I> {
+    fn clone(&self) -> Self {
+        Self {
+            iter: self.iter.clone(),
+            haystacks: Vec::new(),
+            matches: self.matches.clone(),
+            next: self.next,
+            index: self.index,
+        }
+    }
+}
+
+impl<I: Iterator + core::fmt::Debug> core::fmt::Debug for Blocks<I> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Blocks")
+            .field("iter", &self.iter)
+            .field("matches", &self.matches)
+            .field("next", &self.next)
+            .field("index", &self.index)
+            .finish()
+    }
+}
 
 /// Extension trait adding fuzzy matching functions to any iterator whose items
 /// are strings. Results are yielded lazily in iteration order (not sorted by
@@ -18,8 +103,8 @@ use crate::{Config, Match, MatchIndices, Pattern};
 /// ```
 pub trait FuzzyMatchExt: Iterator + Sized {
     /// Fuzzy matches each item against `needle`, yielding a [`Match`] for every
-    /// item that passes. This API performs ~10% slower than the
-    /// [`Matcher::match_list`] API.
+    /// item that passes. Items are pulled in blocks and matched through the
+    /// same path as [`Matcher::match_list`].
     ///
     /// ```
     /// use frizbee::{Config, iter::FuzzyMatchExt};
@@ -36,8 +121,7 @@ pub trait FuzzyMatchExt: Iterator + Sized {
     {
         FuzzyMatch {
             matcher: Matcher::new(pattern, config),
-            iter: self,
-            index: 0,
+            blocks: Blocks::new(self),
         }
     }
 
@@ -79,10 +163,9 @@ impl<I: Iterator> FuzzyMatchExt for I {}
 
 /// Iterator adapter created by [`FuzzyMatchExt::fuzzy_match`]
 #[derive(Debug, Clone)]
-pub struct FuzzyMatch<I> {
+pub struct FuzzyMatch<I: Iterator> {
     matcher: Matcher,
-    iter: I,
-    index: usize,
+    blocks: Blocks<I>,
 }
 
 impl<I> Iterator for FuzzyMatch<I>
@@ -93,20 +176,11 @@ where
     type Item = Match;
 
     fn next(&mut self) -> Option<Match> {
-        loop {
-            let haystack = self.iter.next()?;
-            let index = u32::try_from(self.index)
-                .expect("too many items in haystack, will overflow the u32 index");
-            self.index += 1;
-            if let Some(m) = self.matcher.match_one(haystack, index) {
-                return Some(m);
-            }
-        }
+        self.blocks.next_match(&mut self.matcher)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        // Every item is filtered independently, so we can't know how many pass
-        (0, self.iter.size_hint().1)
+        self.blocks.size_hint()
     }
 }
 
