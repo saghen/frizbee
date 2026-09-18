@@ -37,7 +37,7 @@ pub(crate) use wasm::PrefilterWasmBackend;
 #[cfg(target_arch = "x86_64")]
 pub type PrefilterAVX512 = Prefilter<avx512::PrefilterAVX512Backend>;
 #[cfg(target_arch = "aarch64")]
-pub type PrefilterNEON = Prefilter<neon::PrefilterNEONBackend>;
+pub type PrefilterNEON = neon::PrefilterNEON;
 #[cfg(any(test, not(all(target_arch = "wasm32", target_feature = "simd128"))))]
 pub type PrefilterScalar = Prefilter<scalar::PrefilterScalarBackend>;
 #[cfg(target_arch = "x86_64")]
