@@ -45,6 +45,26 @@ pub(crate) trait Specialized: Sized {
     ) -> Option<MatchIndices>;
 }
 
+/// The Smith Waterman kernels, outlined (`inline(never)`) so each is built
+/// once per backend rather than once per `TYPOS` specialization
+///
+/// # Safety
+/// The backend's required CPU features must be available
+pub(crate) trait Scorer {
+    unsafe fn score<const UNICODE: bool>(
+        &mut self,
+        haystack: &[u8],
+        haystack_start_pos: usize,
+    ) -> u16;
+
+    unsafe fn score_indices<const UNICODE: bool>(
+        &mut self,
+        haystack: &[u8],
+        haystack_start_pos: usize,
+        max_typos: Option<u16>,
+    ) -> (u16, Vec<u32>);
+}
+
 #[derive(Debug, Clone)]
 pub struct MatcherImpl<P: PrefilterKernel, S: SmithWatermanKernel> {
     needle: String,
@@ -58,6 +78,7 @@ impl<P, S> MatcherImpl<P, S>
 where
     P: PrefilterKernel,
     S: SmithWatermanKernel,
+    Self: Scorer,
 {
     #[inline(always)]
     pub fn new(needle: &str, config: &Config) -> Self {
@@ -95,7 +116,7 @@ where
                 if matched {
                     let (trimmed, start_pos, include_exact) =
                         trim_haystack(haystack, start_pos, end_pos);
-                    matches.push(self.smith_waterman_one::<UNICODE>(
+                    matches.push(self.smith_waterman_one::<TYPOS, UNICODE>(
                         trimmed,
                         index,
                         start_pos,
@@ -131,7 +152,7 @@ where
         }
 
         let (trimmed, start_pos, include_exact) = trim_haystack(haystack, start_pos, end_pos);
-        Some(self.smith_waterman_one::<UNICODE>(trimmed, index, start_pos, include_exact))
+        Some(self.smith_waterman_one::<TYPOS, UNICODE>(trimmed, index, start_pos, include_exact))
     }
 
     /// Single-haystack path for `Matcher::match_iter_indices`, mirroring
@@ -163,7 +184,7 @@ where
         }
 
         let (trimmed, start_pos, include_exact) = trim_haystack(haystack, start_pos, end_pos);
-        Some(self.smith_waterman_indices_one::<UNICODE>(
+        Some(self.smith_waterman_indices_one::<TYPOS, UNICODE>(
             trimmed,
             start_pos,
             index,
@@ -217,7 +238,7 @@ where
                 if matched {
                     let (trimmed, start_pos, include_exact) =
                         trim_haystack(haystack, start_pos, end_pos);
-                    matches.push(self.smith_waterman_indices_one::<UNICODE>(
+                    matches.push(self.smith_waterman_indices_one::<TYPOS, UNICODE>(
                         trimmed,
                         start_pos,
                         index as u32,
@@ -231,19 +252,19 @@ where
     }
 
     #[inline(always)]
-    fn smith_waterman_one<const UNICODE: bool>(
+    fn smith_waterman_one<const TYPOS: u16, const UNICODE: bool>(
         &mut self,
         haystack: &[u8],
         index: u32,
         haystack_start_pos: usize,
         include_exact: bool,
     ) -> Match {
-        let mut score = if UNICODE {
-            self.smith_waterman
-                .score_haystack_unicode(haystack, haystack_start_pos)
+        // With no prefilter every haystack is scored, so the kernel stays
+        // inline with the loop; otherwise it's outlined and shared
+        let mut score = if TYPOS == NO_PREFILTER {
+            self.score_inline::<UNICODE>(haystack, haystack_start_pos)
         } else {
-            self.smith_waterman
-                .score_haystack(haystack, haystack_start_pos)
+            unsafe { self.score::<UNICODE>(haystack, haystack_start_pos) }
         };
 
         let exact = include_exact && self.needle.as_bytes() == haystack;
@@ -267,7 +288,7 @@ where
     }
 
     #[inline(always)]
-    fn smith_waterman_indices_one<const UNICODE: bool>(
+    fn smith_waterman_indices_one<const TYPOS: u16, const UNICODE: bool>(
         &mut self,
         haystack: &[u8],
         haystack_start_pos: usize,
@@ -275,15 +296,10 @@ where
         include_exact: bool,
         max_typos: Option<u16>,
     ) -> MatchIndices {
-        let (mut score, indices) = if UNICODE {
-            self.smith_waterman.score_haystack_unicode_indices(
-                haystack,
-                haystack_start_pos,
-                max_typos,
-            )
+        let (mut score, indices) = if TYPOS == NO_PREFILTER {
+            self.score_indices_inline::<UNICODE>(haystack, haystack_start_pos, max_typos)
         } else {
-            self.smith_waterman
-                .score_haystack_indices(haystack, haystack_start_pos, max_typos)
+            unsafe { self.score_indices::<UNICODE>(haystack, haystack_start_pos, max_typos) }
         };
 
         let exact = include_exact && self.needle.as_bytes() == haystack;
@@ -296,6 +312,40 @@ where
             score,
             exact,
             indices,
+        }
+    }
+
+    #[inline(always)]
+    pub(super) fn score_inline<const UNICODE: bool>(
+        &mut self,
+        haystack: &[u8],
+        haystack_start_pos: usize,
+    ) -> u16 {
+        if UNICODE {
+            self.smith_waterman
+                .score_haystack_unicode(haystack, haystack_start_pos)
+        } else {
+            self.smith_waterman
+                .score_haystack(haystack, haystack_start_pos)
+        }
+    }
+
+    #[inline(always)]
+    pub(super) fn score_indices_inline<const UNICODE: bool>(
+        &mut self,
+        haystack: &[u8],
+        haystack_start_pos: usize,
+        max_typos: Option<u16>,
+    ) -> (u16, Vec<u32>) {
+        if UNICODE {
+            self.smith_waterman.score_haystack_unicode_indices(
+                haystack,
+                haystack_start_pos,
+                max_typos,
+            )
+        } else {
+            self.smith_waterman
+                .score_haystack_indices(haystack, haystack_start_pos, max_typos)
         }
     }
 

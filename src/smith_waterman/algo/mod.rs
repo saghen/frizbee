@@ -6,10 +6,10 @@ use crate::{
 };
 use alloc::{string::ToString, vec, vec::Vec};
 
-use super::SmithWaterman;
 use super::alignment_iter::Alignment;
 use super::backend::{Backend, BytesVec, ScoreVec};
 use super::matrix::Matrix;
+use super::{ScoringVecs, SmithWaterman};
 
 mod ascii;
 pub(crate) mod ascii_gap;
@@ -29,12 +29,30 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         let unicode_pending_gap_open_masks = (0..(needle_unicode.len() + 1))
             .map(|_| unsafe { B::Score::zero() })
             .collect();
+        let scoring_vecs = unsafe {
+            ScoringVecs {
+                gap_extend_penalty: B::Score::splat(scoring.gap_extend_penalty),
+                gap_open_penalty: B::Score::splat(
+                    scoring
+                        .gap_open_penalty
+                        .saturating_sub(scoring.gap_extend_penalty),
+                ),
+                match_score: B::Score::splat(
+                    scoring.match_score.saturating_add(scoring.mismatch_penalty),
+                ),
+                mismatch_penalty: B::Score::splat(scoring.mismatch_penalty),
+                matching_case_bonus: B::Score::splat(scoring.matching_case_bonus),
+                capitalization_bonus: B::Score::splat(scoring.capitalization_bonus),
+                delimiter_bonus: B::Score::splat(scoring.delimiter_bonus),
+            }
+        };
         Self {
             needle: needle.to_string(),
             needle_simd,
             needle_unicode,
             case_sensitive,
             scoring: scoring.clone(),
+            scoring_vecs,
             score_matrix: Matrix::new(needle_len, MAX_HAYSTACK_LEN),
             match_masks: Matrix::new(needle_len, MAX_HAYSTACK_LEN),
             unicode_pending_gap_open_masks,

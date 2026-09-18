@@ -129,6 +129,21 @@ pub(crate) fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
     max_matrix_score + scoring.mismatch_penalty as usize <= u8::MAX as usize
 }
 
+/// Scoring constants splatted once at construction, so the outlined kernels
+/// don't rebuild them per haystack
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ScoringVecs<S> {
+    gap_extend_penalty: S,
+    /// The extra penalty for opening a gap, on top of extending it
+    gap_open_penalty: S,
+    /// Undoes the mismatch penalty, which is applied unconditionally
+    match_score: S,
+    mismatch_penalty: S,
+    matching_case_bonus: S,
+    capitalization_bonus: S,
+    delimiter_bonus: S,
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct SmithWaterman<B: Backend> {
     needle: String,
@@ -136,6 +151,7 @@ pub(crate) struct SmithWaterman<B: Backend> {
     needle_unicode: Vec<UnicodeChar>,
     case_sensitive: bool,
     scoring: Scoring,
+    scoring_vecs: ScoringVecs<B::Score>,
     score_matrix: Matrix<B>,
     match_masks: Matrix<B>,
     unicode_pending_gap_open_masks: Vec<B::Score>,

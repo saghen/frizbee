@@ -1,6 +1,6 @@
 //! Definitions for all target feature-specific implementations of the matcher
 
-use super::algo::{MatcherImpl, Specialized};
+use super::algo::{MatcherImpl, Scorer, Specialized};
 use crate::{Config, Match, MatchIndices};
 use alloc::vec::Vec;
 
@@ -157,6 +157,29 @@ macro_rules! impl_specialized {
                 index: u32,
             ) -> Option<MatchIndices> {
                 self.match_one_indices_impl::<TYPOS, UNICODE, H>(haystack, index)
+            }
+        }
+
+        impl Scorer for MatcherImpl<$prefilter, $smith_waterman> {
+            #[inline(never)]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn score<const UNICODE: bool>(
+                &mut self,
+                haystack: &[u8],
+                haystack_start_pos: usize,
+            ) -> u16 {
+                self.score_inline::<UNICODE>(haystack, haystack_start_pos)
+            }
+
+            #[inline(never)]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn score_indices<const UNICODE: bool>(
+                &mut self,
+                haystack: &[u8],
+                haystack_start_pos: usize,
+                max_typos: Option<u16>,
+            ) -> (u16, Vec<u32>) {
+                self.score_indices_inline::<UNICODE>(haystack, haystack_start_pos, max_typos)
             }
         }
     };
