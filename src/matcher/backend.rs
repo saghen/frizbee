@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 
 #[cfg(target_arch = "aarch64")]
 use crate::literal::LiteralNEON;
-#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+#[cfg(scalar_fallback)]
 use crate::literal::LiteralScalar;
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 use crate::literal::LiteralWasm;
@@ -15,7 +15,7 @@ use crate::literal::{LiteralAVX, LiteralAVX512, LiteralSSE};
 
 #[cfg(target_arch = "aarch64")]
 use crate::prefilter::backend::PrefilterNEON;
-#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+#[cfg(scalar_fallback)]
 use crate::prefilter::backend::PrefilterScalar;
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 use crate::prefilter::backend::PrefilterWasm;
@@ -28,7 +28,7 @@ use crate::smith_waterman::{
 };
 #[cfg(target_arch = "aarch64")]
 use crate::smith_waterman::{SmithWatermanNEON, SmithWatermanNEONU8};
-#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+#[cfg(scalar_fallback)]
 use crate::smith_waterman::{SmithWatermanScalar, SmithWatermanScalarU8};
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 use crate::smith_waterman::{SmithWatermanWasm, SmithWatermanWasmU8};
@@ -53,9 +53,9 @@ pub type MatcherNEON = MatcherImpl<PrefilterNEON, SmithWatermanNEON>;
 pub type MatcherWasmU8 = MatcherImpl<PrefilterWasm, SmithWatermanWasmU8>;
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 pub type MatcherWasm = MatcherImpl<PrefilterWasm, SmithWatermanWasm>;
-#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+#[cfg(scalar_fallback)]
 pub type MatcherScalar = MatcherImpl<PrefilterScalar, SmithWatermanScalar>;
-#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+#[cfg(scalar_fallback)]
 pub type MatcherScalarU8 = MatcherImpl<PrefilterScalar, SmithWatermanScalarU8>;
 
 #[derive(Debug, Clone)]
@@ -82,11 +82,10 @@ pub enum MatcherBackend {
     WasmU8(MatcherWasmU8),
     #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
     Wasm(MatcherWasm),
-    // simd128 cannot be runtime-detected, so when it's statically enabled the scalar
-    // fallback is unreachable
-    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+    // Compiled out when a SIMD tier is statically available (see build.rs)
+    #[cfg(scalar_fallback)]
     ScalarU8(MatcherScalarU8),
-    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+    #[cfg(scalar_fallback)]
     Scalar(MatcherScalar),
 
     // Literal matching backends (exact / prefix / suffix / substring). Selected when
@@ -101,7 +100,7 @@ pub enum MatcherBackend {
     LiteralNEON(LiteralNEON),
     #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
     LiteralWasm(LiteralWasm),
-    #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+    #[cfg(scalar_fallback)]
     LiteralScalar(LiteralScalar),
 }
 
@@ -208,7 +207,7 @@ impl_specialized!(
 );
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 impl_specialized!(PrefilterWasm, SmithWatermanWasm, target_feature = "simd128");
-#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+#[cfg(scalar_fallback)]
 impl_specialized!(PrefilterScalar, SmithWatermanScalarU8);
-#[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
+#[cfg(scalar_fallback)]
 impl_specialized!(PrefilterScalar, SmithWatermanScalar);
