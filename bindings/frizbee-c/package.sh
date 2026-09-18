@@ -22,10 +22,11 @@ if [[ ${FRIZBEE_C_DEBUG:-0} == 1 ]]; then
 fi
 
 # build static library, versioned shared library, C header, pkg-config metadata
+MSYS2_ARG_CONV_EXCL='--prefix=' \
 cargo cinstall --locked --manifest-path "$BINDING_DIR/Cargo.toml" \
   --target "$TARGET" "$CARGO_C_PROFILE" \
-  --destdir "$PREFIX" --prefix / --libdir lib --includedir include \
-  --pkgconfigdir lib/pkgconfig
+  --destdir="$PREFIX" --prefix=/ --libdir=lib --includedir=include \
+  --pkgconfigdir=lib/pkgconfig
 
 # make the pkg-config file relocatable
 PC_FILE="$PREFIX/lib/pkgconfig/frizbee.pc"
