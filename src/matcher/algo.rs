@@ -61,7 +61,7 @@ pub struct MatcherImpl<P: PrefilterKernel, S: SmithWatermanKernel> {
     config: Config,
     min_haystack_len: usize,
     prefilter: P,
-    smith_waterman: S,
+    pub(super) smith_waterman: S,
 }
 
 impl<P, S> MatcherImpl<P, S>
