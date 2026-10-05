@@ -24,8 +24,11 @@ keywords = ["fuzzy-search", "fuzzy-matching", "string-matching", "simd", "smith-
 categories = ["algorithms", "text-processing"]
 rust-version = "1.89.0" # Changing this? Remember to update CI to test the new msrv!
 
+# Also the bindings' profile (workspace members): one codegen unit, as
+# benchmarked
 [profile.release]
 lto = true
+codegen-units = 1
 
 [dev-dependencies]
 nucleo = "0.5.0"
