@@ -20,6 +20,28 @@
 //!   - WASM:    LANES = 8/16  (scoring u16 x 8 = 128-bit or u8 x 16 = 128-bit)
 //!   - Scalar:  LANES = 8/16 (fallback for non-SIMD systems)
 
+/// Implements a backend's gap propagation entry points by forwarding to the
+/// helpers specialized for its lane count
+macro_rules! gap_dispatch {
+    (8) => { gap_dispatch!(@impl scan_8_lane); };
+    (16) => { gap_dispatch!(@impl scan_16_lane); };
+    (32) => { gap_dispatch!(@impl scan_32_lane); };
+    (64) => { gap_dispatch!(@impl scan_64_lane); };
+    (@impl $scan:ident) => {
+        #[inline(always)]
+        unsafe fn horizontal_scan(
+            values: Self::Score,
+            prev: Self::Score,
+            steps: &[Self::Score; 10],
+            scores: Self::Score,
+        ) -> (Self::Score, Self::Score) {
+            unsafe {
+                crate::smith_waterman::algo::ascii_gap::$scan::<Self>(values, prev, steps, scores)
+            }
+        }
+    };
+}
+
 #[cfg(target_arch = "x86_64")]
 mod avx;
 #[cfg(target_arch = "x86_64")]
@@ -74,22 +96,37 @@ pub trait Backend: Sized + core::fmt::Debug + Clone + 'static {
     /// The backend's required target features must be enabled at the call site.
     unsafe fn widen_mask(m: Self::Mask) -> Self::Score;
 
-    /// Propagate horizontal (left-direction) gaps across a score row.
-    ///
-    /// The number of unrolled stages is fixed per backend: 8-lane backends do
-    /// 3 stages (shifts of 1, 2, 4 lanes), 16-lane backends do 4 stages (1, 2,
-    /// 4, 8), 32-lane backends do 5 stages, and 64-lane backends do 6 stages.
+    /// The steps [`Backend::horizontal_scan`] takes in the ASCII kernel, for a
+    /// gap extend penalty
     ///
     /// # Safety
     /// The backend's required target features must be enabled at the call site.
-    unsafe fn propagate_horizontal_gaps(
-        row: Self::Score,
-        adjacent_row: Self::Score,
-        match_mask: Self::Score,
-        adjacent_match_mask: Self::Score,
-        gap_open_penalty: Self::Score,
-        gap_extend_penalty: Self::Score,
-    ) -> Self::Score;
+    #[inline(always)]
+    unsafe fn ascii_gap_steps(gap_extend: u16) -> [Self::Score; 10] {
+        use crate::smith_waterman::algo::ascii_gap::GAP_SHIFTS;
+        // (no closures: target features)
+        unsafe {
+            let mut steps = [Self::Score::zero(); 10];
+            for (i, step) in steps.iter_mut().enumerate() {
+                let shift = GAP_SHIFTS.get(i).copied().unwrap_or(Self::LANES as u16);
+                *step = Self::Score::splat(gap_extend.saturating_mul(shift));
+            }
+            steps
+        }
+    }
+
+    /// Decayed prefix max of a score row, carrying the previous chunk's scan
+    /// `prev` (see [`crate::smith_waterman::algo::ascii_gap`]). Returns the
+    /// scan and the scan folded with the row's `scores`.
+    ///
+    /// # Safety
+    /// The backend's required target features must be enabled at the call site.
+    unsafe fn horizontal_scan(
+        values: Self::Score,
+        prev: Self::Score,
+        steps: &[Self::Score; 10],
+        scores: Self::Score,
+    ) -> (Self::Score, Self::Score);
 
     /// Propagate Unicode-aware horizontal gaps across a score row.
     ///
@@ -152,6 +189,32 @@ pub trait BytesVec: Copy + core::fmt::Debug {
     /// Caller must guarantee `data` points to at least `len` bytes and the
     /// backend's target features are enabled.
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self;
+
+    /// Whether each byte is an ASCII uppercase or lowercase letter, or a
+    /// delimiter: any ASCII byte that isn't a letter or a digit
+    ///
+    /// # Safety
+    /// The backend's target features must be enabled at the call site.
+    #[inline(always)]
+    unsafe fn classes(self) -> (Self::Mask, Self::Mask, Self::Mask) {
+        unsafe {
+            let is_upper = self
+                .lt(Self::splat(b'Z' + 1))
+                .and(self.gt(Self::splat(b'A' - 1)));
+            let is_lower = self
+                .lt(Self::splat(b'z' + 1))
+                .and(self.gt(Self::splat(b'a' - 1)));
+            let is_digit = self
+                .gt(Self::splat(b'0' - 1))
+                .and(self.lt(Self::splat(b'9' + 1)));
+            let is_delimiter = is_upper
+                .or(is_lower)
+                .or(is_digit)
+                .or(self.gt(Self::splat(127)))
+                .not();
+            (is_upper, is_lower, is_delimiter)
+        }
+    }
 
     #[cfg(test)]
     fn from_lanes(values: &[u8]) -> Self;

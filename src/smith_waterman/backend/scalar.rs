@@ -1,7 +1,7 @@
 //! Scalar backend used when no SIMD instruction set is available (non-x86,
 //! non-ARM)
 
-use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
+use crate::smith_waterman::algo::unicode_gap;
 
 use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
@@ -360,10 +360,9 @@ impl<const LANES: usize> ScoreVec for ScalarScoreU8<LANES> {
 macro_rules! scalar_backend {
     (
         $backend:ident,
-        $lanes:literal,
+        $lanes:tt,
         $lane_bytes:literal,
         $score:ty,
-        $propagate:ident,
         $propagate_unicode:ident
     ) => {
         #[derive(Debug, Clone, Copy)]
@@ -385,26 +384,7 @@ macro_rules! scalar_backend {
                 <$score>::widen(m)
             }
 
-            #[inline(always)]
-            unsafe fn propagate_horizontal_gaps(
-                row: Self::Score,
-                adjacent_row: Self::Score,
-                match_mask: Self::Score,
-                adjacent_match_mask: Self::Score,
-                gap_open_penalty: Self::Score,
-                gap_extend_penalty: Self::Score,
-            ) -> Self::Score {
-                unsafe {
-                    ascii_gap::$propagate::<Self>(
-                        row,
-                        adjacent_row,
-                        match_mask,
-                        adjacent_match_mask,
-                        gap_open_penalty,
-                        gap_extend_penalty,
-                    )
-                }
-            }
+            gap_dispatch!($lanes);
 
             #[inline(always)]
             unsafe fn propagate_horizontal_unicode_gaps(
@@ -443,7 +423,6 @@ scalar_backend!(
     8,
     2,
     ScalarScoreU16<8>,
-    propagate_8_lane,
     propagate_unicode_8_lane
 );
 scalar_backend!(
@@ -451,7 +430,6 @@ scalar_backend!(
     16,
     1,
     ScalarScoreU8<16>,
-    propagate_16_lane,
     propagate_unicode_16_lane
 );
 
@@ -463,7 +441,6 @@ scalar_backend!(
     16,
     2,
     ScalarScoreU16<16>,
-    propagate_16_lane,
     propagate_unicode_16_lane
 );
 #[cfg(target_arch = "x86_64")]
@@ -473,7 +450,6 @@ scalar_backend!(
     32,
     2,
     ScalarScoreU16<32>,
-    propagate_32_lane,
     propagate_unicode_32_lane
 );
 #[cfg(target_arch = "x86_64")]
@@ -483,7 +459,6 @@ scalar_backend!(
     32,
     1,
     ScalarScoreU8<32>,
-    propagate_32_lane,
     propagate_unicode_32_lane
 );
 #[cfg(target_arch = "x86_64")]
@@ -493,6 +468,5 @@ scalar_backend!(
     64,
     1,
     ScalarScoreU8<64>,
-    propagate_64_lane,
     propagate_unicode_64_lane
 );

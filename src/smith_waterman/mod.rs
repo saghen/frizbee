@@ -140,6 +140,9 @@ pub(crate) struct ScoringVecs<S> {
     matching_case_bonus: S,
     capitalization_bonus: S,
     delimiter_bonus: S,
+    /// Gap extend penalties scaled by the horizontal scan's shifts (see
+    /// [`algo::ascii_gap`])
+    gap_steps: [S; 10],
 }
 
 #[derive(Debug, Clone)]
@@ -157,6 +160,9 @@ pub(crate) struct SmithWaterman<B: Backend> {
     /// consumed by the most recent `score_haystack` call. The matrix stride is
     /// always sized for `MAX_HAYSTACK_LEN` for zero-free reuse.
     haystack_chunks: usize,
+    /// Per row, the previous chunk's scores and horizontal scan, then as many
+    /// zeroed entries for the first chunk
+    row_carry: Vec<(B::Score, B::Score)>,
 }
 
 /// Picks the score width at construction: the u8 kernels have twice the lanes
@@ -280,7 +286,7 @@ mod tests {
         let mut matcher =
             SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), case_sensitive);
 
-        let score = matcher.score_haystack(haystack.as_bytes(), true);
+        let score = matcher.score_haystack_matrix(haystack.as_bytes(), true);
         matcher
             .has_alignment_path(score, max_typos)
             .then_some(score)

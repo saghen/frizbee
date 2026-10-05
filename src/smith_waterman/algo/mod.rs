@@ -7,7 +7,7 @@ use crate::{
 use alloc::{string::ToString, vec, vec::Vec};
 
 use super::alignment_iter::Alignment;
-use super::backend::{Backend, BytesVec, ScoreVec};
+use super::backend::{Backend, BytesVec, MaskVec, ScoreVec};
 use super::matrix::Matrix;
 use super::{ScoringVecs, SmithWaterman};
 
@@ -17,6 +17,64 @@ mod unicode;
 pub(crate) mod unicode_gap;
 
 pub(crate) const MAX_HAYSTACK_LEN: usize = 1024;
+
+/// Haystack-side match bonuses of consecutive chunks
+struct ChunkBonuses<B: Backend> {
+    /// The match score plus, for the first chunk, the prefix bonus.
+    /// Saturating adds of unsigned values reassociate exactly, so this sum
+    /// stays off the haystack-dependent chain
+    base_bonus: B::Score,
+    prev_chunk_is_lower_mask: B::Mask,
+    prev_chunk_char_is_delimiter_mask: B::Mask,
+}
+
+impl<B: Backend> ChunkBonuses<B> {
+    #[inline(always)]
+    unsafe fn new(include_prefix: bool, prefix_bonus: u16, vecs: &ScoringVecs<B::Score>) -> Self {
+        unsafe {
+            Self {
+                // TODO: have prefix bonus scale based on distance
+                base_bonus: if include_prefix {
+                    vecs.match_score.add(B::Score::first_lane(prefix_bonus))
+                } else {
+                    vecs.match_score
+                },
+                prev_chunk_is_lower_mask: B::Mask::zero(),
+                prev_chunk_char_is_delimiter_mask: B::Mask::zero(),
+            }
+        }
+    }
+
+    /// The match score plus the match-conditional bonuses (delimiter,
+    /// capitalization, prefix) of the next haystack chunk
+    #[inline(always)]
+    unsafe fn next(&mut self, haystack_chunk: B::Bytes, vecs: &ScoringVecs<B::Score>) -> B::Score {
+        unsafe {
+            let (is_upper_mask, is_lower_mask, char_is_delimiter_mask) = haystack_chunk.classes();
+
+            // Bonus when an uppercase byte follows a lowercase byte
+            let capitalization_mask = B::widen_mask(
+                is_upper_mask
+                    .and(is_lower_mask.shift_right_padded_1(self.prev_chunk_is_lower_mask)),
+            );
+            self.prev_chunk_is_lower_mask = is_lower_mask;
+
+            // Bonus for matching after a delimiter character
+            let prev_char_is_delimiter_mask =
+                char_is_delimiter_mask.shift_right_padded_1(self.prev_chunk_char_is_delimiter_mask);
+            let delimiter_mask =
+                B::widen_mask(prev_char_is_delimiter_mask.and(char_is_delimiter_mask.not()));
+            self.prev_chunk_char_is_delimiter_mask = char_is_delimiter_mask;
+
+            let bonuses = delimiter_mask
+                .and(vecs.delimiter_bonus)
+                .add(capitalization_mask.and(vecs.capitalization_bonus))
+                .add(self.base_bonus);
+            self.base_bonus = vecs.match_score;
+            bonuses
+        }
+    }
+}
 
 impl<B: Backend> Kernel for SmithWaterman<B> {
     fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self {
@@ -44,6 +102,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
                 matching_case_bonus: B::Score::splat(scoring.matching_case_bonus),
                 capitalization_bonus: B::Score::splat(scoring.capitalization_bonus),
                 delimiter_bonus: B::Score::splat(scoring.delimiter_bonus),
+                gap_steps: B::ascii_gap_steps(scoring.gap_extend_penalty),
             }
         };
         Self {
@@ -57,6 +116,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             match_masks: Matrix::new(needle_len, MAX_HAYSTACK_LEN),
             unicode_pending_gap_open_masks,
             haystack_chunks: 0,
+            row_carry: vec![unsafe { (B::Score::zero(), B::Score::zero()) }; 2 * needle_len],
         }
     }
 
@@ -91,7 +151,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             .unwrap_or_else(|| (0, vec![]));
         }
 
-        let score = self.score_haystack(haystack, haystack_start_pos == 0);
+        let score = self.score_haystack_matrix(haystack, haystack_start_pos == 0);
         if score == 0 {
             return (score, Vec::new());
         }

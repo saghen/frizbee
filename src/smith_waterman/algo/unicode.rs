@@ -44,6 +44,7 @@ impl<B: Backend> SmithWaterman<B> {
                 matching_case_bonus,
                 capitalization_bonus,
                 delimiter_bonus,
+                ..
             } = self.scoring_vecs;
 
             let final_row_idx = self.needle_unicode.len();
