@@ -1,6 +1,6 @@
 use crate::{
     Scoring,
-    prefilter::{case_needle, case_needle_unicode},
+    prefilter::{case_byte, case_needle_unicode},
     smith_waterman::greedy::match_greedy,
 };
 use alloc::{string::ToString, vec, vec::Vec};
@@ -108,9 +108,12 @@ impl<B: Backend> SmithWaterman<B> {
 
 impl<B: Backend> SmithWaterman<B> {
     pub(crate) fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self {
-        let needle_simd = case_needle(needle.as_bytes(), case_sensitive)
-            .iter()
-            .map(|(c1, c2)| unsafe { (B::Bytes::splat(*c1), B::Bytes::splat(*c2)) })
+        let needle_simd = needle
+            .bytes()
+            .map(|c| unsafe {
+                let (c1, c2) = case_byte(c, case_sensitive);
+                (B::Bytes::splat(c1), B::Bytes::splat(c2))
+            })
             .collect();
         let needle_unicode = case_needle_unicode(needle, case_sensitive);
         let needle_unicode_simd = needle_unicode
