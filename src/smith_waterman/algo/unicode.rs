@@ -50,7 +50,6 @@ impl<B: Backend> SmithWaterman<B> {
         }
 
         let haystack_chunks = haystack.len().div_ceil(B::LANES) + 1;
-        self.haystack_chunks = haystack_chunks;
 
         unsafe {
             let mut chunk_bonuses = ChunkBonuses::<B>::new(
@@ -116,7 +115,6 @@ impl<B: Backend> SmithWaterman<B> {
         col_idx: usize,
     ) -> B::Score {
         let score_matrix = &mut self.score_matrix;
-        let match_masks = &mut self.match_masks;
         // The first chunk reads the zeroed second half of the row carry, so it
         // needs no reset between haystacks
         let row_carry = self.row_carry.as_mut_ptr();
@@ -218,7 +216,6 @@ impl<B: Backend> SmithWaterman<B> {
 
                     if STORE {
                         score_matrix.set(row_idx, col_idx, row_scores);
-                        match_masks.set(row_idx, col_idx, match_mask);
                     }
                 }
                 prev_row_scores = row_scores;

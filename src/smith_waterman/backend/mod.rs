@@ -9,7 +9,7 @@
 //! [`BytesVec`] type with no loss.
 //!
 //! The kernel itself is generic over [`Backend`] and the lane count threads
-//! through chunk arithmetic, the matrix stride, the alignment-path iterator,
+//! through chunk arithmetic, the matrix stride, the traceback,
 //! and the horizontal-gap propagation unroll.
 //!
 //! Available backends:
@@ -86,7 +86,7 @@ pub use wasm::{BackendWasm, BackendWasmU8};
 pub trait Backend: Sized + core::fmt::Debug + Clone + 'static {
     const LANES: usize;
     /// Size of a single score lane in bytes. 1 for u8-element backends,
-    /// 2 for u16-element backends. Used by the alignment-path iterator to
+    /// 2 for u16-element backends. Used by the traceback to
     /// read individual cells from the matrix's raw byte view.
     const LANE_BYTES: usize;
     type Bytes: BytesVec<Mask = Self::Mask>;

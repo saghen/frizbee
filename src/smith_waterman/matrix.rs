@@ -45,7 +45,7 @@ impl<B: Backend> Matrix<B> {
     /// `(row, lane_index)` is
     ///   `(row * haystack_chunks * LANES + lane_index) * LANE_BYTES`,
     /// where `lane_index = chunk_idx * LANES + lane_within_chunk`. This lets
-    /// the alignment iterator read either u8 (LANE_BYTES = 1) or u16
+    /// the traceback read either u8 (LANE_BYTES = 1) or u16
     /// (LANE_BYTES = 2) cells from the same backing storage.
     #[inline(always)]
     pub fn as_byte_slice(&self) -> &[u8] {

@@ -120,7 +120,7 @@ where
         let (trimmed, start_pos, include_exact) = trim_haystack(haystack, start_pos, end_pos);
         let (mut score, indices) = unsafe {
             self.smith_waterman
-                .score_indices::<UNICODE>(trimmed, start_pos, max_typos)
+                .score_indices::<UNICODE>(trimmed, start_pos)
         };
 
         let exact = include_exact && self.needle.as_bytes() == trimmed;
@@ -361,6 +361,20 @@ mod tests {
         assert_eq!(matches[0].indices, vec![3, 2, 1]);
         assert_eq!(matches[1].index, 1);
         assert_eq!(matches[1].indices, vec![4, 2, 0]);
+    }
+
+    /// Upstream issue #96: the alignment skips the needle's second space (the
+    /// haystack's only one is far away), which the traceback counted as a typo
+    /// past the budget and stopped, leaving only "real" highlighted
+    #[test]
+    fn match_list_indices_trace_past_skipped_needle_chars() {
+        let haystack = "is thisreal/components//components/ real";
+        for max_typos in [Some(0), Some(1), None] {
+            let config = Config::default().max_typos(max_typos);
+            let matches = Matcher::new("is this real", &config).match_list_indices(&[haystack]);
+            assert_eq!(matches.len(), 1);
+            assert_eq!(matches[0].indices, (0..=10).rev().collect::<Vec<_>>());
+        }
     }
 
     #[test]
