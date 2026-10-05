@@ -127,7 +127,7 @@ haystack_end_pos: min_bit
 return (true, haystack_start_pos, haystack_end_pos)
 ```
 
-See the full implementation as well as 1-typo, 2-typo and N-typo implementations in [`src/prefilter/algo`](src/prefilter/algo/ascii.rs).
+See the full implementation in [`src/prefilter/algo/exact.rs`](src/prefilter/algo/exact.rs). When typos are allowed, the prefilter instead computes a bit-parallel longest common subsequence over blocks of the haystack, see [`src/prefilter/algo/typos.rs`](src/prefilter/algo/typos.rs).
 
 ### Smith Waterman
 
@@ -208,23 +208,13 @@ Frizbee matches against UTF-8 bytes directly rather than converting to UTF-32 co
 
 #### Prefiltering
 
-The prefilter path is largely the same as the ASCII path, except we match on the final byte of the UTF-8 codepoint, since it's by far the most discriminating. The prefix bytes of the UTF-8 codepoint identify the script/block, and nearby characters are likely to have a similar prefix. If `!mask.is_zero()`, we then perform offset loads to match the rest of the bytes in the unicode char.
+The prefilter path is largely the same as the ASCII path, except each needle char is a whole UTF-8 codepoint. Every byte of the codepoint is compared against the same haystack chunk, and the masks are shifted into place and combined, leaving a bit wherever the codepoint ends. Chunks overlap by 3 bytes, so a codepoint straddling a boundary is seen whole by one of them.
 
 ```rust
-let mask = eq(needle_char.last(), load(haystack, start + needle_char_len - 1))
-if mask.is_zero() { /* continue to next chunk */ }
-
-match needle_char_len {
-  1 => {}
-  2 => {
-    mask = mask.and(eq(needle_char[0], load(haystack, start + needle_char_len - 2)))
-  }
-  3 => {
-    mask = mask.and(eq(needle_char[0], load(haystack, start + needle_char_len - 3)))
-    mask = mask.and(eq(needle_char[1], load(haystack, start + needle_char_len - 2)))
-  }
-  4 => { ... }
-}
+// positions where a 3 byte needle char ends
+let mask = eq(needle_char[2], chunk)
+  & (eq(needle_char[1], chunk) << 1)
+  & (eq(needle_char[0], chunk) << 2)
 ```
 
 #### Smith Waterman

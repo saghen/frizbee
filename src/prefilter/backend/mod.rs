@@ -36,8 +36,7 @@ pub(crate) use wasm::PrefilterWasmBackend;
 pub(crate) use block::{BlockMask, ChunkBlock, Narrow, eq_block_chunks, load_block_chunks};
 
 #[cfg(target_arch = "x86_64")]
-pub use avx::PrefilterAVX;
-
+pub type PrefilterAVX = Prefilter<avx::PrefilterAVXBackend>;
 #[cfg(target_arch = "x86_64")]
 pub type PrefilterAVX512 = Prefilter<avx512::PrefilterAVX512Backend>;
 #[cfg(target_arch = "aarch64")]
@@ -52,14 +51,11 @@ pub type PrefilterWasm = Prefilter<wasm::PrefilterWasmBackend>;
 /// A chunk's compare result. `Into<u64>` gives one bit per byte, which is how
 /// chunk masks are assembled into a [`BlockMask`].
 pub(crate) trait Mask:
-    Copy + Debug + PartialOrd + BitMaskOps + Into<u64> + Send + Sync + 'static
+    Copy + Debug + BitMaskOps + Into<u64> + Send + Sync + 'static
 {
 }
 
-impl<T> Mask for T where
-    T: Copy + Debug + PartialOrd + BitMaskOps + Into<u64> + Send + Sync + 'static
-{
-}
+impl<T> Mask for T where T: Copy + Debug + BitMaskOps + Into<u64> + Send + Sync + 'static {}
 
 pub(crate) trait BitMaskOps {
     fn all() -> Self;
@@ -67,7 +63,6 @@ pub(crate) trait BitMaskOps {
     fn is_zero(&self) -> bool;
     fn trailing_zeros(self) -> usize;
     fn leading_zeros(self) -> usize;
-    fn or(self, other: Self) -> Self;
     fn and(self, other: Self) -> Self;
     fn clear_through_lowest(self, hit: Self) -> Self;
 }
@@ -102,11 +97,6 @@ macro_rules! impl_mask {
             #[inline(always)]
             fn leading_zeros(self) -> usize {
                 <$ty>::leading_zeros(self) as usize
-            }
-
-            #[inline(always)]
-            fn or(self, other: Self) -> Self {
-                self | other
             }
 
             #[inline(always)]
