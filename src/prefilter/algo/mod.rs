@@ -19,6 +19,9 @@ pub(crate) struct Prefilter<B: Backend> {
     case_sensitive: bool,
     /// Per row carry (0 or 1) across blocks of the block walk ([`rows`])
     carries: Vec<u64>,
+    /// The typo walk's budget, see [`Prefilter::match_haystack_typos`]
+    #[cfg(target_arch = "wasm32")]
+    max_typos: usize,
 }
 
 impl<B: Backend> Prefilter<B> {
@@ -48,6 +51,8 @@ impl<B: Backend> Prefilter<B> {
             needle_scalars,
             case_sensitive,
             carries: Vec::new(),
+            #[cfg(target_arch = "wasm32")]
+            max_typos: 0,
         }
     }
 }
