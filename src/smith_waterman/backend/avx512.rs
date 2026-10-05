@@ -1,7 +1,5 @@
 use core::arch::x86_64::*;
 
-use crate::smith_waterman::algo::unicode_gap;
-
 use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
 /// 32-lane u16 scoring (512-bit __m512i), 32-lane u8 input (low half of
@@ -54,35 +52,6 @@ impl Backend for BackendAVX512 {
     }
 
     gap_dispatch!(32);
-
-    #[inline(always)]
-    unsafe fn propagate_horizontal_unicode_gaps(
-        row: Self::Score,
-        adjacent_row: Self::Score,
-        pending_gap_open_mask: Self::Score,
-        adjacent_pending_gap_open_mask: Self::Score,
-        continuation_gap_extend_penalty: Self::Score,
-        adjacent_continuation_gap_extend_penalty: Self::Score,
-        scalar_end_mask: Self::Score,
-        adjacent_scalar_end_mask: Self::Score,
-        gap_open_penalty: Self::Score,
-        gap_extend_penalty: Self::Score,
-    ) -> (Self::Score, Self::Score) {
-        unsafe {
-            unicode_gap::propagate_unicode_32_lane::<BackendAVX512>(
-                row,
-                adjacent_row,
-                pending_gap_open_mask,
-                adjacent_pending_gap_open_mask,
-                continuation_gap_extend_penalty,
-                adjacent_continuation_gap_extend_penalty,
-                scalar_end_mask,
-                adjacent_scalar_end_mask,
-                gap_open_penalty,
-                gap_extend_penalty,
-            )
-        }
-    }
 }
 
 impl Backend for BackendAVX512U8 {
@@ -104,35 +73,6 @@ impl Backend for BackendAVX512U8 {
     }
 
     gap_dispatch!(64);
-
-    #[inline(always)]
-    unsafe fn propagate_horizontal_unicode_gaps(
-        row: Self::Score,
-        adjacent_row: Self::Score,
-        pending_gap_open_mask: Self::Score,
-        adjacent_pending_gap_open_mask: Self::Score,
-        continuation_gap_extend_penalty: Self::Score,
-        adjacent_continuation_gap_extend_penalty: Self::Score,
-        scalar_end_mask: Self::Score,
-        adjacent_scalar_end_mask: Self::Score,
-        gap_open_penalty: Self::Score,
-        gap_extend_penalty: Self::Score,
-    ) -> (Self::Score, Self::Score) {
-        unsafe {
-            unicode_gap::propagate_unicode_64_lane::<BackendAVX512U8>(
-                row,
-                adjacent_row,
-                pending_gap_open_mask,
-                adjacent_pending_gap_open_mask,
-                continuation_gap_extend_penalty,
-                adjacent_continuation_gap_extend_penalty,
-                scalar_end_mask,
-                adjacent_scalar_end_mask,
-                gap_open_penalty,
-                gap_extend_penalty,
-            )
-        }
-    }
 }
 
 impl BytesVec for Avx512Bytes {
@@ -255,10 +195,6 @@ impl MaskVec for Avx512Mask {
         Self(!self.0)
     }
     #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        self.0 == 0
-    }
-    #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         // Lane i = bit i. shift_right_padded_1 places prev's highest lane
         // (bit 31) into lane 0 of the result, and shifts every other lane up
@@ -299,10 +235,6 @@ impl MaskVec for Avx512U8Mask {
     #[inline(always)]
     unsafe fn not(self) -> Self {
         Self(!self.0)
-    }
-    #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        self.0 == 0
     }
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {

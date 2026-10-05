@@ -23,11 +23,11 @@
 /// Implements a backend's gap propagation entry points by forwarding to the
 /// helpers specialized for its lane count
 macro_rules! gap_dispatch {
-    (8) => { gap_dispatch!(@impl scan_8_lane); };
-    (16) => { gap_dispatch!(@impl scan_16_lane); };
-    (32) => { gap_dispatch!(@impl scan_32_lane); };
-    (64) => { gap_dispatch!(@impl scan_64_lane); };
-    (@impl $scan:ident) => {
+    (8) => { gap_dispatch!(@impl scan_8_lane, unicode_steps_8_lane); };
+    (16) => { gap_dispatch!(@impl scan_16_lane, unicode_steps_16_lane); };
+    (32) => { gap_dispatch!(@impl scan_32_lane, unicode_steps_32_lane); };
+    (64) => { gap_dispatch!(@impl scan_64_lane, unicode_steps_64_lane); };
+    (@impl $scan:ident, $unicode_steps:ident) => {
         #[inline(always)]
         unsafe fn horizontal_scan(
             values: Self::Score,
@@ -38,6 +38,14 @@ macro_rules! gap_dispatch {
             unsafe {
                 crate::smith_waterman::algo::ascii_gap::$scan::<Self>(values, prev, steps, scores)
             }
+        }
+
+        #[inline(always)]
+        unsafe fn unicode_gap_steps(
+            d1: Self::Score,
+            prev: &[Self::Score; 10],
+        ) -> [Self::Score; 10] {
+            unsafe { crate::smith_waterman::algo::unicode_gap::$unicode_steps::<Self>(d1, prev) }
         }
     };
 }
@@ -128,28 +136,13 @@ pub trait Backend: Sized + core::fmt::Debug + Clone + 'static {
         scores: Self::Score,
     ) -> (Self::Score, Self::Score);
 
-    /// Propagate Unicode-aware horizontal gaps across a score row.
-    ///
-    /// UTF-8 body bytes are transport lanes: they can carry scores and pending
-    /// gap-open state without charging a gap step. Scalar-end lanes charge the
-    /// affine gap cost. The return value includes the row scores and the
-    /// pending gap-open state needed by the next haystack chunk.
+    /// Per-chunk decays of the Unicode horizontal scan from `d1`, the gap
+    /// extend penalty in the chunk's non-continuation lanes, and the previous
+    /// chunk's decays `prev` (see [`crate::smith_waterman::algo::unicode_gap`])
     ///
     /// # Safety
     /// The backend's required target features must be enabled at the call site.
-    #[allow(clippy::too_many_arguments)]
-    unsafe fn propagate_horizontal_unicode_gaps(
-        row: Self::Score,
-        adjacent_row: Self::Score,
-        pending_gap_open_mask: Self::Score,
-        adjacent_pending_gap_open_mask: Self::Score,
-        continuation_gap_extend_penalty: Self::Score,
-        adjacent_continuation_gap_extend_penalty: Self::Score,
-        scalar_end_mask: Self::Score,
-        adjacent_scalar_end_mask: Self::Score,
-        gap_open_penalty: Self::Score,
-        gap_extend_penalty: Self::Score,
-    ) -> (Self::Score, Self::Score);
+    unsafe fn unicode_gap_steps(d1: Self::Score, prev: &[Self::Score; 10]) -> [Self::Score; 10];
 }
 
 /// A byte-wide vector with `LANES` meaningful bytes
@@ -251,12 +244,6 @@ pub trait MaskVec: Copy + core::fmt::Debug {
     /// # Safety
     /// The backend's target features must be enabled at the call site.
     unsafe fn not(self) -> Self;
-
-    /// Whether every lane is false.
-    ///
-    /// # Safety
-    /// The backend's target features must be enabled at the call site.
-    unsafe fn is_zero(self) -> bool;
 
     /// Shift right by 1 lane, filling lane 0 with the highest meaningful lane
     /// of `prev`.

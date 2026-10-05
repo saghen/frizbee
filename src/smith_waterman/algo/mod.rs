@@ -18,7 +18,8 @@ pub(crate) mod unicode_gap;
 
 pub(crate) const MAX_HAYSTACK_LEN: usize = 1024;
 
-/// Haystack-side match bonuses of consecutive chunks
+/// Haystack-side match bonuses of consecutive chunks, shared by the ASCII and
+/// Unicode kernels
 struct ChunkBonuses<B: Backend> {
     /// The match score plus, for the first chunk, the prefix bonus.
     /// Saturating adds of unsigned values reassociate exactly, so this sum
@@ -83,10 +84,16 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             .map(|(c1, c2)| unsafe { (B::Bytes::splat(*c1), B::Bytes::splat(*c2)) })
             .collect();
         let needle_unicode = case_needle_unicode(needle, case_sensitive);
-        let needle_len = needle.len();
-        let unicode_pending_gap_open_masks = (0..(needle_unicode.len() + 1))
-            .map(|_| unsafe { B::Score::zero() })
+        let needle_unicode_simd = needle_unicode
+            .iter()
+            .map(|c| unsafe {
+                (
+                    c.chars.map(|b| B::Bytes::splat(b)),
+                    c.flipped_chars.map(|b| B::Bytes::splat(b)),
+                )
+            })
             .collect();
+        let needle_len = needle.len();
         let scoring_vecs = unsafe {
             ScoringVecs {
                 gap_extend_penalty: B::Score::splat(scoring.gap_extend_penalty),
@@ -109,12 +116,12 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             needle: needle.to_string(),
             needle_simd,
             needle_unicode,
+            needle_unicode_simd,
             case_sensitive,
             scoring: scoring.clone(),
             scoring_vecs,
             score_matrix: Matrix::new(needle_len, MAX_HAYSTACK_LEN),
             match_masks: Matrix::new(needle_len, MAX_HAYSTACK_LEN),
-            unicode_pending_gap_open_masks,
             haystack_chunks: 0,
             row_carry: vec![unsafe { (B::Score::zero(), B::Score::zero()) }; 2 * needle_len],
         }
@@ -200,7 +207,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             .unwrap_or_else(|| (0, vec![]));
         }
 
-        let score = self.score_haystack_unicode(haystack, haystack_start_pos == 0);
+        let score = self.score_haystack_unicode_matrix(haystack, haystack_start_pos == 0);
         if score == 0 {
             return (score, Vec::new());
         }

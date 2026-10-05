@@ -150,12 +150,13 @@ pub(crate) struct SmithWaterman<B: Backend> {
     needle: String,
     needle_simd: Vec<(B::Bytes, B::Bytes)>,
     needle_unicode: Vec<UnicodeChar>,
+    /// Each needle scalar's UTF-8 bytes splatted, then its case-flipped bytes
+    needle_unicode_simd: Vec<([B::Bytes; 4], [B::Bytes; 4])>,
     case_sensitive: bool,
     scoring: Scoring,
     scoring_vecs: ScoringVecs<B::Score>,
     score_matrix: Matrix<B>,
     match_masks: Matrix<B>,
-    unicode_pending_gap_open_masks: Vec<B::Score>,
     /// Number of LANES-wide chunks (incl. the leading zero column) actually
     /// consumed by the most recent `score_haystack` call. The matrix stride is
     /// always sized for `MAX_HAYSTACK_LEN` for zero-free reuse.

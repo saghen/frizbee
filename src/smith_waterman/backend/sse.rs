@@ -1,7 +1,6 @@
 use core::arch::x86_64::*;
 
 use crate::prefilter::algo::can_overread;
-use crate::smith_waterman::algo::unicode_gap;
 
 use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
@@ -37,35 +36,6 @@ impl Backend for BackendSSE {
     }
 
     gap_dispatch!(8);
-
-    #[inline(always)]
-    unsafe fn propagate_horizontal_unicode_gaps(
-        row: Self::Score,
-        adjacent_row: Self::Score,
-        pending_gap_open_mask: Self::Score,
-        adjacent_pending_gap_open_mask: Self::Score,
-        continuation_gap_extend_penalty: Self::Score,
-        adjacent_continuation_gap_extend_penalty: Self::Score,
-        scalar_end_mask: Self::Score,
-        adjacent_scalar_end_mask: Self::Score,
-        gap_open_penalty: Self::Score,
-        gap_extend_penalty: Self::Score,
-    ) -> (Self::Score, Self::Score) {
-        unsafe {
-            unicode_gap::propagate_unicode_8_lane::<BackendSSE>(
-                row,
-                adjacent_row,
-                pending_gap_open_mask,
-                adjacent_pending_gap_open_mask,
-                continuation_gap_extend_penalty,
-                adjacent_continuation_gap_extend_penalty,
-                scalar_end_mask,
-                adjacent_scalar_end_mask,
-                gap_open_penalty,
-                gap_extend_penalty,
-            )
-        }
-    }
 }
 
 impl SseBytes {
@@ -191,10 +161,6 @@ impl MaskVec for SseBytes {
     #[inline(always)]
     unsafe fn not(self) -> Self {
         unsafe { Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1))) }
-    }
-    #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        unsafe { (_mm_movemask_epi8(self.0) & 0x00ff) == 0 }
     }
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
@@ -334,35 +300,6 @@ impl Backend for BackendSSEU8 {
     }
 
     gap_dispatch!(16);
-
-    #[inline(always)]
-    unsafe fn propagate_horizontal_unicode_gaps(
-        row: Self::Score,
-        adjacent_row: Self::Score,
-        pending_gap_open_mask: Self::Score,
-        adjacent_pending_gap_open_mask: Self::Score,
-        continuation_gap_extend_penalty: Self::Score,
-        adjacent_continuation_gap_extend_penalty: Self::Score,
-        scalar_end_mask: Self::Score,
-        adjacent_scalar_end_mask: Self::Score,
-        gap_open_penalty: Self::Score,
-        gap_extend_penalty: Self::Score,
-    ) -> (Self::Score, Self::Score) {
-        unsafe {
-            unicode_gap::propagate_unicode_16_lane::<BackendSSEU8>(
-                row,
-                adjacent_row,
-                pending_gap_open_mask,
-                adjacent_pending_gap_open_mask,
-                continuation_gap_extend_penalty,
-                adjacent_continuation_gap_extend_penalty,
-                scalar_end_mask,
-                adjacent_scalar_end_mask,
-                gap_open_penalty,
-                gap_extend_penalty,
-            )
-        }
-    }
 }
 
 impl BytesVec for SseU8Bytes {
@@ -430,10 +367,6 @@ impl MaskVec for SseU8Bytes {
     #[inline(always)]
     unsafe fn not(self) -> Self {
         unsafe { Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1))) }
-    }
-    #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        unsafe { _mm_movemask_epi8(self.0) == 0 }
     }
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
