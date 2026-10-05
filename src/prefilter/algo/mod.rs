@@ -3,8 +3,6 @@ mod load;
 mod rows;
 mod typos;
 
-#[cfg(target_arch = "x86_64")]
-pub(crate) use exact::find_last_char_pos;
 pub(crate) use load::{can_overread, load_window};
 
 use super::{backend::Backend, case_needle_unicode};

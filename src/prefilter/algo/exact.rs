@@ -103,23 +103,3 @@ impl<B: Backend> Prefilter<B> {
         }
     }
 }
-
-/// End of the last occurrence of `needle` in `haystack`, which has one (for
-/// AVX2's own ASCII walk)
-#[cfg(target_arch = "x86_64")]
-#[inline(always)]
-pub(crate) unsafe fn find_last_char_pos<B: Backend>(
-    needle: (B::Chunk, B::Chunk),
-    haystack: &[u8],
-) -> usize {
-    let len = haystack.len();
-    let mut start = len.saturating_sub(B::LANES);
-    loop {
-        let (chunk, chunk_mask) = unsafe { load_window::<B>(haystack, start, len) };
-        let mask = unsafe { B::occ(chunk, needle) }.and(chunk_mask);
-        if !mask.is_zero() {
-            return start + B::LANES - mask.leading_zeros();
-        }
-        start = start.saturating_sub(B::LANES);
-    }
-}

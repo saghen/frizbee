@@ -51,8 +51,7 @@ pub(crate) use block::{
 };
 
 #[cfg(target_arch = "x86_64")]
-pub use avx::PrefilterAVX;
-
+pub type PrefilterAVX = Prefilter<avx::PrefilterAVXBackend>;
 #[cfg(target_arch = "x86_64")]
 pub type PrefilterAVX512 = Prefilter<avx512::PrefilterAVX512Backend>;
 #[cfg(target_arch = "aarch64")]
