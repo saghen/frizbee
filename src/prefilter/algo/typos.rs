@@ -31,9 +31,40 @@ use crate::prefilter::{
 
 impl<B: Backend> Prefilter<B> {
     /// Matches with at most `max_typos` deleted rows
-    #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
-    #[cfg_attr(target_arch = "wasm32", inline(never))]
+    #[cfg(not(target_arch = "wasm32"))]
+    #[inline(always)]
     pub(crate) unsafe fn match_haystack_typos<const UNICODE: bool>(
+        &mut self,
+        haystack: &[u8],
+        max_typos: usize,
+    ) -> Window {
+        unsafe { self.walk_typos::<UNICODE>(haystack, max_typos) }
+    }
+
+    /// wasm: outlined, the budget passed via `self` (a fifth argument would
+    /// go on the stack)
+    #[cfg(target_arch = "wasm32")]
+    #[inline(always)]
+    pub(crate) unsafe fn match_haystack_typos<const UNICODE: bool>(
+        &mut self,
+        haystack: &[u8],
+        max_typos: usize,
+    ) -> Window {
+        self.max_typos = max_typos;
+        unsafe { self.match_haystack_typos_outlined::<UNICODE>(haystack) }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    #[inline(never)]
+    unsafe fn match_haystack_typos_outlined<const UNICODE: bool>(
+        &mut self,
+        haystack: &[u8],
+    ) -> Window {
+        unsafe { self.walk_typos::<UNICODE>(haystack, self.max_typos) }
+    }
+
+    #[inline(always)]
+    unsafe fn walk_typos<const UNICODE: bool>(
         &mut self,
         haystack: &[u8],
         max_typos: usize,

@@ -368,7 +368,10 @@ unsafe fn walk_single<M: BlockMask, R: SingleRows<M>, const GREEDY: bool>(
     // are read at one site and masked
     let (lcs, head, tail) = if R::ASCII {
         match max_typos {
+            // (not on wasm, where the copies cost size without a gain)
+            #[cfg(not(target_arch = "wasm32"))]
             1 => unsafe { walk_bytes(rows, n, 1) },
+            #[cfg(not(target_arch = "wasm32"))]
             2 => unsafe { walk_bytes(rows, n, 2) },
             _ => unsafe { walk_bytes(rows, n, max_typos) },
         }
