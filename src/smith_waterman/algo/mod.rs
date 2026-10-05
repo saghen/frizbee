@@ -141,7 +141,7 @@ impl<B: Backend> SmithWaterman<B> {
                 matching_case_bonus: B::Score::splat(scoring.matching_case_bonus),
                 capitalization_bonus: B::Score::splat(scoring.capitalization_bonus),
                 delimiter_bonus: B::Score::splat(scoring.delimiter_bonus),
-                gap_steps: ascii_gap::gap_steps::<B>(scoring.gap_extend_penalty),
+                gap_steps: B::ascii_gap_steps(scoring.gap_extend_penalty),
             }
         };
         Self {

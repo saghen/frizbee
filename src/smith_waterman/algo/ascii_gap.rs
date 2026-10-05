@@ -13,21 +13,6 @@ use crate::smith_waterman::backend::{Backend, ScoreVec};
 pub(crate) const GAP_SHIFTS: [u16; 9] = [1, 2, 3, 4, 8, 12, 16, 32, 48];
 pub(crate) const FULL_STEP: usize = 9;
 
-/// The steps [`Backend::horizontal_scan`] takes in the ASCII kernel, for a
-/// gap extend penalty
-#[inline(always)]
-pub(crate) unsafe fn gap_steps<B: Backend>(gap_extend: u16) -> [B::Score; 10] {
-    // (no closures: target features)
-    unsafe {
-        let mut steps = [B::Score::zero(); 10];
-        for (i, step) in steps.iter_mut().enumerate() {
-            let shift = GAP_SHIFTS.get(i).copied().unwrap_or(B::LANES as u16);
-            *step = B::Score::splat(gap_extend.saturating_mul(shift));
-        }
-        steps
-    }
-}
-
 /// Shifts `v` right by `L` lanes, filling from `prev`, and decays it
 #[inline(always)]
 unsafe fn decay<B: Backend, const L: i32>(v: B::Score, prev: B::Score, step: B::Score) -> B::Score {

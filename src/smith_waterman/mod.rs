@@ -218,6 +218,15 @@ pub(crate) fn score_fits_in_u8(rows: usize, scoring: &Scoring) -> bool {
     scoring.max_score(rows) + scoring.mismatch_penalty as u64 <= u8::MAX as u64
 }
 
+/// Whether the ASCII kernel's ramped scan of `ramp` lanes is exact for this
+/// row count (see [`Backend::ASCII_SCAN_RAMP`]): no cell saturates (see
+/// [`score_fits_in_u8`]), nor a gap source plus the ramp
+pub(crate) fn u8_scan_ramp_fits(rows: usize, scoring: &Scoring, ramp: usize) -> bool {
+    score_fits_in_u8(rows, scoring)
+        && scoring.max_score(rows) + (ramp * scoring.gap_extend_penalty as usize) as u64
+            <= u8::MAX as u64
+}
+
 /// Scoring constants splatted once at construction, so the outlined kernels
 /// don't rebuild them per haystack
 #[derive(Debug, Clone, Copy)]
@@ -254,7 +263,7 @@ pub(crate) struct SmithWaterman<B: Backend> {
 
 /// Picks the score width at construction: the u8 kernels have twice the lanes
 /// of the u16 kernels, so they're used whenever every possible score fits
-/// (see [`score_fits_in_u8`])
+/// (see [`score_fits_in_u8`], [`u8_scan_ramp_fits`])
 #[derive(Debug, Clone)]
 pub(crate) enum ScoreWidth<B8: Backend, B16: Backend> {
     U8(SmithWaterman<B8>),
@@ -272,7 +281,10 @@ macro_rules! either {
 
 impl<B8: Backend, B16: Backend> ScoreWidth<B8, B16> {
     fn new(needle: &str, scoring: &Scoring, case_sensitive: bool, unicode: bool) -> Self {
-        if needle_fits_in_u8(needle, unicode, scoring) {
+        // the ASCII kernel's ramped scan needs its own headroom
+        let fits = needle_fits_in_u8(needle, unicode, scoring)
+            && (unicode || u8_scan_ramp_fits(needle.len(), scoring, B8::ASCII_SCAN_RAMP));
+        if fits {
             Self::U8(SmithWaterman::new(needle, scoring, case_sensitive))
         } else {
             Self::U16(SmithWaterman::new(needle, scoring, case_sensitive))

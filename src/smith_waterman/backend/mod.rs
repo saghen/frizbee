@@ -114,6 +114,10 @@ pub trait Backend: Sized + core::fmt::Debug + Clone + 'static {
     /// 2 for u16-element backends. Used by the traceback to
     /// read individual cells from the matrix's raw byte view.
     const LANE_BYTES: usize;
+    /// Lanes of the gap extend ramp [`Backend::ascii_scan`] adds to the row's
+    /// gaps, or 0 without one: such a kernel scores only the ASCII needles
+    /// with the ramp's headroom (see `u8_scan_ramp_fits`)
+    const ASCII_SCAN_RAMP: usize = 0;
     type Bytes: BytesVec<Mask = Self::Mask>;
     type Mask: MaskVec;
     type Score: ScoreVec;
@@ -128,6 +132,39 @@ pub trait Backend: Sized + core::fmt::Debug + Clone + 'static {
     /// # Safety
     /// The backend's required target features must be enabled at the call site.
     unsafe fn widen_mask(m: Self::Mask) -> Self::Score;
+
+    /// The steps [`Backend::ascii_scan`] takes, for a gap extend penalty
+    ///
+    /// # Safety
+    /// The backend's required target features must be enabled at the call site.
+    #[inline(always)]
+    unsafe fn ascii_gap_steps(gap_extend: u16) -> [Self::Score; 10] {
+        use crate::smith_waterman::algo::ascii_gap::GAP_SHIFTS;
+        // (no closures: target features)
+        unsafe {
+            let mut steps = [Self::Score::zero(); 10];
+            for (i, step) in steps.iter_mut().enumerate() {
+                let shift = GAP_SHIFTS.get(i).copied().unwrap_or(Self::LANES as u16);
+                *step = Self::Score::splat(gap_extend.saturating_mul(shift));
+            }
+            steps
+        }
+    }
+
+    /// [`Backend::horizontal_scan`] with the uniform steps of
+    /// [`Backend::ascii_gap_steps`], as the ASCII kernel needs
+    ///
+    /// # Safety
+    /// The backend's required target features must be enabled at the call site.
+    #[inline(always)]
+    unsafe fn ascii_scan(
+        values: Self::Score,
+        prev: Self::Score,
+        steps: &[Self::Score; 10],
+        scores: Self::Score,
+    ) -> (Self::Score, Self::Score) {
+        unsafe { Self::horizontal_scan(values, prev, steps, scores) }
+    }
 
     /// Decayed prefix max of a score row, carrying the previous chunk's scan
     /// `prev` (see [`crate::smith_waterman::algo::ascii_gap`]). Returns the

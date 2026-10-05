@@ -3,7 +3,7 @@
 
 use super::{
     Rng, indices_score, opposite_case, score, score_fits_in_u8, score_unicode,
-    score_with_exact_bonus,
+    score_with_exact_bonus, u8_kernel_fits,
 };
 use crate::Scoring;
 use crate::smith_waterman::algo::MAX_HAYSTACK_LEN;
@@ -212,7 +212,7 @@ fn kernels(needle: &str, cs: bool, s: &Scoring) -> Vec<(&'static str, Box<dyn Sc
     let mut all: Vec<(&'static str, Box<dyn Scorer>)> = Vec::new();
     macro_rules! push {
         ($label:literal, $b:ty, u8) => {
-            if <$b>::is_available() && score_fits_in_u8(needle.len(), s) {
+            if <$b>::is_available() && u8_kernel_fits::<$b>(needle.len(), s, false) {
                 all.push(($label, Box::new(SmithWaterman::<$b>::new(needle, s, cs))));
             }
         };

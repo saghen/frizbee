@@ -854,6 +854,46 @@ mod tests {
         assert!(is_u8(&pattern.backend));
     }
 
+    /// AVX-512 runs ASCII needles on the u8 kernel only within its scan's
+    /// ramp (9 bytes with the default scoring), the u16 kernel past it,
+    /// and scores them alike
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn avx512_u8_kernel_needs_the_ramp_headroom() {
+        if !MatcherAVX512::is_available() {
+            return;
+        }
+        let haystacks = ["xcomponentsx/a/b", "c_o_m_p_o_n_e_n_t_s", "compon/ents"];
+        for (needle, u8) in [("component", true), ("components", false)] {
+            let config = Config::default()
+                .max_typos(None)
+                .sort(crate::SortStrategy::IndexAsc);
+            let mut matcher = Matcher::new(needle, &config);
+            let CompiledPatterns::Single(pattern) = &matcher.patterns else {
+                panic!("expected a single pattern");
+            };
+            assert_eq!(is_u8(&pattern.backend), u8);
+            let scores: Vec<_> = matcher
+                .match_list(&haystacks)
+                .iter()
+                .map(|m| m.score)
+                .collect();
+            let want: Vec<_> = haystacks
+                .iter()
+                .map(|h| {
+                    crate::smith_waterman::reference::score_with_exact_bonus(
+                        needle,
+                        h,
+                        &config.scoring,
+                        false,
+                        false,
+                    )
+                })
+                .collect();
+            assert_eq!(scores, want, "{needle}");
+        }
+    }
+
     #[test]
     fn u16_path_selected_for_long_needle() {
         let matcher = Matcher::new("abcdefghijklmnopqrst", &Config::default());
