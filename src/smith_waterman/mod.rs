@@ -122,11 +122,9 @@ pub(crate) fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
         return false;
     }
 
-    let max_per_char = scoring.match_score as usize + scoring.max_per_char_bonus() as usize;
-    let max_matrix_score = max_per_char * needle_len
-        + scoring.max_one_time_bonus() as usize
-        + scoring.prefix_bonus as usize;
-    max_matrix_score + scoring.mismatch_penalty as usize <= u8::MAX as usize
+    // No cell holds more than [`Scoring::max_score`], which the diagonal
+    // transiently exceeds by the mismatch penalty before subtracting it
+    scoring.max_score(needle_len) + scoring.mismatch_penalty as u64 <= u8::MAX as u64
 }
 
 /// Scoring constants splatted once at construction, so the outlined kernels
@@ -616,6 +614,13 @@ mod tests {
                 "len={len}"
             );
         }
+    }
+
+    #[test]
+    fn score_fits_in_u8_bounds() {
+        // 12 rows can never saturate ("/aC/aC/aC/aC/" scores 252 in 13)
+        assert!(score_fits_in_u8(12, &Scoring::default()));
+        assert!(!score_fits_in_u8(13, &Scoring::default()));
     }
 
     #[test]
