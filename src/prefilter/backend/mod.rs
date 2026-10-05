@@ -33,7 +33,7 @@ pub(crate) use sse::PrefilterSSEBackend;
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 pub(crate) use wasm::PrefilterWasmBackend;
 
-pub(crate) use block::{BlockMask, ChunkBlock, eq_block_chunks, load_block_chunks};
+pub(crate) use block::{BlockMask, ChunkBlock, Narrow, eq_block_chunks, load_block_chunks};
 
 #[cfg(target_arch = "x86_64")]
 pub use avx::PrefilterAVX;

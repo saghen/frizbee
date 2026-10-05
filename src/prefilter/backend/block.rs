@@ -9,6 +9,25 @@ use core::{
 use super::{Backend, BitMaskOps};
 use crate::prefilter::algo::load_window;
 
+/// A block mask truncated to its low bytes
+pub(crate) trait Narrow<M> {
+    fn narrow(self) -> M;
+}
+
+impl<M: BlockMask> Narrow<M> for M {
+    #[inline(always)]
+    fn narrow(self) -> M {
+        self
+    }
+}
+
+impl Narrow<u64> for u128 {
+    #[inline(always)]
+    fn narrow(self) -> u64 {
+        self as u64
+    }
+}
+
 /// A bit per byte of a block of haystack bytes for the prefilter walks
 pub(crate) trait BlockMask:
     BitMaskOps
@@ -24,6 +43,7 @@ pub(crate) trait BlockMask:
     + Not<Output = Self>
     + Shl<usize, Output = Self>
     + Shr<usize, Output = Self>
+    + Narrow<u64>
 {
     /// Bytes per block
     const BITS: usize;
