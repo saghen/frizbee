@@ -1,6 +1,10 @@
-//! Every available kernel, and the matcher, against the reference DP's scores
+//! Every available kernel, and the matcher, against the reference DP: scores,
+//! indices (an optimal alignment, see [`indices_score`])
 
-use super::{Rng, opposite_case, score, score_fits_in_u8, score_unicode, score_with_exact_bonus};
+use super::{
+    Rng, indices_score, opposite_case, optimal_indices, score, score_fits_in_u8, score_unicode,
+    score_with_exact_bonus,
+};
 use crate::smith_waterman::algo::MAX_HAYSTACK_LEN;
 use crate::smith_waterman::backend::{Backend, BackendScalar8, BackendScalar16U8};
 use crate::smith_waterman::{Kernel, ScoreWidth, SmithWaterman};
@@ -129,24 +133,26 @@ fn random_scoring(rng: &mut Rng) -> Scoring {
 
 /// What the tests read from a kernel, without its type
 trait Scorer {
-    /// The score, and the score of the indices path (which stores the matrix)
-    fn run(&mut self, haystack: &[u8], unicode: bool, start_pos: usize) -> (u16, u16);
+    /// The score, and the indices traced through the stored matrix (relative
+    /// to the haystack)
+    fn run(&mut self, haystack: &[u8], unicode: bool, start_pos: usize) -> (u16, (u16, Vec<u32>));
 }
 
 impl<K: Kernel> Scorer for K {
-    fn run(&mut self, haystack: &[u8], unicode: bool, start_pos: usize) -> (u16, u16) {
-        if unicode {
+    fn run(&mut self, haystack: &[u8], unicode: bool, start_pos: usize) -> (u16, (u16, Vec<u32>)) {
+        let (score, (indices_score, indices)) = if unicode {
             (
                 self.score_haystack_unicode(haystack, start_pos),
-                self.score_haystack_unicode_indices(haystack, start_pos, None)
-                    .0,
+                self.score_haystack_unicode_indices(haystack, start_pos),
             )
         } else {
             (
                 self.score_haystack(haystack, start_pos),
-                self.score_haystack_indices(haystack, start_pos, None).0,
+                self.score_haystack_indices(haystack, start_pos),
             )
-        }
+        };
+        let relative = indices.into_iter().map(|i| i - start_pos as u32);
+        (score, (indices_score, relative.collect()))
     }
 }
 
@@ -207,8 +213,24 @@ fn kernels(needle: &str, cs: bool, s: &Scoring) -> Vec<(&'static str, Box<dyn Sc
     all
 }
 
-/// Checks every kernel's scores on the case against the reference. Returns
-/// the number of kernels checked
+/// Why the indices aren't an optimal alignment of the case, if they aren't:
+/// the score must be the reference's and re-score to it along the indices
+fn check_indices(case: &Case, s: &Scoring, (score, indices): &(u16, Vec<u32>)) -> Option<String> {
+    let (needle, haystack) = (case.needle.as_str(), case.haystack.as_bytes());
+    let (cs, prefix, unicode) = (case.case_sensitive, case.include_prefix, case.unicode);
+    let (want, _) = optimal_indices(needle, haystack, s, cs, prefix, unicode);
+    if *score != want {
+        return Some(format!("score {score}, reference {want}"));
+    }
+    match indices_score(needle, haystack, s, cs, prefix, unicode, indices) {
+        Ok(path) if path == want as i64 => None,
+        Ok(path) => Some(format!("indices {indices:?} score {path} along their path")),
+        Err(err) => Some(err),
+    }
+}
+
+/// Checks every kernel on the case: its score and indices against the
+/// reference. Returns the number of kernels checked
 fn check(case: &Case, s: &Scoring) -> usize {
     let want = case.reference(&case.haystack, s);
     let (needle, haystack) = (case.needle.as_str(), case.haystack.as_bytes());
@@ -217,9 +239,11 @@ fn check(case: &Case, s: &Scoring) -> usize {
     let start = if case.include_prefix { 0 } else { 1 };
     let mut all = kernels(needle, cs, s);
     for (label, kernel) in &mut all {
-        let (score, indices_score) = kernel.run(haystack, unicode, start);
+        let (score, indices) = kernel.run(haystack, unicode, start);
         assert_eq!(score, want, "{}", msg(label));
-        assert_eq!(indices_score, want, "{} indices", msg(label));
+        if let Some(err) = check_indices(case, s, &indices) {
+            panic!("{}: {err}", msg(label));
+        }
     }
     all.len()
 }
@@ -241,6 +265,13 @@ fn kernels_match_reference() {
             continue;
         }
         check(&case, &scoring);
+
+        // The reference's own traceback is an optimal alignment
+        let (needle, haystack) = (case.needle.as_str(), case.haystack.as_bytes());
+        let (cs, prefix, unicode) = (case.case_sensitive, case.include_prefix, case.unicode);
+        let path = optimal_indices(needle, haystack, &scoring, cs, prefix, unicode);
+        assert_eq!(path.0, case.reference(&case.haystack, &scoring));
+        assert_eq!(check_indices(&case, &scoring, &path), None);
     }
 }
 
@@ -393,10 +424,13 @@ fn width_matches_reference() {
     }
 }
 
+/// Indices are only checked when the matcher scored the whole haystack (a
+/// prefilter may trim it to a window)
 #[test]
 fn matcher_matches_reference() {
     let iterations = if cfg!(miri) { 4 } else { 6_000 };
     let mut rng = Rng(0x7ace_0096);
+    let mut checked = 0;
     for _ in 0..iterations {
         let mut case = Case::generate(&mut rng);
         let scoring = random_scoring(&mut rng);
@@ -440,7 +474,32 @@ fn matcher_matches_reference() {
             assert_eq!(m.score, want, "{case:?} haystack={haystack:?} {scoring:?}");
             assert_eq!(matcher.match_one(haystack, m.index), Some(m));
         }
+
+        let max_typos = rng.pick(&[None, Some(0), Some(1), Some(2)]);
+        let Some(m) = Matcher::new(case.needle.as_str(), &config.max_typos(max_typos))
+            .match_list_indices(&[case.haystack.as_str()])
+            .pop()
+        else {
+            continue;
+        };
+        let exact_bonus = if m.exact {
+            scoring.exact_match_bonus
+        } else {
+            0
+        };
+        let got = (m.score - exact_bonus, m.indices);
+        if got.0 != case.reference(&case.haystack, &scoring) {
+            continue;
+        }
+        checked += 1;
+        if let Some(err) = check_indices(&case, &scoring, &got) {
+            panic!("{case:?} max_typos={max_typos:?} {scoring:?}: {err}");
+        }
     }
+    assert!(
+        cfg!(miri) || checked > iterations / 2,
+        "{checked} matches checked"
+    );
 }
 
 #[test]

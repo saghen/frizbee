@@ -12,7 +12,6 @@ use crate::smith_waterman::{Kernel, SmithWaterman, score_fits_in_u8};
 struct BackendCase {
     needle: String,
     haystack: Vec<u8>,
-    max_typos: Option<u16>,
     case_sensitive: bool,
 }
 
@@ -28,16 +27,11 @@ impl BackendCase {
             test_bound(768, 72),
             &[0, 1, 7, 8, 15, 16, 31, 32, 63, 64, 1023, 1024, 1025],
         );
-        let max_typos = match cursor.next() % 5 {
-            0 => None,
-            byte => Some((byte as u16 - 1) % 17),
-        };
         let case_sensitive = cursor.bool();
 
         Self {
             needle: String::from_utf8_lossy(&cursor.bytes(needle_len)).to_string(),
             haystack: cursor.bytes(haystack_len),
-            max_typos,
             case_sensitive,
         }
     }
@@ -135,9 +129,7 @@ fn score_with<B: Backend>(needle: &str, haystack: &str) -> u16 {
 
 fn indices_with<B: Backend>(needle: &str, haystack: &str) -> Vec<u32> {
     let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), false);
-    matcher
-        .score_haystack_indices(haystack.as_bytes(), 0, None)
-        .1
+    matcher.score_haystack_indices(haystack.as_bytes(), 0).1
 }
 
 fn assert_score_backend<B: Backend>(label: &str, needle: &str, haystack: &str, want: u16) {
@@ -216,18 +208,16 @@ fn score_bytes_with<B: Backend>(needle: &str, haystack: &[u8], case_sensitive: b
 fn indices_bytes_with<B: Backend>(
     needle: &str,
     haystack: &[u8],
-    max_typos: Option<u16>,
     case_sensitive: bool,
 ) -> (u16, Vec<u32>) {
     let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), case_sensitive);
-    matcher.score_haystack_indices(haystack, 0, max_typos)
+    matcher.score_haystack_indices(haystack, 0)
 }
 
 fn assert_backend<B: Backend>(
     label: &str,
     needle: &str,
     haystack: &[u8],
-    max_typos: Option<u16>,
     case_sensitive: bool,
     want_score: u16,
     want_indices_score: u16,
@@ -239,8 +229,7 @@ fn assert_backend<B: Backend>(
             "{label} score mismatch for needle={needle:?} haystack_len={}",
             haystack.len()
         );
-        let (indices_score, indices) =
-            indices_bytes_with::<B>(needle, haystack, max_typos, case_sensitive);
+        let (indices_score, indices) = indices_bytes_with::<B>(needle, haystack, case_sensitive);
         assert_eq!(
             indices_score,
             want_indices_score,
@@ -255,18 +244,15 @@ fn assert_backend_matches_reference<B: Backend, R: Backend>(
     label: &str,
     needle: &str,
     haystack: &[u8],
-    max_typos: Option<u16>,
     case_sensitive: bool,
 ) {
     if B::is_available() {
         let want_score = score_bytes_with::<R>(needle, haystack, case_sensitive);
-        let want_indices_score =
-            indices_bytes_with::<R>(needle, haystack, max_typos, case_sensitive).0;
+        let want_indices_score = indices_bytes_with::<R>(needle, haystack, case_sensitive).0;
         assert_backend::<B>(
             label,
             needle,
             haystack,
-            max_typos,
             case_sensitive,
             want_score,
             want_indices_score,
@@ -312,7 +298,6 @@ macro_rules! assert_case_row {
                     $label,
                     &$case.needle,
                     &$case.haystack,
-                    $case.max_typos,
                     $case.case_sensitive,
                 );
             }

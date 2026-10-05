@@ -138,17 +138,6 @@ macro_rules! impl_specialized {
             ) -> u16 {
                 self.score_inline::<UNICODE>(haystack, haystack_start_pos)
             }
-
-            #[inline(never)]
-            $(#[target_feature(enable = $feature)])?
-            unsafe fn score_indices<const UNICODE: bool>(
-                &mut self,
-                haystack: &[u8],
-                haystack_start_pos: usize,
-                max_typos: Option<u16>,
-            ) -> (u16, Vec<u32>) {
-                self.score_indices_inline::<UNICODE>(haystack, haystack_start_pos, max_typos)
-            }
         }
     };
 }

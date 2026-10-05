@@ -6,7 +6,6 @@ use crate::{
 };
 use alloc::{string::ToString, vec, vec::Vec};
 
-use super::alignment_iter::Alignment;
 use super::backend::{Backend, BytesVec, MaskVec, ScoreVec};
 use super::matrix::Matrix;
 use super::{ScoringVecs, SmithWaterman};
@@ -77,6 +76,29 @@ impl<B: Backend> ChunkBonuses<B> {
     }
 }
 
+impl<B: Backend> SmithWaterman<B> {
+    /// The score and indices of a haystack too long for the kernels, from
+    /// the greedy matcher
+    fn greedy_indices(&self, haystack: &[u8], haystack_start_pos: usize) -> (u16, Vec<u32>) {
+        match_greedy(
+            self.needle.as_bytes(),
+            haystack,
+            &self.scoring,
+            self.case_sensitive,
+            haystack_start_pos == 0,
+        )
+        .map(|(score, mut indices)| {
+            for index in &mut indices {
+                *index = u32::try_from(*index as usize + haystack_start_pos)
+                    .expect("haystack byte index will overflow u32");
+            }
+            indices.reverse();
+            (score, indices)
+        })
+        .unwrap_or_else(|| (0, vec![]))
+    }
+}
+
 impl<B: Backend> Kernel for SmithWaterman<B> {
     fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self {
         let needle_simd = case_needle(needle.as_bytes(), case_sensitive)
@@ -121,8 +143,6 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             scoring: scoring.clone(),
             scoring_vecs,
             score_matrix: Matrix::new(needle_len, MAX_HAYSTACK_LEN),
-            match_masks: Matrix::new(needle_len, MAX_HAYSTACK_LEN),
-            haystack_chunks: 0,
             row_carry: vec![unsafe { (B::Score::zero(), B::Score::zero()) }; 2 * needle_len],
         }
     }
@@ -137,25 +157,9 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         &mut self,
         haystack: &[u8],
         haystack_start_pos: usize,
-        max_typos: Option<u16>,
     ) -> (u16, Vec<u32>) {
         if haystack.len() > MAX_HAYSTACK_LEN {
-            return match_greedy(
-                self.needle.as_bytes(),
-                haystack,
-                &self.scoring,
-                self.case_sensitive,
-                haystack_start_pos == 0,
-            )
-            .map(|(score, mut indices)| {
-                for index in &mut indices {
-                    *index = u32::try_from(*index as usize + haystack_start_pos)
-                        .expect("haystack byte index will overflow u32");
-                }
-                indices.reverse();
-                (score, indices)
-            })
-            .unwrap_or_else(|| (0, vec![]));
+            return self.greedy_indices(haystack, haystack_start_pos);
         }
 
         let score = self.score_haystack_matrix(haystack, haystack_start_pos == 0);
@@ -163,20 +167,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             return (score, Vec::new());
         }
 
-        let needle_len = self.needle.len();
-        let mut indices = Vec::with_capacity(needle_len);
-        for pos in self.iter_alignment_path(needle_len, haystack_start_pos, None, score, max_typos)
-        {
-            match pos {
-                Some(Alignment::Match((_, haystack_idx))) => indices.push(haystack_idx as u32),
-                Some(_) => {}
-                // TODO: it's possible for us to lose alignment due to score == 0
-                // but to stay consistent with results of `match_list`, we simply
-                // don't return the full list of indices
-                None => break,
-            }
-        }
-
+        let indices = self.alignment_indices(haystack, haystack_start_pos, false, score);
         (score, indices)
     }
 
@@ -186,25 +177,9 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         &mut self,
         haystack: &[u8],
         haystack_start_pos: usize,
-        max_typos: Option<u16>,
     ) -> (u16, Vec<u32>) {
         if haystack.len() > MAX_HAYSTACK_LEN {
-            return match_greedy(
-                self.needle.as_bytes(),
-                haystack,
-                &self.scoring,
-                self.case_sensitive,
-                haystack_start_pos == 0,
-            )
-            .map(|(score, mut indices)| {
-                for index in &mut indices {
-                    *index = u32::try_from(*index as usize + haystack_start_pos)
-                        .expect("haystack byte index will overflow u32");
-                }
-                indices.reverse();
-                (score, indices)
-            })
-            .unwrap_or_else(|| (0, vec![]));
+            return self.greedy_indices(haystack, haystack_start_pos);
         }
 
         let score = self.score_haystack_unicode_matrix(haystack, haystack_start_pos == 0);
@@ -212,31 +187,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             return (score, Vec::new());
         }
 
-        let mut indices = Vec::with_capacity(self.needle.len());
-        let mut prev_haystack_idx = usize::MAX;
-        for pos in self.iter_alignment_path(
-            self.needle_unicode.len(),
-            haystack_start_pos,
-            Some(haystack),
-            score,
-            max_typos,
-        ) {
-            match pos {
-                Some(Alignment::Match((needle_idx, haystack_idx))) => {
-                    if prev_haystack_idx != haystack_idx {
-                        let len = self.needle_unicode[needle_idx].len;
-                        indices.extend((0..len).rev().map(|offset| (haystack_idx + offset) as u32));
-                        prev_haystack_idx = haystack_idx;
-                    }
-                }
-                Some(_) => {}
-                // TODO: it's possible for us to lose alignment due to score == 0
-                // but to stay consistent with results of `match_list`, we simply
-                // don't return the full list of indices
-                None => break,
-            }
-        }
-
+        let indices = self.alignment_indices(haystack, haystack_start_pos, true, score);
         (score, indices)
     }
 

@@ -21,6 +21,7 @@ impl<B: Backend> Matrix<B> {
         }
     }
 
+    #[cfg(feature = "match_end_col")]
     #[inline(always)]
     pub fn get(&self, needle_idx: usize, haystack_idx: usize) -> B::Score {
         unsafe {
