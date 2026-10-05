@@ -75,25 +75,6 @@ pub(crate) fn keep_first(n: usize) -> *const u8 {
     unsafe { KEEP_FIRST.0.as_ptr().add(64 - n) }
 }
 
-/// The `remaining` bytes at `ptr`, zero padded. Only the copy is outlined, so
-/// the caller loads it with its target features
-///
-/// # Safety
-/// `ptr` must point to `remaining <= N` readable bytes.
-#[cfg(any(
-    target_arch = "x86_64",
-    target_arch = "aarch64",
-    all(target_arch = "wasm32", target_feature = "simd128")
-))]
-// with safe_read every partial chunk comes here: inlining is 4-21% faster
-#[cfg_attr(not(feature = "safe_read"), cold, inline(never))]
-#[cfg_attr(feature = "safe_read", inline(always))]
-pub(crate) unsafe fn copy_partial<const N: usize>(ptr: *const u8, remaining: usize) -> [u8; N] {
-    let mut data = [0u8; N];
-    unsafe { core::ptr::copy_nonoverlapping(ptr, data.as_mut_ptr(), remaining) };
-    data
-}
-
 #[cfg(target_arch = "x86_64")]
 mod avx;
 #[cfg(target_arch = "x86_64")]
