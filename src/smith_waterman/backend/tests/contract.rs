@@ -79,8 +79,8 @@ fn check_bytes_load_partial<B: Backend>() {
     unsafe {
         let data: Vec<u8> = (1..=64).collect();
         let lanes = B::LANES;
-        for start in (0..32).step_by(lanes) {
-            for len in (start + 1)..=32 {
+        for start in (0..64).step_by(lanes) {
+            for len in (start + 1)..=64 {
                 let v = B::Bytes::load_partial(data.as_ptr(), start, len);
                 let got = BytesVec::to_lanes(v);
                 let mut expected = vec![0u8; lanes];

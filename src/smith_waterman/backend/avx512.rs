@@ -1,6 +1,42 @@
 use core::arch::x86_64::*;
 
-use super::{Backend, BytesVec, MaskVec, ScoreVec};
+use crate::prefilter::algo::can_overread;
+
+use super::{Backend, BytesVec, MaskVec, ScoreVec, keep_first};
+
+/// Loads the first `n` (1..64) bytes at `ptr`, zeroing the rest: a masked load
+/// (which stalls on cache misses) only when a full one would cross a page. The
+/// keep mask comes from [`keep_first`] so LLVM can't fold it into a masked load
+#[inline(always)]
+unsafe fn load_first(ptr: *const u8, n: usize) -> __m512i {
+    unsafe {
+        if can_overread(ptr, 64) {
+            let keep = keep_first(n);
+            _mm512_and_si512(
+                _mm512_loadu_si512(ptr as *const __m512i),
+                _mm512_loadu_si512(keep as *const __m512i),
+            )
+        } else {
+            _mm512_maskz_loadu_epi8((1u64 << n) - 1, ptr as *const i8)
+        }
+    }
+}
+
+/// [`load_first`] for `n` in 1..=32 bytes, in the low half of the vector
+#[inline(always)]
+unsafe fn load_first_256(ptr: *const u8, n: usize) -> __m512i {
+    unsafe {
+        if can_overread(ptr, 32) {
+            let keep = keep_first(n);
+            _mm512_zextsi256_si512(_mm256_and_si256(
+                _mm256_loadu_si256(ptr as *const __m256i),
+                _mm256_loadu_si256(keep as *const __m256i),
+            ))
+        } else {
+            _mm512_maskz_loadu_epi8((1u64 << n) - 1, ptr as *const i8)
+        }
+    }
+}
 
 /// 32-lane u16 scoring (512-bit __m512i), 32-lane u8 input (low half of
 /// __m512i).
@@ -102,9 +138,7 @@ impl BytesVec for Avx512Bytes {
             if remaining == 0 {
                 return Self(_mm512_setzero_si512());
             }
-            let ptr = data.add(start);
-            let mask: __mmask64 = ((1u64 << remaining).wrapping_sub(1)) as __mmask64;
-            Self(_mm512_maskz_loadu_epi8(mask, ptr as *const i8))
+            Self(load_first_256(data.add(start), remaining))
         }
     }
 
@@ -153,12 +187,7 @@ impl BytesVec for Avx512U8Bytes {
             let ptr = data.add(start);
             Self(match remaining {
                 0 => unreachable!(),
-                1..64 => {
-                    // lanes outside mask are zeroed and don't access memory,
-                    // so a partial chunk at the haystack tail is page-safe
-                    let mask: __mmask64 = (1u64 << remaining).wrapping_sub(1);
-                    _mm512_maskz_loadu_epi8(mask, ptr as *const i8)
-                }
+                1..64 => load_first(ptr, remaining),
                 64.. => _mm512_loadu_si512(ptr as *const __m512i),
             })
         }
