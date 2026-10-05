@@ -100,7 +100,7 @@ impl<B: Backend> LiteralImpl<B> {
     }
 
     #[inline(always)]
-    unsafe fn match_one_impl<const UNICODE: bool>(
+    pub(super) unsafe fn match_one_impl<const UNICODE: bool>(
         &self,
         haystack: &str,
         index: u32,

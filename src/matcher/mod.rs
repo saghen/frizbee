@@ -3,6 +3,7 @@ use crate::smith_waterman::avx512_u8_fits;
 use crate::sort::radix_sort_matches;
 use crate::{Config, Match, MatchIndices, Pattern};
 use alloc::{vec, vec::Vec};
+use core::marker::PhantomData;
 
 #[cfg(target_arch = "aarch64")]
 use crate::literal::LiteralNEON;
@@ -78,6 +79,54 @@ macro_rules! dispatch_typos {
 
 mod multi;
 use multi::{CompiledPattern, CompiledPatterns};
+
+/// A borrowed UTF-8 haystack for the bindings: `#[repr(C)]` pointer then
+/// length (the pointer may be null when the length is 0), so C strings can be
+/// viewed as `&[RawStr]`. Bindings matching through [`Matcher::match_list_raw`]
+/// reuse frizbee's own copy of the matching code, which matches `RawStr`
+#[doc(hidden)]
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct RawStr<'a> {
+    ptr: *const u8,
+    len: usize,
+    _str: PhantomData<&'a str>,
+}
+
+impl RawStr<'_> {
+    /// # Safety
+    /// Unless `len` is 0 (where `ptr` may be anything, including null), `ptr`
+    /// must point to `len` bytes of valid UTF-8 that stay valid and unmodified
+    /// for the lifetime
+    pub const unsafe fn from_raw_parts(ptr: *const u8, len: usize) -> Self {
+        Self {
+            ptr,
+            len,
+            _str: PhantomData,
+        }
+    }
+}
+
+impl<'a> From<&'a str> for RawStr<'a> {
+    fn from(s: &'a str) -> Self {
+        unsafe { Self::from_raw_parts(s.as_ptr(), s.len()) }
+    }
+}
+
+impl AsRef<str> for RawStr<'_> {
+    #[inline(always)]
+    fn as_ref(&self) -> &str {
+        if self.len == 0 {
+            return "";
+        }
+        // SAFETY: guaranteed by the constructor
+        unsafe { core::str::from_utf8_unchecked(core::slice::from_raw_parts(self.ptr, self.len)) }
+    }
+}
+
+// SAFETY: a shared view of immutable bytes, like `&str`
+unsafe impl Send for RawStr<'_> {}
+unsafe impl Sync for RawStr<'_> {}
 
 /// Primary entrypoint for fuzzy matching
 ///
@@ -238,6 +287,14 @@ impl Matcher {
             radix_sort_matches(&mut matches);
         }
         matches
+    }
+
+    /// [`Matcher::match_list`] for the bindings (see [`RawStr`]). Never inlined,
+    /// so the bindings call frizbee's copy instead of instantiating their own
+    #[doc(hidden)]
+    #[inline(never)]
+    pub fn match_list_raw(&mut self, haystacks: &[RawStr<'_>]) -> Vec<Match> {
+        self.match_list(haystacks)
     }
 
     /// Matches a list of haystacks, returning a list of [`MatchIndices`] which
@@ -419,7 +476,7 @@ impl Matcher {
         index: u32,
     ) -> Option<Match> {
         let mut matches = Vec::new();
-        Self::dispatch_pattern_into(pattern, &[haystack], index, &mut matches);
+        Self::dispatch_pattern_into(pattern, &[RawStr::from(haystack)], index, &mut matches);
         matches.pop()
     }
 
@@ -541,6 +598,21 @@ impl Matcher {
 mod tests {
     use super::*;
     use crate::{CaseMatching, Scoring, SortStrategy};
+
+    #[test]
+    fn raw_str_matches_like_str() {
+        let haystacks = ["fooBar", "", "foo_bar", "prelude", "bar/foo"];
+        let mut raw = haystacks.map(RawStr::from);
+        // C callers may pass NULL for empty strings
+        raw[1] = unsafe { RawStr::from_raw_parts(core::ptr::null(), 0) };
+        for query in ["fBr", "foo !bar", "!foo", ""] {
+            let mut matcher = Matcher::from_query(query, &Config::default());
+            let expected = matcher.match_list(&haystacks);
+            assert_eq!(matcher.match_list_raw(&raw), expected, "query: {query:?}");
+            #[cfg(all(feature = "std", not(target_family = "wasm")))]
+            assert_eq!(matcher.match_list_parallel_raw(&raw, 2), expected);
+        }
+    }
 
     #[test]
     fn long_needles_saturate_instead_of_panicking() {

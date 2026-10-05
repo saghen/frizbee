@@ -2,6 +2,7 @@
 //! (`collect_haystacks`/`with_haystacks`), or strings copied once into
 //! Rust-owned `Haystacks` and matched with the GIL released.
 
+use frizbee::RawStr;
 use pyo3::exceptions::{PyIndexError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyList, PyString, PyTuple};
@@ -34,18 +35,18 @@ pub(crate) fn collect_haystacks<'py>(
     }
 }
 
-/// Extracts the haystacks as zero-copy borrowed `&str`s and calls `f` with
+/// Extracts the haystacks as zero-copy borrowed strings and calls `f` with
 /// them. The `Bound` handles are kept alive for the duration of `f` so the
 /// borrowed strings cannot be deallocated
 pub(crate) fn with_haystacks<R>(
     haystacks: &Bound<'_, PyAny>,
-    f: impl FnOnce(&[&str]) -> PyResult<R>,
+    f: impl FnOnce(&[RawStr<'_>]) -> PyResult<R>,
 ) -> PyResult<R> {
     let owners = collect_haystacks(haystacks)?;
     let strs = owners
         .iter()
-        .map(|s| s.to_str())
-        .collect::<PyResult<Vec<&str>>>()?;
+        .map(|s| s.to_str().map(RawStr::from))
+        .collect::<PyResult<Vec<_>>>()?;
     f(&strs)
 }
 
@@ -77,11 +78,12 @@ impl PyHaystacks {
 
     /// Views of every haystack; the arena is Rust-owned, so the views can be
     /// used with the GIL released
-    pub(crate) fn as_strs(&self) -> Vec<&str> {
+    pub(crate) fn as_strs(&self) -> Vec<RawStr<'_>> {
         self.offsets
             .windows(2)
             // SAFETY: the arena only ever holds bytes copied from `&str`s
             .map(|span| unsafe { core::str::from_utf8_unchecked(&self.bytes[span[0]..span[1]]) })
+            .map(RawStr::from)
             .collect()
     }
 }

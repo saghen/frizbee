@@ -1,3 +1,4 @@
+use frizbee::RawStr;
 use js_sys::{Array, Object, Reflect};
 use wasm_bindgen::prelude::*;
 
@@ -183,10 +184,10 @@ impl Matcher {
     /// to `matchHaystacks`) so that no strings cross the boundary per call
     #[wasm_bindgen(js_name = matchList, skip_typescript)]
     pub fn match_list(&mut self, haystacks: Vec<String>) -> MatchArray {
-        // borrow as &str so the core monomorphizes once for H = &str (shared with the
-        // Haystacks path), halving the largest family of functions in the binary
-        let haystacks: Vec<&str> = haystacks.iter().map(String::as_str).collect();
-        let mut matches = self.inner.match_list(&haystacks);
+        // borrow as `RawStr` so the core monomorphizes once, shared with the Haystacks
+        // path and frizbee itself, rather than once per haystack type
+        let haystacks: Vec<RawStr> = haystacks.iter().map(|s| RawStr::from(s.as_str())).collect();
+        let mut matches = self.inner.match_list_raw(&haystacks);
         self.truncate(&mut matches);
         matches_to_js(&matches)
     }
@@ -200,7 +201,9 @@ impl Matcher {
     /// Useful for displaying matched indices in the UI
     #[wasm_bindgen(js_name = matchListIndices, skip_typescript)]
     pub fn match_list_indices(&mut self, haystacks: Vec<String>) -> MatchIndicesArray {
-        let haystacks: Vec<&str> = haystacks.iter().map(String::as_str).collect();
+        // as `RawStr`, sharing the core's copy with `matchHaystacksIndices` (see
+        // `match_list`)
+        let haystacks: Vec<RawStr> = haystacks.iter().map(|s| RawStr::from(s.as_str())).collect();
         let mut matches = self.inner.match_list_indices(&haystacks);
         self.truncate(&mut matches);
         matches_indices_to_js(&matches)
@@ -212,7 +215,7 @@ impl Matcher {
     /// `matchList` accepts a `Haystacks` directly and forwards here
     #[wasm_bindgen(js_name = matchHaystacks)]
     pub fn match_haystacks(&mut self, haystacks: &Haystacks) -> MatchArray {
-        let mut matches = self.inner.match_list(&haystacks.as_strs());
+        let mut matches = self.inner.match_list_raw(&haystacks.as_strs());
         self.truncate(&mut matches);
         matches_to_js(&matches)
     }
