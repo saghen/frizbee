@@ -2,25 +2,25 @@ use super::Matcher;
 use crate::{Config, Match, MatchIndices, Pattern};
 use alloc::vec::Vec;
 
-/// Haystacks pulled from the source iterator per block (see [`Blocks`])
-const BLOCK: usize = 256;
+/// Haystacks pulled from the source iterator per batch (see [`Batched`])
+const BATCH: usize = 256;
 
-/// Runs an iterator of haystacks through the list path a block at a time,
+/// Runs an iterator of haystacks through the list path a batch at a time,
 /// so haystacks are prefiltered and scored with the same pair kernel as
 /// `match_list`, and yields the matches in iteration order.
-pub(crate) struct Blocks<I: Iterator> {
+pub(crate) struct Batched<I: Iterator> {
     iter: I,
-    /// The block being matched; empty between calls, so cloning needs no
+    /// The batch being matched; empty between calls, so cloning needs no
     /// `I::Item: Clone`
     haystacks: Vec<I::Item>,
     matches: Vec<Match>,
     /// Next match of `matches` to yield
     next: usize,
-    /// Index of the first haystack of the next block
+    /// Index of the first haystack of the next batch
     index: usize,
 }
 
-impl<I> Blocks<I>
+impl<I> Batched<I>
 where
     I: Iterator,
     I::Item: AsRef<str>,
@@ -42,7 +42,7 @@ where
                 return Some(*m);
             }
             self.haystacks.clear();
-            self.haystacks.extend(self.iter.by_ref().take(BLOCK));
+            self.haystacks.extend(self.iter.by_ref().take(BATCH));
             if self.haystacks.is_empty() {
                 return None;
             }
@@ -63,7 +63,7 @@ where
     }
 }
 
-impl<I: Iterator + Clone> Clone for Blocks<I> {
+impl<I: Iterator + Clone> Clone for Batched<I> {
     fn clone(&self) -> Self {
         Self {
             iter: self.iter.clone(),
@@ -75,9 +75,9 @@ impl<I: Iterator + Clone> Clone for Blocks<I> {
     }
 }
 
-impl<I: Iterator + core::fmt::Debug> core::fmt::Debug for Blocks<I> {
+impl<I: Iterator + core::fmt::Debug> core::fmt::Debug for Batched<I> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Blocks")
+        f.debug_struct("Batched")
             .field("iter", &self.iter)
             .field("matches", &self.matches)
             .field("next", &self.next)
@@ -103,7 +103,7 @@ impl<I: Iterator + core::fmt::Debug> core::fmt::Debug for Blocks<I> {
 /// ```
 pub trait FuzzyMatchExt: Iterator + Sized {
     /// Fuzzy matches each item against `needle`, yielding a [`Match`] for every
-    /// item that passes. Items are pulled in blocks and matched through the
+    /// item that passes. Items are pulled in batches and matched through the
     /// same path as [`Matcher::match_list`].
     ///
     /// ```
@@ -121,7 +121,7 @@ pub trait FuzzyMatchExt: Iterator + Sized {
     {
         FuzzyMatch {
             matcher: Matcher::new(pattern, config),
-            blocks: Blocks::new(self),
+            batched: Batched::new(self),
         }
     }
 
@@ -165,7 +165,7 @@ impl<I: Iterator> FuzzyMatchExt for I {}
 #[derive(Debug, Clone)]
 pub struct FuzzyMatch<I: Iterator> {
     matcher: Matcher,
-    blocks: Blocks<I>,
+    batched: Batched<I>,
 }
 
 impl<I> Iterator for FuzzyMatch<I>
@@ -176,11 +176,11 @@ where
     type Item = Match;
 
     fn next(&mut self) -> Option<Match> {
-        self.blocks.next_match(&mut self.matcher)
+        self.batched.next_match(&mut self.matcher)
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        self.blocks.size_hint()
+        self.batched.size_hint()
     }
 }
 

@@ -142,7 +142,7 @@ impl<B: Backend> Prefilter<B> {
             prefilter: self,
             block: unsafe { self.load_block::<UNICODE>(haystack) },
         };
-        unsafe { walk_single::<M, _>(&rows, self.rows::<UNICODE>(), max_typos, haystack.len()) }
+        unsafe { walk_single::<M, _>(&rows, self.rows::<UNICODE>(), max_typos) }
     }
 }
 
@@ -189,7 +189,6 @@ unsafe fn walk_single<M: BlockMask, R: SingleRows<M>>(
     rows: &R,
     n: usize,
     max_typos: usize,
-    len: usize,
 ) -> Window {
     // Row 0 is read unchecked: empty needles never reach the prefilter
     // (`Matcher::compile` skips them)
@@ -217,8 +216,11 @@ unsafe fn walk_single<M: BlockMask, R: SingleRows<M>>(
         (lcs, head, tail)
     };
 
-    if lcs + max_typos < n {
-        return (false, 0, len);
-    }
-    (true, head.trailing_zeros(), M::BITS - tail.leading_zeros())
+    // no early return on a miss: the branch would mispredict, and the
+    // batched callers only read the window of a hit
+    (
+        lcs + max_typos >= n,
+        head.trailing_zeros(),
+        M::BITS - tail.leading_zeros(),
+    )
 }

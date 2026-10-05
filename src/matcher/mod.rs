@@ -271,7 +271,7 @@ impl Matcher {
 
     /// Returns an iterator over [`Match`] values for an iterator of strings.
     ///
-    /// Haystacks are pulled from the source in blocks and matched through the
+    /// Haystacks are pulled from the source in batches and matched through the
     /// same path as [`Matcher::match_list`], so it performs about the same
     /// (minus the sort).
     ///
@@ -291,8 +291,8 @@ impl Matcher {
         &mut self,
         haystacks: impl IntoIterator<Item = S>,
     ) -> impl Iterator<Item = Match> {
-        let mut blocks = iter::Blocks::new(haystacks.into_iter());
-        core::iter::from_fn(move || blocks.next_match(self))
+        let mut batched = iter::Batched::new(haystacks.into_iter());
+        core::iter::from_fn(move || batched.next_match(self))
     }
 
     /// Returns an iterator over [`MatchIndices`] values for an iterator of

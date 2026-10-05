@@ -11,6 +11,9 @@ use alloc::{
 pub(super) const MANY_TYPOS: u16 = u16::MAX;
 pub(super) const NO_PREFILTER: u16 = u16::MAX - 1;
 
+/// Haystacks prefiltered ahead of scoring in the typo modes
+const BATCH: usize = 128;
+
 /// Fully inlined per-backend implementations, specialized for each
 /// configuration (0 typos, 1 typo, unicode variants, ...) and built with the
 /// backend's `#[target_feature]`.
@@ -101,6 +104,16 @@ where
         } else {
             TYPOS
         };
+        if TYPOS != 0 && TYPOS != NO_PREFILTER {
+            return self.match_list_batched::<TYPOS, UNICODE, H>(
+                haystacks,
+                haystack_index_offset,
+                matches,
+                max_typos,
+            );
+        }
+        // Prefilters each haystack before scoring it, or without a prefilter,
+        // scores the whole haystack
         let mut pending = None;
         for (index, haystack_str) in (haystack_index_offset..).zip(haystacks.iter()) {
             let haystack = haystack_str.as_ref().as_bytes();
@@ -113,6 +126,44 @@ where
                     self.score_candidate::<TYPOS, UNICODE>(candidate, &mut pending, matches);
                 }
             }
+        }
+        self.score_pending::<TYPOS, UNICODE>(pending, matches);
+    }
+
+    /// Prefilters a batch of haystacks before scoring the ones that pass, so
+    /// the walks overlap without a branch between them
+    #[inline(always)]
+    fn match_list_batched<const TYPOS: u16, const UNICODE: bool, H: AsRef<str>>(
+        &mut self,
+        haystacks: &[H],
+        haystack_index_offset: u32,
+        matches: &mut Vec<Match>,
+        max_typos: u16,
+    ) {
+        let mut passed = [(0u32, 0usize, 0usize); BATCH];
+        let mut pending = None;
+        let mut index = haystack_index_offset;
+        for batch in haystacks.chunks(BATCH) {
+            let mut count = 0;
+            for (i, haystack_str) in batch.iter().enumerate() {
+                let haystack = haystack_str.as_ref().as_bytes();
+                let (matched, start_pos, end_pos) = if haystack.len() >= self.min_haystack_len {
+                    self.prefilter_haystack::<TYPOS, UNICODE>(haystack, max_typos)
+                } else {
+                    (false, 0, 0)
+                };
+                // branch-free append: the slot is overwritten when it didn't match
+                unsafe { *passed.get_unchecked_mut(count) = (i as u32, start_pos, end_pos) };
+                count += matched as usize;
+            }
+            for &(i, start_pos, end_pos) in &passed[..count] {
+                let haystack = unsafe { batch.get_unchecked(i as usize) }
+                    .as_ref()
+                    .as_bytes();
+                let candidate = trim_haystack(index + i, haystack, start_pos, end_pos);
+                self.score_candidate::<TYPOS, UNICODE>(candidate, &mut pending, matches);
+            }
+            index = index.wrapping_add(batch.len() as u32);
         }
         self.score_pending::<TYPOS, UNICODE>(pending, matches);
     }

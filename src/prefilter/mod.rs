@@ -104,6 +104,8 @@ pub(crate) fn case_needle_unicode(needle: &str, case_sensitive: bool) -> Vec<Uni
         .collect()
 }
 
+/// Whether the haystack matched, and the start and end of the window to
+/// score. The window is unspecified when the haystack didn't match
 pub(crate) type Window = (bool, usize, usize);
 
 /// Ordered prefiltering kernel which allows score-level false positives.
