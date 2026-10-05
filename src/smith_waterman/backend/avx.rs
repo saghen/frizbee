@@ -223,11 +223,7 @@ impl ScoreVec for AvxScore {
         unsafe {
             let high = _mm256_extracti128_si256::<1>(self.0);
             let low = _mm256_castsi256_si128(self.0);
-            let m = _mm_max_epu16(low, high);
-            let m = _mm_max_epu16(m, _mm_srli_si128::<8>(m));
-            let m = _mm_max_epu16(m, _mm_srli_si128::<4>(m));
-            let m = _mm_max_epu16(m, _mm_srli_si128::<2>(m));
-            _mm_extract_epi16::<0>(m) as u16
+            super::sse::horizontal_max_epu16(_mm_max_epu16(low, high))
         }
     }
     #[inline(always)]
@@ -245,11 +241,12 @@ impl ScoreVec for AvxScore {
     #[inline(always)]
     unsafe fn shift_right_padded<const L: i32>(self, prev: Self) -> Self {
         unsafe {
-            const { assert!(L >= 0 && L <= 8) };
-            // permute2x128(prev, self, 0x21) = [prev_high, self_low]
+            const { assert!(L >= 0 && L <= 16) };
+            // permuted = [prev_high, self_low]
             // alignr_epi8(self, permuted, 16 - L*2) lane-pair-wise yields the
-            // desired right-shift-with-fill.
-            let permuted = _mm256_permute2x128_si256::<0x21>(prev.0, self.0);
+            // desired right-shift-with-fill. Past 8 lanes, each half splices
+            // the next lower half instead: alignr_epi8(permuted, prev, 32 - L*2)
+            let permuted = prev_high_self_low(prev.0, self.0);
             Self(match L {
                 0 => self.0,
                 1 => _mm256_alignr_epi8::<14>(self.0, permuted),
@@ -260,6 +257,8 @@ impl ScoreVec for AvxScore {
                 6 => _mm256_alignr_epi8::<4>(self.0, permuted),
                 7 => _mm256_alignr_epi8::<2>(self.0, permuted),
                 8 => permuted,
+                12 => _mm256_alignr_epi8::<8>(permuted, prev.0),
+                16 => prev.0,
                 _ => core::hint::unreachable_unchecked(),
             })
         }
@@ -283,6 +282,19 @@ impl ScoreVec for AvxScore {
         let mut buf = [0u16; 16];
         unsafe { _mm256_storeu_si256(buf.as_mut_ptr() as *mut __m256i, self.0) };
         buf.to_vec()
+    }
+}
+
+/// `[prev_high, self_low]`, the window cross-lane shifts splice from. An
+/// insert of `self`'s low half rather than `vperm2i128`, since `self` is
+/// usually on the row's dependency chain and the insert is faster on AMD
+#[inline(always)]
+unsafe fn prev_high_self_low(prev: __m256i, this: __m256i) -> __m256i {
+    unsafe {
+        _mm256_inserti128_si256::<1>(
+            _mm256_castsi128_si256(_mm256_extracti128_si256::<1>(prev)),
+            _mm256_castsi256_si128(this),
+        )
     }
 }
 
@@ -394,12 +406,12 @@ impl MaskVec for AvxU8Bytes {
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         unsafe {
-            // permute2x128(prev, self, 0x21) = (low = prev_high, high = self_low)
+            // permuted = (low = prev_high, high = self_low)
             // alignr_epi8 then runs per 128-bit lane, splicing
             //   low  = [prev[31], self[0..15]]
             //   high = [self[15], self[16..30]]
             // which together form the desired right-shift-by-1-byte result.
-            let permuted = _mm256_permute2x128_si256::<0x21>(prev.0, self.0);
+            let permuted = prev_high_self_low(prev.0, self.0);
             Self(_mm256_alignr_epi8::<15>(self.0, permuted))
         }
     }
@@ -446,12 +458,7 @@ impl ScoreVec for AvxU8Score {
         unsafe {
             let high = _mm256_extracti128_si256::<1>(self.0);
             let low = _mm256_castsi256_si128(self.0);
-            let m = _mm_max_epu8(low, high);
-            let m = _mm_max_epu8(m, _mm_srli_si128::<8>(m));
-            let m = _mm_max_epu8(m, _mm_srli_si128::<4>(m));
-            let m = _mm_max_epu8(m, _mm_srli_si128::<2>(m));
-            let m = _mm_max_epu8(m, _mm_srli_si128::<1>(m));
-            (_mm_extract_epi8::<0>(m) as u8) as u16
+            super::sse::horizontal_max_epu8(_mm_max_epu8(low, high))
         }
     }
     #[inline(always)]
@@ -471,11 +478,11 @@ impl ScoreVec for AvxU8Score {
         unsafe {
             const { assert!(L >= 0 && L <= 16) };
             // For L lane shift on a 32-byte vector composed of two 128-bit
-            // halves, we permute (prev_high, self_low) into one register and
+            // halves, we splice (prev_high, self_low) into one register and
             // use alignr_epi8 byte count = 16 - L, which splices each half
             // correctly. See AVX2 u16 backend for the same trick at u16
             // granularity (byte count = 16 - 2L).
-            let permuted = _mm256_permute2x128_si256::<0x21>(prev.0, self.0);
+            let permuted = prev_high_self_low(prev.0, self.0);
             Self(match L {
                 0 => self.0,
                 1 => _mm256_alignr_epi8::<15>(self.0, permuted),

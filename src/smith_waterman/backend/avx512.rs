@@ -285,16 +285,11 @@ impl ScoreVec for Avx512Score {
     #[inline(always)]
     unsafe fn horizontal_max(self) -> u16 {
         unsafe {
-            let lo = _mm512_castsi512_si256(self.0);
-            let hi = _mm512_extracti64x4_epi64::<1>(self.0);
-            let m = _mm256_max_epu16(lo, hi);
-            let lo128 = _mm256_castsi256_si128(m);
-            let hi128 = _mm256_extracti128_si256::<1>(m);
-            let m = _mm_max_epu16(lo128, hi128);
-            let m = _mm_max_epu16(m, _mm_srli_si128::<8>(m));
-            let m = _mm_max_epu16(m, _mm_srli_si128::<4>(m));
-            let m = _mm_max_epu16(m, _mm_srli_si128::<2>(m));
-            _mm_extract_epi16::<0>(m) as u16
+            // The quarters are extracted in parallel, a shorter chain than
+            // halving twice
+            let (q0, q1, q2, q3) = quarters(self.0);
+            let m = _mm_max_epu16(_mm_max_epu16(q0, q1), _mm_max_epu16(q2, q3));
+            super::sse::horizontal_max_epu16(m)
         }
     }
     #[inline(always)]
@@ -358,21 +353,9 @@ impl ScoreVec for Avx512U8Score {
     #[inline(always)]
     unsafe fn horizontal_max(self) -> u16 {
         unsafe {
-            // Fold to a 256-bit half-max, then reuse the AVX2 u8 reduction
-            // cascade. `vpreduce*` exists as an LLVM intrinsic but the
-            // manual fold is easier to reason about and reliably codegens
-            // to a tight chain.
-            let lo = _mm512_castsi512_si256(self.0);
-            let hi = _mm512_extracti64x4_epi64::<1>(self.0);
-            let m = _mm256_max_epu8(lo, hi);
-            let lo128 = _mm256_castsi256_si128(m);
-            let hi128 = _mm256_extracti128_si256::<1>(m);
-            let m = _mm_max_epu8(lo128, hi128);
-            let m = _mm_max_epu8(m, _mm_srli_si128::<8>(m));
-            let m = _mm_max_epu8(m, _mm_srli_si128::<4>(m));
-            let m = _mm_max_epu8(m, _mm_srli_si128::<2>(m));
-            let m = _mm_max_epu8(m, _mm_srli_si128::<1>(m));
-            (_mm_extract_epi8::<0>(m) as u8) as u16
+            let (q0, q1, q2, q3) = quarters(self.0);
+            let m = _mm_max_epu8(_mm_max_epu8(q0, q1), _mm_max_epu8(q2, q3));
+            super::sse::horizontal_max_epu8(m)
         }
     }
     #[inline(always)]
@@ -414,6 +397,19 @@ impl ScoreVec for Avx512U8Score {
         let mut buf = [0u8; 64];
         unsafe { _mm512_storeu_si512(buf.as_mut_ptr() as *mut __m512i, self.0) };
         buf.iter().map(|&v| v as u16).collect()
+    }
+}
+
+/// The four 128-bit quarters of `v`
+#[inline(always)]
+unsafe fn quarters(v: __m512i) -> (__m128i, __m128i, __m128i, __m128i) {
+    unsafe {
+        (
+            _mm512_castsi512_si128(v),
+            _mm512_extracti32x4_epi32::<1>(v),
+            _mm512_extracti32x4_epi32::<2>(v),
+            _mm512_extracti32x4_epi32::<3>(v),
+        )
     }
 }
 
@@ -472,6 +468,8 @@ unsafe fn shift_right_lanes<const L: i32>(prev: __m512i, cur: __m512i) -> __m512
 
         // use native cross-lane byte shifts when available
         4 => unsafe { _mm512_alignr_epi32::<15>(cur, prev) },
+        12 => unsafe { _mm512_alignr_epi32::<13>(cur, prev) },
+        48 => unsafe { _mm512_alignr_epi32::<4>(cur, prev) },
         8 => unsafe { _mm512_alignr_epi64::<7>(cur, prev) },
         16 => unsafe { _mm512_alignr_epi64::<6>(cur, prev) },
         32 => unsafe { _mm512_alignr_epi64::<4>(cur, prev) },

@@ -212,14 +212,7 @@ impl ScoreVec for SseScore {
     }
     #[inline(always)]
     unsafe fn horizontal_max(self) -> u16 {
-        unsafe {
-            // PHMINPOSUW finds the minimum; invert to find the max.
-            let all_ones = _mm_set1_epi16(-1);
-            let inverted = _mm_xor_si128(self.0, all_ones);
-            let min_pos = _mm_minpos_epu16(inverted);
-            let min_val = _mm_extract_epi16::<0>(min_pos) as u16;
-            !min_val
-        }
+        unsafe { horizontal_max_epu16(self.0) }
     }
     #[inline(always)]
     unsafe fn add(self, other: Self) -> Self {
@@ -411,14 +404,7 @@ impl ScoreVec for SseU8Score {
     }
     #[inline(always)]
     unsafe fn horizontal_max(self) -> u16 {
-        unsafe {
-            // Cascade of pairwise maxes halving the lane count each step.
-            let m = _mm_max_epu8(self.0, _mm_srli_si128::<8>(self.0));
-            let m = _mm_max_epu8(m, _mm_srli_si128::<4>(m));
-            let m = _mm_max_epu8(m, _mm_srli_si128::<2>(m));
-            let m = _mm_max_epu8(m, _mm_srli_si128::<1>(m));
-            (_mm_extract_epi8::<0>(m) as u8) as u16
-        }
+        unsafe { horizontal_max_epu8(self.0) }
     }
     #[inline(always)]
     unsafe fn add(self, other: Self) -> Self {
@@ -481,5 +467,25 @@ impl ScoreVec for SseU8Score {
         let mut buf = [0u8; 16];
         unsafe { _mm_storeu_si128(buf.as_mut_ptr() as *mut __m128i, self.0) };
         buf.iter().map(|&v| v as u16).collect()
+    }
+}
+
+/// Max of 8 u16 lanes: PHMINPOSUW finds the minimum of the inverted lanes
+#[inline(always)]
+pub(super) unsafe fn horizontal_max_epu16(v: __m128i) -> u16 {
+    unsafe {
+        let inverted = _mm_xor_si128(v, _mm_set1_epi16(-1));
+        !(_mm_cvtsi128_si32(_mm_minpos_epu16(inverted)) as u16)
+    }
+}
+
+/// Max of 16 u8 lanes: folds byte pairs into the low byte of each word, then
+/// PHMINPOSUW finds the minimum of `255 - low byte`
+#[inline(always)]
+pub(super) unsafe fn horizontal_max_epu8(v: __m128i) -> u16 {
+    unsafe {
+        let pairs = _mm_max_epu8(v, _mm_srli_epi16::<8>(v));
+        let inverted = _mm_andnot_si128(pairs, _mm_set1_epi16(0xFF));
+        (!(_mm_cvtsi128_si32(_mm_minpos_epu16(inverted)) as u8)) as u16
     }
 }
