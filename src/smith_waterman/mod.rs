@@ -25,25 +25,23 @@
 //!
 //! diagonal:    [10  9   8   16]
 //! up:          [9   8   16  11]
-//! current:     [8   7   24  9]
+//! current:     [8   7   24  10]
 //!
-//! // now we propagate the left data dependency
+//! // now we propagate the left data dependency (gaps along the haystack)
 //!
-//! left:        [0   16  11  10]
-//! // shift current right by 1 element, filling in with right most element from left
-//! shifted:     [10  8   7   24]
-//! // decay by gap extend penalty (1)
-//! // last element decayed by 5 (gap open penalty) instead of 1 (gap extend penalty)
-//! // because the previous element matched (affine gaps)
-//! decayed:     [9   7   6   19]
-//! // max with current
-//! current:     [9   7   24  19]
-//! // repeat for shifting by 2 elements
-//! shifted:     [11  10  9   7]
-//! decayed:     [9   8   7   5] // gap extend penalty * 2 or gap open penalty + extend penalty
-//! current:     [9   8   24  19]
+//! // a gap leaving a match pays the gap open penalty (5) on its first step, so
+//! // charge its difference to the gap extend penalty (1) at the source
+//! sources:     [8   7   20  10]
+//! // the previous register did the same, and its scan fills in the shifts
+//! prev scan:   [0   12  11  10]
+//! // each element takes the best source to its left, decayed by the gap extend
+//! // penalty per element crossed: shift by 1, 2 and 3 elements, then max
+//! shift 1:     [9   7   6   19]
+//! shift 2:     [9   8   6   5]
+//! shift 3:     [9   8   7   5]
+//! // wider registers repeat with shifts of 4, 8 and 12 elements, and so on
 //!
-//! final:       [8   7   24  19]
+//! final:       [9   8   24  19] <- max(current, shifts)
 //! ```
 //!
 //! Frizbee previously used inter-sequence parallelism (one needle, $LANES
@@ -215,6 +213,8 @@ pub(crate) struct ScoringVecs<S> {
     matching_case_bonus: S,
     capitalization_bonus: S,
     delimiter_bonus: S,
+    /// Gap extend penalties scaled by [`algo::ascii_gap::GAP_SHIFTS`]
+    gap_steps: [S; algo::ascii_gap::GAP_STEPS],
 }
 
 #[derive(Debug, Clone)]
@@ -222,16 +222,21 @@ pub(crate) struct SmithWaterman<B: Backend> {
     needle: String,
     needle_simd: Vec<(B::Bytes, B::Bytes)>,
     needle_unicode: Vec<UnicodeChar>,
+    /// Each needle scalar's UTF-8 bytes splatted, then its case-flipped bytes
+    #[allow(clippy::type_complexity)]
+    needle_unicode_simd: Vec<([B::Bytes; 4], [B::Bytes; 4])>,
     case_sensitive: bool,
     scoring: Scoring,
     scoring_vecs: ScoringVecs<B::Score>,
     score_matrix: Matrix<B>,
     match_masks: Matrix<B>,
-    unicode_pending_gap_open_masks: Vec<B::Score>,
     /// Number of LANES-wide chunks (incl. the leading zero column) actually
     /// consumed by the most recent `score_haystack` call. The matrix stride is
     /// always sized for `MAX_HAYSTACK_LEN` for zero-free reuse.
     haystack_chunks: usize,
+    /// Per row, the previous chunk's scores and gap scores, then as many
+    /// zeroed entries for the first chunk
+    chunk_rows: Vec<(B::Score, B::Score)>,
 }
 
 /// Picks u8 or u16 kernel based on the max possible score (see
@@ -360,7 +365,7 @@ mod tests {
         let mut matcher =
             SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), case_sensitive);
 
-        let score = matcher.score_haystack(haystack.as_bytes(), true);
+        let score = matcher.score_haystack_matrix(haystack.as_bytes(), true);
         matcher
             .has_alignment_path(score, max_typos)
             .then_some(score)

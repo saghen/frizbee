@@ -48,55 +48,7 @@ impl<const SSE41: bool> Backend for BackendSSE<SSE41> {
         unsafe { SseScore(_mm_unpacklo_epi8(m.0, m.0)) }
     }
 
-    #[inline(always)]
-    unsafe fn propagate_horizontal_gaps(
-        row: Self::Score,
-        adjacent_row: Self::Score,
-        match_mask: Self::Score,
-        adjacent_match_mask: Self::Score,
-        gap_open_penalty: Self::Score,
-        gap_extend_penalty: Self::Score,
-    ) -> Self::Score {
-        unsafe {
-            ascii_gap::propagate_8_lane::<Self>(
-                row,
-                adjacent_row,
-                match_mask,
-                adjacent_match_mask,
-                gap_open_penalty,
-                gap_extend_penalty,
-            )
-        }
-    }
-
-    #[inline(always)]
-    unsafe fn propagate_horizontal_unicode_gaps(
-        row: Self::Score,
-        adjacent_row: Self::Score,
-        pending_gap_open_mask: Self::Score,
-        adjacent_pending_gap_open_mask: Self::Score,
-        continuation_gap_extend_penalty: Self::Score,
-        adjacent_continuation_gap_extend_penalty: Self::Score,
-        scalar_end_mask: Self::Score,
-        adjacent_scalar_end_mask: Self::Score,
-        gap_open_penalty: Self::Score,
-        gap_extend_penalty: Self::Score,
-    ) -> (Self::Score, Self::Score) {
-        unsafe {
-            unicode_gap::propagate_unicode_8_lane::<Self>(
-                row,
-                adjacent_row,
-                pending_gap_open_mask,
-                adjacent_pending_gap_open_mask,
-                continuation_gap_extend_penalty,
-                adjacent_continuation_gap_extend_penalty,
-                scalar_end_mask,
-                adjacent_scalar_end_mask,
-                gap_open_penalty,
-                gap_extend_penalty,
-            )
-        }
-    }
+    gap_dispatch!(8);
 }
 
 impl<const SSE41: bool> SseBytes<SSE41> {
@@ -222,10 +174,6 @@ impl<const SSE41: bool> MaskVec for SseBytes<SSE41> {
     #[inline(always)]
     unsafe fn not(self) -> Self {
         unsafe { Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1))) }
-    }
-    #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        unsafe { (_mm_movemask_epi8(self.0) & 0x00ff) == 0 }
     }
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
@@ -377,55 +325,7 @@ impl<const SSE41: bool> Backend for BackendSSEU8<SSE41> {
         SseU8Score(m.0)
     }
 
-    #[inline(always)]
-    unsafe fn propagate_horizontal_gaps(
-        row: Self::Score,
-        adjacent_row: Self::Score,
-        match_mask: Self::Score,
-        adjacent_match_mask: Self::Score,
-        gap_open_penalty: Self::Score,
-        gap_extend_penalty: Self::Score,
-    ) -> Self::Score {
-        unsafe {
-            ascii_gap::propagate_16_lane::<Self>(
-                row,
-                adjacent_row,
-                match_mask,
-                adjacent_match_mask,
-                gap_open_penalty,
-                gap_extend_penalty,
-            )
-        }
-    }
-
-    #[inline(always)]
-    unsafe fn propagate_horizontal_unicode_gaps(
-        row: Self::Score,
-        adjacent_row: Self::Score,
-        pending_gap_open_mask: Self::Score,
-        adjacent_pending_gap_open_mask: Self::Score,
-        continuation_gap_extend_penalty: Self::Score,
-        adjacent_continuation_gap_extend_penalty: Self::Score,
-        scalar_end_mask: Self::Score,
-        adjacent_scalar_end_mask: Self::Score,
-        gap_open_penalty: Self::Score,
-        gap_extend_penalty: Self::Score,
-    ) -> (Self::Score, Self::Score) {
-        unsafe {
-            unicode_gap::propagate_unicode_16_lane::<Self>(
-                row,
-                adjacent_row,
-                pending_gap_open_mask,
-                adjacent_pending_gap_open_mask,
-                continuation_gap_extend_penalty,
-                adjacent_continuation_gap_extend_penalty,
-                scalar_end_mask,
-                adjacent_scalar_end_mask,
-                gap_open_penalty,
-                gap_extend_penalty,
-            )
-        }
-    }
+    gap_dispatch!(16);
 }
 
 impl<const SSE41: bool> BytesVec for SseU8Bytes<SSE41> {
@@ -493,10 +393,6 @@ impl<const SSE41: bool> MaskVec for SseU8Bytes<SSE41> {
     #[inline(always)]
     unsafe fn not(self) -> Self {
         unsafe { Self(_mm_xor_si128(self.0, _mm_set1_epi32(-1))) }
-    }
-    #[inline(always)]
-    unsafe fn is_zero(self) -> bool {
-        unsafe { _mm_movemask_epi8(self.0) == 0 }
     }
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {

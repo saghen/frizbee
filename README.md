@@ -165,23 +165,21 @@ gap_penalty: [-1  -1  -1  -1]
 
 current:     [8   7   24  10] <- max(diagonal + match, up + gap_penalty)
 
-// now we propagate the left data dependency
+// now we propagate the left data dependency (gaps along the haystack)
 
-left:        [0   16  11  10]
-// shift `current` right by 1 element, filling in with right most element from left
-shifted:     [10  8   7   24]
-// decay by gap extend penalty (1)
-// last element decayed by 5 (gap open penalty) instead of 1 (gap extend penalty)
-// because the previous element matched (affine gaps)
-decayed:     [9   7   6   19]
-// max with current
-current:     [9   7   24  19]
-// repeat for shifting by 2 elements
-shifted:     [11  10  9   7]
-decayed:     [9   8   7   5] <- gap extend penalty * 2 or gap open penalty + extend penalty
-current:     [9   8   24  19]
+// a gap leaving a match pays the gap open penalty (5) on its first step, so
+// charge its difference to the gap extend penalty (1) at the source
+sources:     [8   7   20  10]
+// the previous register did the same, and its scan fills in the shifts
+prev scan:   [0   12  11  10]
+// each element takes the best source to its left, decayed by the gap extend
+// penalty per element crossed: shift by 1, 2 and 3 elements, then max
+shift 1:     [9   7   6   19]
+shift 2:     [9   8   6   5]
+shift 3:     [9   8   7   5]
+// wider registers repeat with shifts of 4, 8 and 12 elements, and so on
 
-final:       [8   7   24  19]
+final:       [9   8   24  19] <- max(current, shifts)
 ```
 
 Frizbee previously used inter-sequence parallelism (one needle, $LANES haystacks) but this performed only slightly better than sequential layout due to requiring interleaving the haystacks and bucketing based on haystack length, while performing worse in parallel due to the required bucketing. This may be revisited in the future (PRs welcome, search git history for "bucket").
@@ -229,7 +227,7 @@ match needle_char_len {
 
 #### Smith Waterman
 
-The matrix receives a row per needle UTF-8 codepoint, rather than per needle byte. This significantly reduces the size of the matrix versus the naive path (i.e. 5 chars of 3 bytes/char would be 15 rows vs 5 rows). The match mask uses a similar approach to the prefilter with the offset loads. The tricky part was applying the gap propagation, since we only want to apply a gap penalty once per multi-byte haystack char. The solution was to keep track of the number of lead/continuation bytes we've crossed, see the [docs on the implementation](src/smith_waterman/algo/unicode_gap.rs).
+The matrix receives a row per needle UTF-8 codepoint, rather than per needle byte. This significantly reduces the size of the matrix versus the naive path (i.e. 5 chars of 3 bytes/char would be 15 rows vs 5 rows). The match mask uses a similar approach to the prefilter with the offset loads. The tricky part was applying the gap propagation, since we only want to apply a gap penalty once per multi-byte haystack char. The solution was to let scores cross continuation bytes for free and to decay gaps only on the other bytes, with the decays computed once per chunk, see the [docs on the implementation](src/smith_waterman/algo/unicode_gap.rs).
 
 #### Limitations
 

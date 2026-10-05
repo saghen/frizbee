@@ -20,6 +20,36 @@
 //!   - WASM:    LANES = 8/16  (scoring u16 x 8 = 128-bit or u8 x 16 = 128-bit)
 //!   - Scalar:  LANES = 8/16 (fallback for non-SIMD systems)
 
+/// Implements a backend's gap propagation entry points by forwarding to the
+/// helpers specialized for its lane count
+macro_rules! gap_dispatch {
+    (8) => { gap_dispatch!(@impl scan_8_lane, unicode_steps_8_lane); };
+    (16) => { gap_dispatch!(@impl scan_16_lane, unicode_steps_16_lane); };
+    (32) => { gap_dispatch!(@impl scan_32_lane, unicode_steps_32_lane); };
+    (64) => { gap_dispatch!(@impl scan_64_lane, unicode_steps_64_lane); };
+    (@impl $scan:ident, $unicode_steps:ident) => {
+        #[inline(always)]
+        unsafe fn propagate_horizontal_gaps(
+            sources: Self::Score,
+            prev_scan: Self::Score,
+            steps: &[Self::Score; ascii_gap::GAP_STEPS],
+            scores: Self::Score,
+        ) -> (Self::Score, Self::Score) {
+            unsafe { ascii_gap::$scan::<Self>(sources, prev_scan, steps, scores) }
+        }
+
+        #[inline(always)]
+        unsafe fn unicode_gap_steps(
+            step_1: Self::Score,
+            prev_steps: &[Self::Score; ascii_gap::GAP_STEPS],
+        ) -> [Self::Score; ascii_gap::GAP_STEPS] {
+            unsafe { unicode_gap::$unicode_steps::<Self>(step_1, prev_steps) }
+        }
+    };
+}
+
+use crate::smith_waterman::algo::ascii_gap::GAP_STEPS;
+
 #[cfg(target_arch = "x86_64")]
 mod avx;
 #[cfg(target_arch = "x86_64")]
@@ -74,45 +104,28 @@ pub trait Backend: Sized + core::fmt::Debug + Clone + 'static {
     /// The backend's required target features must be enabled at the call site.
     unsafe fn widen_mask(m: Self::Mask) -> Self::Score;
 
-    /// Propagate horizontal (left-direction) gaps across a score row.
-    ///
-    /// The number of unrolled stages is fixed per backend: 8-lane backends do
-    /// 3 stages (shifts of 1, 2, 4 lanes), 16-lane backends do 4 stages (1, 2,
-    /// 4, 8), 32-lane backends do 5 stages, and 64-lane backends do 6 stages.
+    /// Propagate horizontal (left-direction) gaps across a score row, see
+    /// [`crate::smith_waterman::algo::ascii_gap`]. Returns the scan and the
+    /// scan folded with `scores`.
     ///
     /// # Safety
     /// The backend's required target features must be enabled at the call site.
     unsafe fn propagate_horizontal_gaps(
-        row: Self::Score,
-        adjacent_row: Self::Score,
-        match_mask: Self::Score,
-        adjacent_match_mask: Self::Score,
-        gap_open_penalty: Self::Score,
-        gap_extend_penalty: Self::Score,
-    ) -> Self::Score;
+        sources: Self::Score,
+        prev_scan: Self::Score,
+        steps: &[Self::Score; GAP_STEPS],
+        scores: Self::Score,
+    ) -> (Self::Score, Self::Score);
 
-    /// Propagate Unicode-aware horizontal gaps across a score row.
-    ///
-    /// UTF-8 body bytes are transport lanes: they can carry scores and pending
-    /// gap-open state without charging a gap step. Scalar-end lanes charge the
-    /// affine gap cost. The return value includes the row scores and the
-    /// pending gap-open state needed by the next haystack chunk.
+    /// Per-chunk steps of the Unicode gap propagation, see
+    /// [`crate::smith_waterman::algo::unicode_gap`]
     ///
     /// # Safety
     /// The backend's required target features must be enabled at the call site.
-    #[allow(clippy::too_many_arguments)]
-    unsafe fn propagate_horizontal_unicode_gaps(
-        row: Self::Score,
-        adjacent_row: Self::Score,
-        pending_gap_open_mask: Self::Score,
-        adjacent_pending_gap_open_mask: Self::Score,
-        continuation_gap_extend_penalty: Self::Score,
-        adjacent_continuation_gap_extend_penalty: Self::Score,
-        scalar_end_mask: Self::Score,
-        adjacent_scalar_end_mask: Self::Score,
-        gap_open_penalty: Self::Score,
-        gap_extend_penalty: Self::Score,
-    ) -> (Self::Score, Self::Score);
+    unsafe fn unicode_gap_steps(
+        step_1: Self::Score,
+        prev_steps: &[Self::Score; GAP_STEPS],
+    ) -> [Self::Score; GAP_STEPS];
 }
 
 /// A byte-wide vector with `LANES` meaningful bytes
@@ -188,12 +201,6 @@ pub trait MaskVec: Copy + core::fmt::Debug {
     /// # Safety
     /// The backend's target features must be enabled at the call site.
     unsafe fn not(self) -> Self;
-
-    /// Whether every lane is false.
-    ///
-    /// # Safety
-    /// The backend's target features must be enabled at the call site.
-    unsafe fn is_zero(self) -> bool;
 
     /// Shift right by 1 lane, filling lane 0 with the highest meaningful lane
     /// of `prev`.

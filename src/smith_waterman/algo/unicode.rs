@@ -1,4 +1,4 @@
-use super::MAX_HAYSTACK_LEN;
+use super::{MAX_HAYSTACK_LEN, ascii_gap::GAP_STEPS};
 use crate::smith_waterman::{
     ScoringVecs, SmithWaterman,
     backend::{Backend, BytesVec, MaskVec, ScoreVec},
@@ -6,8 +6,33 @@ use crate::smith_waterman::{
 };
 
 impl<B: Backend> SmithWaterman<B> {
+    /// Scores the haystack without filling the matrices, unless they're
+    /// needed for the match's end column
     #[inline(always)]
     pub(crate) fn score_haystack_unicode(&mut self, haystack: &[u8], include_prefix: bool) -> u16 {
+        self.score_haystack_unicode_impl::<{ cfg!(feature = "match_end_col") }>(
+            haystack,
+            include_prefix,
+        )
+    }
+
+    /// Scores the haystack and fills the score matrix for the
+    /// alignment path
+    #[inline(always)]
+    pub(crate) fn score_haystack_unicode_matrix(
+        &mut self,
+        haystack: &[u8],
+        include_prefix: bool,
+    ) -> u16 {
+        self.score_haystack_unicode_impl::<true>(haystack, include_prefix)
+    }
+
+    #[inline(always)]
+    fn score_haystack_unicode_impl<const STORE: bool>(
+        &mut self,
+        haystack: &[u8],
+        include_prefix: bool,
+    ) -> u16 {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(
                 self.needle.as_bytes(),
@@ -33,7 +58,7 @@ impl<B: Backend> SmithWaterman<B> {
         // needed between calls
         let score_matrix = &mut self.score_matrix;
         let match_masks = &mut self.match_masks;
-        let unicode_pending_gap_open_masks = &mut self.unicode_pending_gap_open_masks;
+        let chunk_rows = self.chunk_rows.as_mut_ptr();
 
         unsafe {
             let ScoringVecs {
@@ -44,17 +69,11 @@ impl<B: Backend> SmithWaterman<B> {
                 matching_case_bonus,
                 capitalization_bonus,
                 delimiter_bonus,
+                ..
             } = self.scoring_vecs;
 
             let final_row_idx = self.needle_unicode.len();
             let mut max_scores = B::Score::zero();
-
-            for pending_gap_open_mask in unicode_pending_gap_open_masks
-                .iter_mut()
-                .take(final_row_idx + 1)
-            {
-                *pending_gap_open_mask = B::Score::zero();
-            }
 
             // Like the ASCII scorer, Unicode scoring is haystack-major: each
             // chunk computes its haystack-side bonuses once, then walks the
@@ -69,8 +88,8 @@ impl<B: Backend> SmithWaterman<B> {
             };
             let mut prev_chunk_char_is_delimiter_mask = B::Mask::zero();
             let mut prev_chunk_is_lower_mask = B::Mask::zero();
-            let mut prev_chunk_continuation_gap_extend_penalty = B::Score::zero();
-            let mut prev_chunk_scalar_start_mask = B::Score::zero();
+            let mut prev_chunk_continuation_score_mask = B::Score::zero();
+            let mut prev_chunk_gap_steps = [B::Score::zero(); GAP_STEPS];
 
             for col_idx in 1..haystack_chunks {
                 let chunk_start = (col_idx - 1) * B::LANES;
@@ -81,11 +100,29 @@ impl<B: Backend> SmithWaterman<B> {
                     B::Bytes::load_partial(haystack.as_ptr(), chunk_start, haystack.len()),
                 ];
                 let haystack_chunk = haystack_byte_chunks[3];
-                let (continuation_mask, scalar_start_mask) =
+                let (continuation_mask, not_scalar_start_mask) =
                     unicode_scalar_masks::<B>(haystack_chunk, haystack.len(), chunk_start);
-                let scalar_start_score_mask = B::widen_mask(scalar_start_mask);
-                let continuation_gap_extend_penalty =
-                    B::widen_mask(continuation_mask).and(gap_extend_penalty);
+
+                // Lanes that receive a transported score from 1 and 2 lanes
+                // back
+                let continuation_score_mask = B::widen_mask(continuation_mask);
+                let continuation_2_mask = continuation_score_mask.and(
+                    continuation_score_mask
+                        .shift_right_padded::<1>(prev_chunk_continuation_score_mask),
+                );
+                prev_chunk_continuation_score_mask = continuation_score_mask;
+
+                // Lanes that don't start a scalar saturate the diagonal and up
+                // penalties, so their scores are zero
+                let not_scalar_start_score_mask = B::widen_mask(not_scalar_start_mask);
+                let scalar_mismatch_penalty = mismatch_penalty.add(not_scalar_start_score_mask);
+                let scalar_gap_extend_penalty = gap_extend_penalty.add(not_scalar_start_score_mask);
+
+                let gap_steps = B::unicode_gap_steps(
+                    B::widen_mask(continuation_mask.not()).and(gap_extend_penalty),
+                    &prev_chunk_gap_steps,
+                );
+                prev_chunk_gap_steps = gap_steps;
 
                 // Bonus for matching a capital letter after a lowercase ASCII
                 // letter
@@ -128,13 +165,22 @@ impl<B: Backend> SmithWaterman<B> {
                     .add(match_score);
                 prefix_bonus_masked = B::Score::zero();
 
-                let mut up_gap_mask = B::Score::zero();
+                // First chunk reads the zeroed half, so no reset per haystack
+                let prev_chunk_rows = if col_idx == 1 {
+                    chunk_rows.add(self.needle.len())
+                } else {
+                    chunk_rows
+                };
+                // Up gaps pay the open penalty below a match
+                let mut up_penalty = scalar_gap_extend_penalty;
+                // The previous chunk's row above, shifted in by the diagonal
+                let mut prev_chunk_prev_row_scores = B::Score::zero();
                 let mut prev_row_scores = B::Score::zero();
-                let mut row_scores = B::Score::zero();
 
-                for (row_idx, needle_char) in self
+                for (row_idx, (needle_char, (chars, flipped_chars))) in self
                     .needle_unicode
                     .iter()
+                    .zip(&self.needle_unicode_simd)
                     .enumerate()
                     .map(|(i, c)| (i + 1, c))
                 {
@@ -142,71 +188,76 @@ impl<B: Backend> SmithWaterman<B> {
                     // Match the whole UTF-8 needle scalar against haystack byte
                     // windows starting at each lane, only the first byte of a
                     // multi-byte Unicode scalar can be marked as a match
-                    let exact_case_match_mask = unicode_char_match_mask::<B>(
-                        haystack_byte_chunks,
-                        scalar_start_mask,
-                        needle_char.len,
-                        needle_char.chars,
-                    );
-                    let flipped_case_match_mask = unicode_char_match_mask::<B>(
-                        haystack_byte_chunks,
-                        scalar_start_mask,
-                        needle_char.len,
-                        needle_char.flipped_chars,
-                    );
-                    let match_mask =
-                        B::widen_mask(exact_case_match_mask.or(flipped_case_match_mask));
-                    let exact_case_match_mask = B::widen_mask(exact_case_match_mask);
+                    let exact_case_match_mask =
+                        unicode_char_match_mask::<B>(&haystack_byte_chunks, needle_char.len, chars);
+                    // Caseless scripts have no flipped variant to check
+                    let match_mask = B::widen_mask(if needle_char.has_flip {
+                        exact_case_match_mask.or(unicode_char_match_mask::<B>(
+                            &haystack_byte_chunks,
+                            needle_char.len,
+                            flipped_chars,
+                        ))
+                    } else {
+                        exact_case_match_mask
+                    });
+                    let match_bonuses_masked = match_mask
+                        .and(match_and_masked_bonuses)
+                        .add(B::widen_mask(exact_case_match_mask).and(matching_case_bonus));
 
                     // Diagonal - typical match/mismatch, advancing one cell
-                    let diag_scores = {
-                        let diag = prev_row_scores
-                            .shift_right_padded::<1>(score_matrix.get(row_idx - 1, col_idx - 1));
-                        // Add bonuses for matches
-                        let diag = diag.add(match_mask.and(match_and_masked_bonuses));
+                    let diag_scores = prev_row_scores
+                        .shift_right_padded::<1>(prev_chunk_prev_row_scores)
+                        .add(match_bonuses_masked)
                         // Always pay the mismatch penalty
-                        let diag = diag.subs(mismatch_penalty);
-                        // Reward matching the needle's exact case
-                        let diag = diag.add(exact_case_match_mask.and(matching_case_bonus));
-                        diag.and(scalar_start_score_mask)
-                    };
+                        .subs(scalar_mismatch_penalty);
 
                     // Up - skipping a char in the needle
-                    let up_scores = {
-                        let after_extend = prev_row_scores.subs(gap_extend_penalty);
-                        let up = after_extend.subs(up_gap_mask.and(gap_open_penalty));
-                        up.and(scalar_start_score_mask)
-                    };
+                    let up_scores = prev_row_scores.subs(up_penalty);
 
-                    // Max of diagonal, up, and left (after gap extension)
-                    // Left skips bytes in the haystack
-                    let (next_row_scores, pending_gap_open_mask) =
-                        B::propagate_horizontal_unicode_gaps(
-                            diag_scores.max(up_scores),
-                            score_matrix.get(row_idx, col_idx - 1),
-                            match_mask,
-                            *unicode_pending_gap_open_masks.get_unchecked(row_idx),
-                            continuation_gap_extend_penalty,
-                            prev_chunk_continuation_gap_extend_penalty,
-                            scalar_start_score_mask,
-                            prev_chunk_scalar_start_mask,
-                            gap_open_penalty,
-                            gap_extend_penalty,
+                    // Left - skipping scalars in the haystack, with the gap
+                    // open penalty paid at the source (see the ASCII row)
+                    let gap_open_penalty_masked = match_mask.and(gap_open_penalty);
+                    let mut row_scores = diag_scores.max(up_scores);
+                    // Transport and gaps can't raise the last row's max:
+                    // skip them there unless the matrix is stored
+                    if STORE || row_idx != final_row_idx {
+                        let gap_source_scores = row_scores.subs(gap_open_penalty_masked);
+                        let (prev_chunk_row_scores, prev_chunk_gap_scores) =
+                            prev_chunk_rows.add(row_idx - 1).read();
+
+                        // Scores cross continuation bytes for free
+                        let scores = row_scores.max(
+                            row_scores
+                                .shift_right_padded::<1>(prev_chunk_row_scores)
+                                .and(continuation_score_mask),
+                        );
+                        let scores = scores.max(
+                            scores
+                                .shift_right_padded::<2>(prev_chunk_row_scores)
+                                .and(continuation_2_mask),
                         );
 
-                    score_matrix.set(row_idx, col_idx, next_row_scores);
-                    match_masks.set(row_idx, col_idx, match_mask);
-                    *unicode_pending_gap_open_masks.get_unchecked_mut(row_idx) =
-                        pending_gap_open_mask;
-                    prev_row_scores = next_row_scores;
-                    row_scores = next_row_scores;
-                    up_gap_mask = match_mask;
+                        let gap_scores;
+                        (gap_scores, row_scores) = B::propagate_horizontal_gaps(
+                            gap_source_scores,
+                            prev_chunk_gap_scores,
+                            &gap_steps,
+                            scores,
+                        );
+                        chunk_rows.add(row_idx - 1).write((row_scores, gap_scores));
+                        prev_chunk_prev_row_scores = prev_chunk_row_scores;
+
+                        if STORE {
+                            score_matrix.set(row_idx, col_idx, row_scores);
+                            match_masks.set(row_idx, col_idx, match_mask);
+                        }
+                    }
+                    prev_row_scores = row_scores;
+                    up_penalty = scalar_gap_extend_penalty.add(gap_open_penalty_masked);
                 }
 
                 // Last row of the matrix at this chunk
-                max_scores = max_scores.max(row_scores);
-                prev_chunk_continuation_gap_extend_penalty = continuation_gap_extend_penalty;
-                prev_chunk_scalar_start_mask = scalar_start_score_mask;
+                max_scores = max_scores.max(prev_row_scores);
             }
 
             max_scores.horizontal_max()
@@ -214,29 +265,25 @@ impl<B: Backend> SmithWaterman<B> {
     }
 }
 
+/// Lanes where the needle scalar's UTF-8 bytes start. A scalar's lead byte is
+/// never a continuation byte, so this only matches at scalar starts.
 #[inline(always)]
 unsafe fn unicode_char_match_mask<B: Backend>(
-    haystack_chunks: [B::Bytes; 4],
-    scalar_start_mask: B::Mask,
+    haystack_chunks: &[B::Bytes; 4],
     char_len: usize,
-    chars: [u8; 4],
+    chars: &[B::Bytes; 4],
 ) -> B::Mask {
     unsafe {
-        let mut mask = haystack_chunks[4 - char_len]
-            .eq(B::Bytes::splat(chars[char_len - 1]))
-            .and(scalar_start_mask);
-
-        if char_len > 1 && !mask.is_zero() {
-            for byte_idx in 0..(char_len - 1) {
-                let haystack_bytes = haystack_chunks[3 - byte_idx];
-                mask = mask.and(haystack_bytes.eq(B::Bytes::splat(chars[byte_idx])));
-            }
+        // No early exit, the branch mispredicts
+        let mut mask = haystack_chunks[3].eq(chars[0]);
+        for byte_idx in 1..char_len {
+            mask = mask.and(haystack_chunks[3 - byte_idx].eq(chars[byte_idx]));
         }
-
         mask
     }
 }
 
+/// Continuation byte lanes, and lanes that don't start a haystack scalar
 #[inline(always)]
 unsafe fn unicode_scalar_masks<B: Backend>(
     current_bytes: B::Bytes,
@@ -244,15 +291,13 @@ unsafe fn unicode_scalar_masks<B: Backend>(
     start: usize,
 ) -> (B::Mask, B::Mask) {
     unsafe {
-        let valid_mask = valid_haystack_lanes::<B>(haystack_len, start);
-
+        // Zeroed lanes past the haystack's end aren't continuation bytes
         let continuation_mask = current_bytes
             .gt(B::Bytes::splat(0x7f))
-            .and(current_bytes.lt(B::Bytes::splat(0xc0)))
-            .and(valid_mask);
-        let scalar_start_mask = continuation_mask.not().and(valid_mask);
-
-        (continuation_mask, scalar_start_mask)
+            .and(current_bytes.lt(B::Bytes::splat(0xc0)));
+        let not_scalar_start_mask =
+            continuation_mask.or(valid_haystack_lanes::<B>(haystack_len, start).not());
+        (continuation_mask, not_scalar_start_mask)
     }
 }
 

@@ -25,8 +25,14 @@ impl<B: Backend> SmithWaterman<B> {
             .collect();
         let needle_unicode = case_needle_unicode(needle, case_sensitive);
         let needle_len = needle.len();
-        let unicode_pending_gap_open_masks = (0..(needle_unicode.len() + 1))
-            .map(|_| unsafe { B::Score::zero() })
+        let needle_unicode_simd = needle_unicode
+            .iter()
+            .map(|c| unsafe {
+                (
+                    c.chars.map(|b| B::Bytes::splat(b)),
+                    c.flipped_chars.map(|b| B::Bytes::splat(b)),
+                )
+            })
             .collect();
         let scoring_vecs = unsafe {
             ScoringVecs {
@@ -43,19 +49,21 @@ impl<B: Backend> SmithWaterman<B> {
                 matching_case_bonus: B::Score::splat(scoring.matching_case_bonus),
                 capitalization_bonus: B::Score::splat(scoring.capitalization_bonus),
                 delimiter_bonus: B::Score::splat(scoring.delimiter_bonus),
+                gap_steps: ascii_gap::gap_steps::<B>(scoring.gap_extend_penalty),
             }
         };
         Self {
             needle: needle.to_string(),
             needle_simd,
             needle_unicode,
+            needle_unicode_simd,
             case_sensitive,
             scoring: scoring.clone(),
             scoring_vecs,
             score_matrix: Matrix::new(needle_len, MAX_HAYSTACK_LEN),
             match_masks: Matrix::new(needle_len, MAX_HAYSTACK_LEN),
-            unicode_pending_gap_open_masks,
             haystack_chunks: 0,
+            chunk_rows: vec![unsafe { (B::Score::zero(), B::Score::zero()) }; 2 * needle_len],
         }
     }
 
@@ -85,7 +93,7 @@ impl<B: Backend> SmithWaterman<B> {
             .unwrap_or_else(|| (0, vec![]));
         }
 
-        let score = self.score_haystack(haystack, haystack_start_pos == 0);
+        let score = self.score_haystack_matrix(haystack, haystack_start_pos == 0);
         if score == 0 {
             return (score, Vec::new());
         }
@@ -133,7 +141,7 @@ impl<B: Backend> SmithWaterman<B> {
             .unwrap_or_else(|| (0, vec![]));
         }
 
-        let score = self.score_haystack_unicode(haystack, haystack_start_pos == 0);
+        let score = self.score_haystack_unicode_matrix(haystack, haystack_start_pos == 0);
         if score == 0 {
             return (score, Vec::new());
         }

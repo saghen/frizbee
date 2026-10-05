@@ -6,8 +6,26 @@ use crate::smith_waterman::{
 };
 
 impl<B: Backend> SmithWaterman<B> {
+    /// Scores the haystack without filling the matrices, unless they're
+    /// needed for the match's end column
     #[inline(always)]
     pub(crate) fn score_haystack(&mut self, haystack: &[u8], include_prefix: bool) -> u16 {
+        self.score_haystack_impl::<{ cfg!(feature = "match_end_col") }>(haystack, include_prefix)
+    }
+
+    /// Scores the haystack and fills the score matrix for the
+    /// alignment path
+    #[inline(always)]
+    pub(crate) fn score_haystack_matrix(&mut self, haystack: &[u8], include_prefix: bool) -> u16 {
+        self.score_haystack_impl::<true>(haystack, include_prefix)
+    }
+
+    #[inline(always)]
+    fn score_haystack_impl<const STORE: bool>(
+        &mut self,
+        haystack: &[u8],
+        include_prefix: bool,
+    ) -> u16 {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(
                 self.needle.as_bytes(),
@@ -29,6 +47,8 @@ impl<B: Backend> SmithWaterman<B> {
         // needed between calls
         let score_matrix = &mut self.score_matrix;
         let match_masks = &mut self.match_masks;
+        let chunk_rows = self.chunk_rows.as_mut_ptr();
+        let needle_len = self.needle.len();
 
         unsafe {
             let ScoringVecs {
@@ -39,6 +59,7 @@ impl<B: Backend> SmithWaterman<B> {
                 matching_case_bonus,
                 capitalization_bonus,
                 delimiter_bonus,
+                gap_steps,
             } = self.scoring_vecs;
 
             // State
@@ -52,11 +73,12 @@ impl<B: Backend> SmithWaterman<B> {
             let mut prev_chunk_is_lower_mask = B::Mask::zero();
             let mut max_scores = B::Score::zero();
 
-            for (col_idx, haystack_chunk) in (0..(haystack_chunks - 1)).map(|col_idx| {
-                let haystack_chunk =
-                    B::Bytes::load_partial(haystack.as_ptr(), col_idx * B::LANES, haystack.len());
-                (col_idx + 1, haystack_chunk)
-            }) {
+            for col_idx in 1..haystack_chunks {
+                let haystack_chunk = B::Bytes::load_partial(
+                    haystack.as_ptr(),
+                    (col_idx - 1) * B::LANES,
+                    haystack.len(),
+                );
                 // Bonus for matching a capital letter after a lowercase letter
                 let is_upper_mask = haystack_chunk
                     .lt(B::Bytes::splat(b'Z' + 1))
@@ -96,9 +118,17 @@ impl<B: Backend> SmithWaterman<B> {
                     .add(prefix_bonus_masked)
                     .add(match_score);
 
-                let mut up_gap_mask = B::Score::zero();
+                // First chunk reads the zeroed half, so no reset per haystack
+                let prev_chunk_rows = if col_idx == 1 {
+                    chunk_rows.add(needle_len)
+                } else {
+                    chunk_rows
+                };
+                // Up gaps pay the open penalty below a match
+                let mut up_penalty = gap_extend_penalty;
+                // The previous chunk's row above, shifted in by the diagonal
+                let mut prev_chunk_prev_row_scores = B::Score::zero();
                 let mut prev_row_scores = B::Score::zero();
-                let mut row_scores = B::Score::zero();
 
                 for (row_idx, (needle_char, flipped_case_needle_char)) in
                     self.needle_simd.iter().enumerate().map(|(i, c)| (i + 1, c))
@@ -108,44 +138,51 @@ impl<B: Backend> SmithWaterman<B> {
                     let flipped_case_match_mask = flipped_case_needle_char.eq(haystack_chunk);
                     let match_mask =
                         B::widen_mask(exact_case_match_mask.or(flipped_case_match_mask));
-                    let exact_case_match_mask = B::widen_mask(exact_case_match_mask);
+                    let match_bonuses_masked = match_mask
+                        .and(match_and_masked_bonuses)
+                        .add(B::widen_mask(exact_case_match_mask).and(matching_case_bonus));
 
                     // Diagonal - typical match/mismatch, advancing one cell
-                    let diag_scores = {
-                        let diag = prev_row_scores
-                            .shift_right_padded::<1>(score_matrix.get(row_idx - 1, col_idx - 1));
-                        // Add bonuses for matches
-                        let diag = diag.add(match_mask.and(match_and_masked_bonuses));
+                    let diag_scores = prev_row_scores
+                        .shift_right_padded::<1>(prev_chunk_prev_row_scores)
+                        .add(match_bonuses_masked)
                         // Always pay the mismatch penalty
-                        let diag = diag.subs(mismatch_penalty);
-                        // Reward matching the needle's exact case
-                        diag.add(exact_case_match_mask.and(matching_case_bonus))
-                    };
+                        .subs(mismatch_penalty);
 
                     // Up - skipping a char in the needle
-                    let up_scores = {
-                        let after_extend = prev_row_scores.subs(gap_extend_penalty);
-                        after_extend.subs(up_gap_mask.and(gap_open_penalty))
-                    };
+                    let up_scores = prev_row_scores.subs(up_penalty);
 
-                    // Max of diagonal, up, and left (after gap extension)
-                    row_scores = B::propagate_horizontal_gaps(
-                        diag_scores.max(up_scores),
-                        score_matrix.get(row_idx, col_idx - 1),
-                        match_mask,
-                        match_masks.get(row_idx, col_idx - 1),
-                        gap_open_penalty,
-                        gap_extend_penalty,
-                    );
+                    // Left - skipping chars in the haystack. Gaps opened from a
+                    // match pay the open penalty at their source
+                    let gap_open_penalty_masked = match_mask.and(gap_open_penalty);
+                    let mut row_scores = diag_scores.max(up_scores);
+                    // Gaps can't raise the last row's max: skip it there
+                    // unless the matrix is stored
+                    if STORE || row_idx != needle_len {
+                        let gap_source_scores = row_scores.subs(gap_open_penalty_masked);
+                        let (prev_chunk_row_scores, prev_chunk_gap_scores) =
+                            prev_chunk_rows.add(row_idx - 1).read();
+                        let gap_scores;
+                        (gap_scores, row_scores) = B::propagate_horizontal_gaps(
+                            gap_source_scores,
+                            prev_chunk_gap_scores,
+                            &gap_steps,
+                            row_scores,
+                        );
+                        chunk_rows.add(row_idx - 1).write((row_scores, gap_scores));
+                        prev_chunk_prev_row_scores = prev_chunk_row_scores;
 
-                    score_matrix.set(row_idx, col_idx, row_scores);
-                    match_masks.set(row_idx, col_idx, match_mask);
+                        if STORE {
+                            score_matrix.set(row_idx, col_idx, row_scores);
+                            match_masks.set(row_idx, col_idx, match_mask);
+                        }
+                    }
                     prev_row_scores = row_scores;
-                    up_gap_mask = match_mask;
+                    up_penalty = gap_extend_penalty.add(gap_open_penalty_masked);
                 }
 
                 // Last row of the matrix at this chunk
-                max_scores = max_scores.max(row_scores);
+                max_scores = max_scores.max(prev_row_scores);
                 prefix_bonus_masked = B::Score::zero();
             }
 
