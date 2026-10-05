@@ -75,6 +75,7 @@ where
         matches: &mut Vec<Match>,
     ) {
         let max_typos = self.max_typos_runtime::<TYPOS>();
+        let mut pending = None;
         for (index, haystack_str) in (haystack_index_offset..).zip(haystacks.iter()) {
             let haystack = haystack_str.as_ref().as_bytes();
             let original_len = haystack.len();
@@ -82,16 +83,46 @@ where
                 let (matched, start_pos, end_pos) =
                     self.prefilter_haystack::<TYPOS, UNICODE>(haystack, max_typos);
                 if matched {
-                    let (trimmed, start_pos, include_exact) =
-                        trim_haystack(haystack, start_pos, end_pos);
-                    matches.push(self.smith_waterman_one::<TYPOS, UNICODE>(
-                        trimmed,
-                        index,
-                        start_pos,
-                        include_exact,
-                    ));
+                    let candidate = trim_haystack(index, haystack, start_pos, end_pos);
+                    self.score_candidate::<TYPOS, UNICODE>(candidate, &mut pending, matches);
                 }
             }
+        }
+        // outlined, so the list loop inlines no kernel for the unpaired
+        // candidate
+        if let Some(last) = pending {
+            let score = unsafe {
+                self.smith_waterman
+                    .score::<UNICODE>(last.haystack, last.start_pos)
+            };
+            matches.push(self.finish_match::<UNICODE>(last, score));
+        }
+    }
+
+    /// Scores a prefiltered candidate. ASCII ones are scored in pairs, so the
+    /// kernel's dependency chains overlap: the first one waits in `pending`
+    /// for its partner. Not on wasm, for binary size, nor with the end column,
+    /// which reads back the matrices of the last scored haystack
+    #[inline(always)]
+    fn score_candidate<'a, const TYPOS: u16, const UNICODE: bool>(
+        &mut self,
+        candidate: Candidate<'a>,
+        pending: &mut Option<Candidate<'a>>,
+        matches: &mut Vec<Match>,
+    ) {
+        if UNICODE || cfg!(target_arch = "wasm32") || cfg!(feature = "match_end_col") {
+            matches.push(self.smith_waterman_one::<TYPOS, UNICODE>(candidate));
+        } else if let Some(first) = pending.take() {
+            let [score_a, score_b] = unsafe {
+                self.smith_waterman.score_pair(
+                    [first.haystack, candidate.haystack],
+                    [first.start_pos, candidate.start_pos],
+                )
+            };
+            matches.push(self.finish_match::<UNICODE>(first, score_a));
+            matches.push(self.finish_match::<UNICODE>(candidate, score_b));
+        } else {
+            *pending = Some(candidate);
         }
     }
 
@@ -118,17 +149,12 @@ where
             return None;
         }
 
-        let (trimmed, start_pos, include_exact) = trim_haystack(haystack, start_pos, end_pos);
-        let (mut score, indices) = unsafe {
+        let candidate = trim_haystack(index, haystack, start_pos, end_pos);
+        let (score, indices) = unsafe {
             self.smith_waterman
-                .score_indices::<UNICODE>(trimmed, start_pos)
+                .score_indices::<UNICODE>(candidate.haystack, candidate.start_pos)
         };
-
-        let exact = include_exact && self.needle.as_bytes() == trimmed;
-        if exact {
-            score = score.saturating_add(self.config.scoring.exact_match_bonus);
-        }
-
+        let (score, exact) = self.exact_bonus(candidate, score);
         Some(MatchIndices {
             index,
             score,
@@ -164,38 +190,38 @@ where
     #[inline(always)]
     fn smith_waterman_one<const TYPOS: u16, const UNICODE: bool>(
         &mut self,
-        haystack: &[u8],
-        index: u32,
-        haystack_start_pos: usize,
-        include_exact: bool,
+        candidate: Candidate<'_>,
     ) -> Match {
-        let mut score = if Self::inline_kernel::<TYPOS>() {
+        let score = if Self::inline_kernel::<TYPOS>() {
             self.smith_waterman
-                .score_inline::<UNICODE>(haystack, haystack_start_pos)
+                .score_inline::<UNICODE>(candidate.haystack, candidate.start_pos)
         } else {
             unsafe {
                 self.smith_waterman
-                    .score::<UNICODE>(haystack, haystack_start_pos)
+                    .score::<UNICODE>(candidate.haystack, candidate.start_pos)
             }
         };
+        self.finish_match::<UNICODE>(candidate, score)
+    }
 
-        let exact = include_exact && self.needle.as_bytes() == haystack;
-        if exact {
-            score = score.saturating_add(self.config.scoring.exact_match_bonus);
-        }
-
-        #[cfg(not(feature = "match_end_col"))]
-        let _ = haystack_start_pos;
-
+    /// Builds the match for a scored candidate. The end column reads back the
+    /// matrices of the last scored haystack
+    #[inline(always)]
+    fn finish_match<const UNICODE: bool>(
+        &mut self,
+        candidate: Candidate<'_>,
+        raw_score: u16,
+    ) -> Match {
+        let (score, exact) = self.exact_bonus(candidate, raw_score);
         Match {
-            index,
+            index: candidate.index,
             score,
             exact,
             #[cfg(feature = "match_end_col")]
             end_col: self
                 .smith_waterman
-                .match_end_col(haystack, UNICODE)
-                .saturating_add(haystack_start_pos.min(u16::MAX as usize) as u16),
+                .match_end_col(candidate.haystack, UNICODE)
+                .saturating_add(candidate.start_pos.min(u16::MAX as usize) as u16),
         }
     }
 
@@ -205,6 +231,18 @@ where
     #[inline(always)]
     fn inline_kernel<const TYPOS: u16>() -> bool {
         TYPOS == NO_PREFILTER && !cfg!(target_arch = "wasm32")
+    }
+
+    /// Adds the exact match bonus when the candidate is the whole needle
+    #[inline(always)]
+    fn exact_bonus(&self, candidate: Candidate<'_>, score: u16) -> (u16, bool) {
+        let exact = candidate.include_exact && self.needle.as_bytes() == candidate.haystack;
+        let bonus = if exact {
+            self.config.scoring.exact_match_bonus
+        } else {
+            0
+        };
+        (score.saturating_add(bonus), exact)
     }
 
     /// The runtime typo budget for a `TYPOS` specialization: 0/1/2 encode the
@@ -220,16 +258,31 @@ where
     }
 }
 
-/// Trims the haystack to the prefilter's window, returning the trimmed slice,
-/// the trimmed start position, and whether the window covers the full haystack
-/// (making it eligible for the exact match bonus)
+/// A prefiltered haystack awaiting scoring
+#[derive(Clone, Copy)]
+struct Candidate<'a> {
+    index: u32,
+    /// The haystack trimmed to the prefilter's window
+    haystack: &'a [u8],
+    /// Start of the window in the original haystack
+    start_pos: usize,
+    /// Whether the window covers the full haystack (making it eligible for the
+    /// exact match bonus)
+    include_exact: bool,
+}
+
+/// Trims the haystack to the prefilter's window
 #[inline(always)]
-fn trim_haystack(haystack: &[u8], start_pos: usize, end_pos: usize) -> (&[u8], usize, bool) {
+fn trim_haystack(index: u32, haystack: &[u8], start_pos: usize, end_pos: usize) -> Candidate<'_> {
     // substract 1 so that we add the delimiter bonus from the first char
     // otherwise, we would never see it in the smith waterman
     let start_pos = start_pos.saturating_sub(1);
-    let include_exact = start_pos == 0 && end_pos == haystack.len();
-    (&haystack[start_pos..end_pos], start_pos, include_exact)
+    Candidate {
+        index,
+        haystack: &haystack[start_pos..end_pos],
+        start_pos,
+        include_exact: start_pos == 0 && end_pos == haystack.len(),
+    }
 }
 
 #[cfg(test)]
@@ -334,6 +387,113 @@ mod tests {
         });
         let matches = Matcher::new("BBBB", &config).match_list(&["aBaBaBaB"]);
         assert_eq!(matches[0].score, 4 * (40 + 40));
+    }
+
+    #[test]
+    fn paired_haystacks_score_as_alone() {
+        // Every backend scores ASCII haystacks in pairs and Unicode ones
+        // alone, with leftovers, haystacks past the kernels' limit and scores
+        // above 255, as it does one at a time
+        use super::super::backend::*;
+        use super::{MANY_TYPOS, NO_PREFILTER, Specialized};
+        use crate::Match;
+        use crate::smith_waterman::reference::Rng;
+        use alloc::string::String;
+
+        fn check<M: Specialized, const TYPOS: u16, const UNICODE: bool>(
+            needle: &str,
+            haystacks: &[String],
+            max_typos: Option<u16>,
+        ) {
+            let config = Config::default().max_typos(max_typos);
+            let mut matcher = unsafe { M::build(needle, &config) };
+            for n in [1, 2, 3, haystacks.len()] {
+                let haystacks = &haystacks[..n];
+                let mut alone = Vec::new();
+                for (i, haystack) in (0..).zip(haystacks) {
+                    unsafe { matcher.match_list::<TYPOS, UNICODE, _>(&[haystack], i, &mut alone) };
+                }
+                let mut matches: Vec<Match> = Vec::new();
+                unsafe { matcher.match_list::<TYPOS, UNICODE, _>(haystacks, 0, &mut matches) };
+                assert_eq!(matches, alone, "{needle} {max_typos:?} {n}");
+                if needle.starts_with('/') && n > 9 {
+                    assert!(alone.iter().any(|m| m.score > 255), "{needle}");
+                }
+            }
+        }
+
+        let ascii = [
+            "components",
+            "/",
+            "policy",
+            "Policy",
+            "compnents",
+            "polcy",
+            "_",
+            "x/",
+        ];
+        let unicode = [
+            "니다",
+            "합니다",
+            "하는",
+            "다",
+            "가나다라마바사",
+            "a니b다",
+            "😀다",
+            " ",
+        ];
+        let needles = [
+            "components/policy",
+            "policy",
+            "/a/b/c/d/e/f/g",
+            "니다",
+            "/a/b/c/d/e/f/다",
+        ];
+        let mut rng = Rng(12345);
+        let mut haystacks: Vec<String> = Vec::new();
+        for _ in 0..if cfg!(miri) { 12 } else { 1000 } {
+            let words = if rng.below(2) == 0 { &ascii } else { &unicode };
+            let mut haystack = match rng.below(8) {
+                0 => rng.pick(&needles).into(),
+                1 => "x".repeat(1100),
+                _ => String::new(),
+            };
+            for _ in 0..rng.below(24) {
+                haystack.push_str(rng.pick(words));
+            }
+            haystacks.push(haystack);
+        }
+
+        macro_rules! check {
+            ($m:ty) => {
+                if <$m>::is_available() {
+                    for needle in needles {
+                        if needle.is_ascii() {
+                            check::<$m, 0, false>(needle, &haystacks, Some(0));
+                            check::<$m, MANY_TYPOS, false>(needle, &haystacks, Some(1));
+                            check::<$m, NO_PREFILTER, false>(needle, &haystacks, None);
+                        } else {
+                            check::<$m, 0, true>(needle, &haystacks, Some(0));
+                            check::<$m, MANY_TYPOS, true>(needle, &haystacks, Some(1));
+                            check::<$m, NO_PREFILTER, true>(needle, &haystacks, None);
+                        }
+                    }
+                }
+            };
+        }
+        #[cfg(target_arch = "x86_64")]
+        {
+            check!(MatcherAVX512);
+            check!(MatcherAVX);
+            check!(MatcherSSE41);
+            check!(MatcherSSE2);
+        }
+        #[cfg(target_arch = "aarch64")]
+        check!(MatcherNEON);
+        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+        check!(MatcherWasm);
+        #[cfg(scalar_fallback)]
+        check!(MatcherScalar);
     }
 
     #[test]

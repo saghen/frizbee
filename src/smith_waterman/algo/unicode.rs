@@ -115,7 +115,7 @@ impl<B: Backend> SmithWaterman<B> {
         col_idx: usize,
     ) -> B::Score {
         let score_matrix = &mut self.score_matrix;
-        // The first chunk reads the zeroed second half of the row carry, so it
+        // The first chunk reads the zeroed entries after its row carry, so it
         // needs no reset between haystacks
         let row_carry = self.row_carry.as_mut_ptr();
         let carry_in = if col_idx == 1 {

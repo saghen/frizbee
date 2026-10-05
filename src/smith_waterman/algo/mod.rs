@@ -27,6 +27,14 @@ struct ChunkBonuses<B: Backend> {
     prev_chunk_char_is_delimiter_mask: B::Mask,
 }
 
+impl<B: Backend> Clone for ChunkBonuses<B> {
+    #[inline(always)]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<B: Backend> Copy for ChunkBonuses<B> {}
+
 impl<B: Backend> ChunkBonuses<B> {
     #[inline(always)]
     unsafe fn new(include_prefix: bool, prefix_bonus: u16, vecs: &ScoringVecs<B::Score>) -> Self {
@@ -142,7 +150,7 @@ impl<B: Backend> SmithWaterman<B> {
             scoring: scoring.clone(),
             scoring_vecs,
             score_matrix: Matrix::new(needle_len, MAX_HAYSTACK_LEN),
-            row_carry: vec![unsafe { (B::Score::zero(), B::Score::zero()) }; 2 * needle_len],
+            row_carry: vec![unsafe { (B::Score::zero(), B::Score::zero()) }; 3 * needle_len],
         }
     }
 
@@ -208,6 +216,16 @@ impl<B: Backend> SmithWaterman<B> {
         } else {
             self.score_haystack_indices(haystack, haystack_start_pos)
         }
+    }
+
+    #[inline(always)]
+    pub(crate) fn score_pair_inline(
+        &mut self,
+        haystacks: [&[u8]; 2],
+        start_pos: [usize; 2],
+    ) -> [u16; 2] {
+        let include_prefix = [start_pos[0] == 0, start_pos[1] == 0];
+        self.score_haystack_pair(haystacks, include_prefix)
     }
 
     #[cfg(feature = "match_end_col")]

@@ -116,6 +116,16 @@ macro_rules! kernel {
                 <$kernel>::score_indices_inline::<UNICODE>(self, haystack, haystack_start_pos)
             }
 
+            #[inline(never)]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn score_pair(
+                &mut self,
+                haystacks: [&[u8]; 2],
+                start_pos: [usize; 2],
+            ) -> [u16; 2] {
+                <$kernel>::score_pair_inline(self, haystacks, start_pos)
+            }
+
             #[cfg(feature = "match_end_col")]
             fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16 {
                 <$kernel>::match_end_col(self, haystack, unicode)
@@ -236,8 +246,8 @@ pub(crate) struct SmithWaterman<B: Backend> {
     scoring: Scoring,
     scoring_vecs: ScoringVecs<B::Score>,
     score_matrix: Matrix<B>,
-    /// Per row, the previous chunk's scores and horizontal scan, then as many
-    /// zeroed entries for the first chunk
+    /// Per row and haystack of a pair, the previous chunk's scores and
+    /// horizontal scan, with zeroed entries after the first haystack's
     row_carry: Vec<(B::Score, B::Score)>,
 }
 
@@ -290,6 +300,11 @@ impl<B8: Backend, B16: Backend> ScoreWidth<B8, B16> {
         either!(self, sw => sw.score_indices_inline::<UNICODE>(haystack, haystack_start_pos))
     }
 
+    #[inline(always)]
+    fn score_pair_inline(&mut self, haystacks: [&[u8]; 2], start_pos: [usize; 2]) -> [u16; 2] {
+        either!(self, sw => sw.score_pair_inline(haystacks, start_pos))
+    }
+
     #[cfg(feature = "match_end_col")]
     fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16 {
         either!(self, sw => sw.match_end_col(haystack, unicode))
@@ -330,6 +345,13 @@ pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
         haystack: &[u8],
         haystack_start_pos: usize,
     ) -> (u16, Vec<u32>);
+
+    /// Scores two ASCII haystacks at once, without storing the matrices.
+    /// Outlined like [`Kernel::score`]
+    ///
+    /// # Safety
+    /// The backend's required CPU features must be available
+    unsafe fn score_pair(&mut self, haystacks: [&[u8]; 2], start_pos: [usize; 2]) -> [u16; 2];
 
     #[cfg(feature = "match_end_col")]
     fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16;
