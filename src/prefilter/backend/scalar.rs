@@ -22,13 +22,20 @@ impl Backend for PrefilterScalarBackend {
 
     #[inline(always)]
     unsafe fn eq(a: Self::Chunk, b: Self::Chunk) -> Self::Mask {
-        let mut mask = 0u16;
-        for (idx, &byte) in a.iter().enumerate() {
-            if byte == b[idx] {
-                mask |= 1u16 << idx;
-            }
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            sse2::movemask(sse2::eq(a, b))
         }
-        mask
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            let mut mask = 0u16;
+            for (idx, &byte) in a.iter().enumerate() {
+                if byte == b[idx] {
+                    mask |= 1u16 << idx;
+                }
+            }
+            mask
+        }
     }
 
     #[inline(always)]
@@ -51,14 +58,24 @@ impl Backend for PrefilterScalarBackend {
 
     #[inline(always)]
     unsafe fn occ(chunk: Self::Chunk, needle: (Self::Chunk, Self::Chunk)) -> Self::Mask {
-        let mut mask = 0u16;
-        for (idx, &byte) in chunk.iter().enumerate() {
-            // use `|` because `||` prevents auto-vectorization
-            if (byte == needle.0[idx]) | (byte == needle.1[idx]) {
-                mask |= 1u16 << idx;
-            }
+        #[cfg(target_arch = "x86_64")]
+        unsafe {
+            sse2::movemask(sse2::or(
+                sse2::eq(chunk, needle.0),
+                sse2::eq(chunk, needle.1),
+            ))
         }
-        mask
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            let mut mask = 0u16;
+            for (idx, &byte) in chunk.iter().enumerate() {
+                // use `|` because `||` prevents auto-vectorization
+                if (byte == needle.0[idx]) | (byte == needle.1[idx]) {
+                    mask |= 1u16 << idx;
+                }
+            }
+            mask
+        }
     }
 
     #[inline(always)]
@@ -78,5 +95,33 @@ impl Backend for PrefilterScalarBackend {
     #[inline(always)]
     unsafe fn eq_block(chunks: &Self::Chunks, needle: Self::Chunk) -> Self::Block {
         unsafe { eq_block_chunks::<Self, 4>(chunks, needle) }
+    }
+}
+
+/// SSE2 is part of x86-64, so the compares there are a compare and a move
+/// mask: LLVM turns the per-byte loops into long vector shuffle sequences,
+/// repeated at every compare the walks inline
+#[cfg(target_arch = "x86_64")]
+mod sse2 {
+    use core::arch::x86_64::*;
+
+    #[inline(always)]
+    pub(super) unsafe fn eq(a: [u8; 16], b: [u8; 16]) -> __m128i {
+        unsafe {
+            _mm_cmpeq_epi8(
+                _mm_loadu_si128(a.as_ptr().cast()),
+                _mm_loadu_si128(b.as_ptr().cast()),
+            )
+        }
+    }
+
+    #[inline(always)]
+    pub(super) unsafe fn or(a: __m128i, b: __m128i) -> __m128i {
+        unsafe { _mm_or_si128(a, b) }
+    }
+
+    #[inline(always)]
+    pub(super) unsafe fn movemask(eq: __m128i) -> u16 {
+        unsafe { _mm_movemask_epi8(eq) as u16 }
     }
 }
