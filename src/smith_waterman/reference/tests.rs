@@ -143,6 +143,8 @@ trait Scorer {
     /// to the haystack)
     fn run(&mut self, haystack: &[u8], unicode: bool, start_pos: usize) -> (u16, (u16, Vec<u32>));
     fn pair(&mut self, haystacks: [&[u8]; 2], start_pos: [usize; 2]) -> [u16; 2];
+    #[cfg(feature = "match_end_col")]
+    fn end_col(&self, haystack: &[u8], unicode: bool, score: u16) -> u16;
 }
 
 macro_rules! impl_scorer {
@@ -172,6 +174,11 @@ macro_rules! impl_scorer {
             fn pair(&mut self, haystacks: [&[u8]; 2], start_pos: [usize; 2]) -> [u16; 2] {
                 self.score_pair_inline(haystacks, start_pos)
             }
+
+            #[cfg(feature = "match_end_col")]
+            fn end_col(&self, haystack: &[u8], unicode: bool, score: u16) -> u16 {
+                self.match_end_col(haystack, unicode, score)
+            }
         }
     };
 }
@@ -190,6 +197,12 @@ impl<K: Scorer> Scorer for Both<K> {
 
     fn pair(&mut self, haystacks: [&[u8]; 2], start_pos: [usize; 2]) -> [u16; 2] {
         self.ascii.pair(haystacks, start_pos)
+    }
+
+    #[cfg(feature = "match_end_col")]
+    fn end_col(&self, haystack: &[u8], unicode: bool, score: u16) -> u16 {
+        let kernel = if unicode { &self.unicode } else { &self.ascii };
+        kernel.end_col(haystack, unicode, score)
     }
 }
 
@@ -281,12 +294,24 @@ fn check(case: &Case, s: &Scoring, other: &str) -> usize {
     let (cs, unicode) = (case.case_sensitive, case.unicode);
     let msg = |label: &str| format!("{label} {case:?} other={other:?} {s:?}");
     let start = if case.include_prefix { 0 } else { 1 };
+    #[cfg(feature = "match_end_col")]
+    let mut end_col = None;
     let mut all = kernels(needle, cs, s);
     for (label, kernel) in &mut all {
         let (score, indices) = kernel.run(haystack, unicode, start);
         assert_eq!(score, want, "{}", msg(label));
         if let Some(err) = check_indices(case, s, &indices) {
             panic!("{}: {err}", msg(label));
+        }
+        #[cfg(feature = "match_end_col")]
+        {
+            let col = kernel.end_col(haystack, unicode, indices.0);
+            assert_eq!(
+                col,
+                *end_col.get_or_insert(col),
+                "{} end column",
+                msg(label)
+            );
         }
         if unicode {
             continue;

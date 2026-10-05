@@ -127,8 +127,9 @@ macro_rules! kernel {
             }
 
             #[cfg(feature = "match_end_col")]
-            fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16 {
-                <$kernel>::match_end_col(self, haystack, unicode)
+            #[inline(always)]
+            fn match_end_col(&self, haystack: &[u8], unicode: bool, score: u16) -> u16 {
+                <$kernel>::match_end_col(self, haystack, unicode, score)
             }
         }
     };
@@ -306,8 +307,9 @@ impl<B8: Backend, B16: Backend> ScoreWidth<B8, B16> {
     }
 
     #[cfg(feature = "match_end_col")]
-    fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16 {
-        either!(self, sw => sw.match_end_col(haystack, unicode))
+    #[inline(always)]
+    fn match_end_col(&self, haystack: &[u8], unicode: bool, score: u16) -> u16 {
+        either!(self, sw => sw.match_end_col(haystack, unicode, score))
     }
 }
 
@@ -353,8 +355,10 @@ pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
     /// The backend's required CPU features must be available
     unsafe fn score_pair(&mut self, haystacks: [&[u8]; 2], start_pos: [usize; 2]) -> [u16; 2];
 
+    /// The column of the first cell in the final row holding `score`, the
+    /// score returned by the last `score*` call on this haystack
     #[cfg(feature = "match_end_col")]
-    fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16;
+    fn match_end_col(&self, haystack: &[u8], unicode: bool, score: u16) -> u16;
 }
 
 #[cfg(test)]
@@ -582,15 +586,15 @@ mod tests {
     #[cfg(feature = "match_end_col")]
     fn get_end_col(needle: &str, haystack: &str) -> u16 {
         let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
-        matcher.score_haystack(haystack.as_bytes(), true);
-        matcher.match_end_col(haystack.as_bytes(), false)
+        let score = matcher.score_haystack(haystack.as_bytes(), true);
+        matcher.match_end_col(haystack.as_bytes(), false, score)
     }
 
     #[cfg(feature = "match_end_col")]
     fn get_end_col_unicode(needle: &str, haystack: &str) -> u16 {
         let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
-        matcher.score_haystack_unicode(haystack.as_bytes(), true);
-        matcher.match_end_col(haystack.as_bytes(), true)
+        let score = matcher.score_haystack_unicode(haystack.as_bytes(), true);
+        matcher.match_end_col(haystack.as_bytes(), true, score)
     }
 
     #[test]
