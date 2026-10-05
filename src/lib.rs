@@ -524,21 +524,26 @@ impl Scoring {
     /// Max additional score that a needle character can receive, aside from the
     /// match score
     pub(crate) fn max_per_char_bonus(&self) -> u16 {
-        let bonus = self.delimiter_bonus.max(self.capitalization_bonus);
-        let amortized = bonus
-            .div_ceil(2)
-            .max(bonus.saturating_sub(self.gap_open_penalty));
-        amortized.saturating_add(self.matching_case_bonus)
+        self.amortized_bonus().saturating_add(self.matching_case_bonus)
     }
 
     /// Max bonus given to a score one time, aside from the prefix or exact
     /// bonuses
     pub(crate) fn max_one_time_bonus(&self) -> u16 {
-        let bonus = self.delimiter_bonus.max(self.capitalization_bonus);
-        let amortized = bonus
+        let both = self.delimiter_bonus.saturating_add(self.capitalization_bonus);
+        both - self.amortized_bonus()
+    }
+
+    /// Delimiter and capitalization bonus amortized per needle char
+    fn amortized_bonus(&self) -> u16 {
+        let either = self.delimiter_bonus.max(self.capitalization_bonus);
+        let both = self.delimiter_bonus.saturating_add(self.capitalization_bonus);
+        // "/aC" earns both on adjacent chars, then pays a row or a gap
+        either
             .div_ceil(2)
-            .max(bonus.saturating_sub(self.gap_open_penalty));
-        bonus - amortized
+            .max(either.saturating_sub(self.gap_open_penalty))
+            .max(both.div_ceil(3))
+            .max(both.saturating_sub(self.gap_open_penalty).div_ceil(2))
     }
 }
 
@@ -548,6 +553,6 @@ mod tests {
 
     #[test]
     fn max_needle_len_default() {
-        assert_eq!(Scoring::default().max_needle_len(), 3639);
+        assert_eq!(Scoring::default().max_needle_len(), 3447);
     }
 }

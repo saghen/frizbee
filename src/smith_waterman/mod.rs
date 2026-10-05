@@ -707,6 +707,14 @@ mod tests {
     }
 
     #[test]
+    fn score_fits_in_u8_adjacent_bonuses() {
+        // "/aC/aC/aC/aC/" scores 252 in 13 rows, plus the transient mismatch
+        // penalty
+        assert!(score_fits_in_u8(12, &Scoring::default()));
+        assert!(!score_fits_in_u8(13, &Scoring::default()));
+    }
+
+    #[test]
     fn score_fits_in_u8_bounds_gap_extend_doubling() {
         assert!(score_fits_in_u8(4, &Scoring::default()));
         // The gap propagators scale the gap extend penalty by up to 64x on the
