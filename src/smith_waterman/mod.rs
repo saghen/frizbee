@@ -72,8 +72,8 @@ macro_rules! kernel {
         pub type $name = $kernel;
 
         impl Kernel for $name {
-            fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self {
-                <$kernel>::new(needle, scoring, case_sensitive)
+            fn new(needle: &str, scoring: &Scoring, case_sensitive: bool, unicode: bool) -> Self {
+                <$kernel>::new(needle, scoring, case_sensitive, unicode)
             }
 
             fn is_available() -> bool {
@@ -154,10 +154,8 @@ kernel!(
     ScoreWidth<BackendScalar16U8, BackendScalar8>
 );
 
-/// Returns true if every possible Smith-Waterman matrix cell value for this
-/// needle length and scoring config fits in a u8. The u8 backends are otherwise
-/// identical to the u16 backends but with double the lane count (64 cells/chunk
-/// on AVX-512, 32 on AVX2, 16 on SSE/NEON).
+/// Returns whether the score is guaranteed to fit within in a u8 for the given
+/// needle lengths (char count, not bytes) and scoring config
 #[inline]
 pub(crate) fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
     let max_constant = (scoring.match_score as usize + scoring.mismatch_penalty as usize)
@@ -235,8 +233,14 @@ macro_rules! either {
 }
 
 impl<B8: Backend, B16: Backend> ScoreWidth<B8, B16> {
-    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self {
-        if score_fits_in_u8(needle.len(), scoring) {
+    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool, unicode: bool) -> Self {
+        // Unicode kernel uses row per char, ASCII kernel uses per byte
+        let needle_len = if unicode {
+            needle.chars().count()
+        } else {
+            needle.len()
+        };
+        if score_fits_in_u8(needle_len, scoring) {
             Self::U8(SmithWaterman::new(needle, scoring, case_sensitive))
         } else {
             Self::U16(SmithWaterman::new(needle, scoring, case_sensitive))
@@ -269,7 +273,7 @@ impl<B8: Backend, B16: Backend> ScoreWidth<B8, B16> {
 
 /// The Smith Waterman kernel of one SIMD tier
 pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
-    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self;
+    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool, unicode: bool) -> Self;
     fn is_available() -> bool;
 
     /// Inlined into the caller, for loops which score every haystack
@@ -566,9 +570,7 @@ mod tests {
         let mut matcher = SmithWaterman::<BackendScalar8>::new("é", &Scoring::default(), false);
 
         assert_eq!(
-            matcher
-                .score_indices::<true>("é".as_bytes(), 3, None)
-                .1,
+            matcher.score_indices::<true>("é".as_bytes(), 3, None).1,
             vec![3, 4]
         );
     }
@@ -578,9 +580,7 @@ mod tests {
         let mut matcher = SmithWaterman::<BackendScalar8>::new("éx", &Scoring::default(), false);
 
         assert_eq!(
-            matcher
-                .score_indices::<true>("é😀x".as_bytes(), 3, None)
-                .1,
+            matcher.score_indices::<true>("é😀x".as_bytes(), 3, None).1,
             vec![3, 4, 9]
         );
     }
@@ -629,10 +629,21 @@ mod tests {
     fn score_width_follows_the_needle_length() {
         type Width = ScoreWidth<backend::BackendScalar16U8, BackendScalar8>;
         let scoring = Scoring::default();
-        let short = Width::new("abc", &scoring, false);
+        let short = Width::new("abc", &scoring, false, false);
         assert!(matches!(short, ScoreWidth::U8(_)));
-        let long = Width::new("abcdefghijklmnopqrst", &scoring, false);
+        let long = Width::new("abcdefghijklmnopqrst", &scoring, false, false);
         assert!(matches!(long, ScoreWidth::U16(_)));
+    }
+
+    #[test]
+    fn unicode_score_width_counts_scalars() {
+        // 8 chars but 24 bytes
+        type Width = ScoreWidth<backend::BackendScalar16U8, BackendScalar8>;
+        let (needle, scoring) = ("그것은무엇입니까", Scoring::default());
+        let unicode = Width::new(needle, &scoring, false, true);
+        assert!(matches!(unicode, ScoreWidth::U8(_)));
+        let ascii = Width::new(needle, &scoring, false, false);
+        assert!(matches!(ascii, ScoreWidth::U16(_)));
     }
 
     #[test]
