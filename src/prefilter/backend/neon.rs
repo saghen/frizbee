@@ -1,6 +1,6 @@
 use core::arch::aarch64::*;
 
-use super::{Backend, BitMaskOps, ChunkBlock, eq_block_chunks, load_block_chunks};
+use super::{Backend, BitMaskOps, ChunkBlock, Register, load_block_chunks, pair::PairChunks};
 
 /// Four bits per lane, so NEON comparisons only need SHRN to pack their lanes
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -103,15 +103,104 @@ impl Backend for PrefilterNEONBackend {
     unsafe fn fold_block(chunks: &mut Self::Chunks) {
         unsafe {
             for chunk in chunks.chunks.iter_mut().take(chunks.count) {
-                let upper = vcltq_u8(vsubq_u8(*chunk, vdupq_n_u8(b'A')), vdupq_n_u8(26));
-                *chunk = vorrq_u8(*chunk, vandq_u8(upper, vdupq_n_u8(0x20)));
+                *chunk = Self::fold(*chunk);
             }
         }
     }
 
+    /// All four chunks at once (see [`pack_bits`])
     #[inline(always)]
     unsafe fn eq_block(chunks: &Self::Chunks, needle: Self::Chunk) -> Self::Block {
-        unsafe { eq_block_chunks::<Self, 4>(chunks, needle) }
+        unsafe {
+            let [a, b, c, d] = chunks.chunks;
+            pack_bits([
+                vceqq_u8(a, needle),
+                vceqq_u8(b, needle),
+                vceqq_u8(c, needle),
+                vceqq_u8(d, needle),
+            ])
+        }
+    }
+}
+
+impl Register for PrefilterNEONBackend {
+    #[inline(always)]
+    unsafe fn cmpeq(a: uint8x16_t, b: uint8x16_t) -> uint8x16_t {
+        unsafe { vceqq_u8(a, b) }
+    }
+
+    #[inline(always)]
+    unsafe fn or(a: uint8x16_t, b: uint8x16_t) -> uint8x16_t {
+        unsafe { vorrq_u8(a, b) }
+    }
+
+    /// One bit per byte rather than [`NeonMask`]'s four, so masks of two
+    /// registers fit a u32 and need no compaction (see [`pack_bits`])
+    #[inline(always)]
+    unsafe fn movemask_pair(lo: uint8x16_t, hi: uint8x16_t) -> u32 {
+        unsafe {
+            let bits = vld1q_u8(BITS.as_ptr());
+            let sums = vpaddq_u8(vminq_u8(lo, bits), vminq_u8(hi, bits));
+            let sums = vget_low_u8(vpaddq_u8(sums, sums));
+            vget_lane_u32::<0>(vreinterpret_u32_u8(vpadd_u8(sums, sums)))
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn fold(chunk: uint8x16_t) -> uint8x16_t {
+        unsafe {
+            let upper = vcltq_u8(vsubq_u8(chunk, vdupq_n_u8(b'A')), vdupq_n_u8(26));
+            vorrq_u8(chunk, vandq_u8(upper, vdupq_n_u8(0x20)))
+        }
+    }
+
+    /// Two chunks at a time (see [`pack_bits`]), the last two only when
+    /// loaded
+    #[inline(always)]
+    unsafe fn eq_block_pair(chunks: &PairChunks<Self>, needle: uint8x16_t) -> u128 {
+        unsafe {
+            let [[a, b], [c, d], [e, f], [g, h]] = chunks.chunks;
+            let low = pack_bits([
+                vceqq_u8(a, needle),
+                vceqq_u8(b, needle),
+                vceqq_u8(c, needle),
+                vceqq_u8(d, needle),
+            ]);
+            if chunks.count <= 2 {
+                return low as u128;
+            }
+            let high = pack_bits([
+                vceqq_u8(e, needle),
+                vceqq_u8(f, needle),
+                vceqq_u8(g, needle),
+                vceqq_u8(h, needle),
+            ]);
+            ((high as u128) << 64) | low as u128
+        }
+    }
+}
+
+/// Each byte's bit within its 8-byte group
+const BITS: [u8; 16] = [1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128];
+
+/// One bit per byte of four compare results: weighting each byte by its bit
+/// within its 8-byte group and summing pairwise packs them into one u64 with
+/// a single transfer, where per-register masks need a nibble compaction
+/// each. UMIN rather than AND keeps LLVM from proving the sums disjoint,
+/// which turns each ADDP into UZP1 + UZP2 + ORR.
+#[inline(always)]
+unsafe fn pack_bits([a, b, c, d]: [uint8x16_t; 4]) -> u64 {
+    unsafe {
+        let bits = vld1q_u8(BITS.as_ptr());
+        let (a, b, c, d) = (
+            vminq_u8(a, bits),
+            vminq_u8(b, bits),
+            vminq_u8(c, bits),
+            vminq_u8(d, bits),
+        );
+        let sums = vpaddq_u8(vpaddq_u8(a, b), vpaddq_u8(c, d));
+        let sums = vpadd_u8(vget_low_u8(sums), vget_high_u8(sums));
+        vget_lane_u64::<0>(vreinterpret_u64_u8(sums))
     }
 }
 

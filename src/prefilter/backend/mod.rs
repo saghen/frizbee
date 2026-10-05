@@ -10,6 +10,12 @@ mod avx;
 mod avx512;
 #[cfg(target_arch = "aarch64")]
 mod neon;
+#[cfg(any(
+    target_arch = "x86_64",
+    target_arch = "aarch64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+mod pair;
 #[cfg(any(test, scalar_fallback))]
 mod scalar;
 #[cfg(target_arch = "x86_64")]
@@ -33,6 +39,13 @@ pub(crate) use sse::PrefilterSSEBackend;
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 pub(crate) use wasm::PrefilterWasmBackend;
 
+#[cfg(any(
+    target_arch = "x86_64",
+    target_arch = "aarch64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+use pair::{PairBackend, Register};
+
 pub(crate) use block::{
     BlockMask, ChunkBlock, Narrow, copy_partial, eq_block_chunks, load_block_chunks,
 };
@@ -43,13 +56,13 @@ pub use avx::PrefilterAVX;
 #[cfg(target_arch = "x86_64")]
 pub type PrefilterAVX512 = Prefilter<avx512::PrefilterAVX512Backend>;
 #[cfg(target_arch = "aarch64")]
-pub type PrefilterNEON = Prefilter<neon::PrefilterNEONBackend>;
+pub type PrefilterNEON = Prefilter<PairBackend<neon::PrefilterNEONBackend>>;
 #[cfg(any(test, scalar_fallback))]
 pub type PrefilterScalar = Prefilter<scalar::PrefilterScalarBackend>;
 #[cfg(target_arch = "x86_64")]
-pub type PrefilterSSE = Prefilter<sse::PrefilterSSEBackend>;
+pub type PrefilterSSE = Prefilter<PairBackend<sse::PrefilterSSEBackend>>;
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-pub type PrefilterWasm = Prefilter<wasm::PrefilterWasmBackend>;
+pub type PrefilterWasm = Prefilter<PairBackend<wasm::PrefilterWasmBackend>>;
 
 /// A chunk's compare result. `Into<u64>` gives one bit per byte, which is how
 /// chunk masks are assembled into a [`BlockMask`].
@@ -171,6 +184,16 @@ pub(crate) trait Backend: Sized + Debug + Clone + 'static {
     /// Whether [`Backend::load_block`] fills the bytes past the haystack with
     /// [`BLOCK_PAD`](block::BLOCK_PAD), so occurrence masks need no masking
     const PADDED_BLOCKS: bool = false;
+
+    /// `chunk` with its bytes from `len` on set to [`BLOCK_PAD`](block::BLOCK_PAD), for
+    /// [`load_block_chunks`] of a padded backend
+    ///
+    /// # Safety
+    /// `len <= LANES`, and the backend's target features must be enabled.
+    #[inline(always)]
+    unsafe fn pad(chunk: Self::Chunk, _len: usize) -> Self::Chunk {
+        chunk
+    }
 
     /// Loads the chunks of the block at the start of `haystack`, with the
     /// mask of the bytes inside it. Bytes past the haystack are

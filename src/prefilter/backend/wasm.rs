@@ -1,6 +1,6 @@
 use core::arch::wasm32::*;
 
-use super::{Backend, ChunkBlock, eq_block_chunks, load_block_chunks};
+use super::{Backend, ChunkBlock, Register, eq_block_chunks, load_block_chunks};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PrefilterWasmBackend;
@@ -48,8 +48,7 @@ impl Backend for PrefilterWasmBackend {
     unsafe fn fold_block(chunks: &mut Self::Chunks) {
         unsafe {
             for chunk in chunks.chunks.iter_mut().take(chunks.count) {
-                let upper = u8x16_lt(u8x16_sub(*chunk, u8x16_splat(b'A')), u8x16_splat(26));
-                *chunk = v128_or(*chunk, v128_and(upper, u8x16_splat(0x20)));
+                *chunk = Self::fold(*chunk);
             }
         }
     }
@@ -57,5 +56,28 @@ impl Backend for PrefilterWasmBackend {
     #[inline(always)]
     unsafe fn eq_block(chunks: &Self::Chunks, needle: Self::Chunk) -> Self::Block {
         unsafe { eq_block_chunks::<Self, 4>(chunks, needle) }
+    }
+}
+
+impl Register for PrefilterWasmBackend {
+    #[inline(always)]
+    unsafe fn cmpeq(a: v128, b: v128) -> v128 {
+        u8x16_eq(a, b)
+    }
+
+    #[inline(always)]
+    unsafe fn or(a: v128, b: v128) -> v128 {
+        v128_or(a, b)
+    }
+
+    #[inline(always)]
+    unsafe fn movemask_pair(lo: v128, hi: v128) -> u32 {
+        u8x16_bitmask(lo) as u32 | ((u8x16_bitmask(hi) as u32) << 16)
+    }
+
+    #[inline(always)]
+    unsafe fn fold(chunk: v128) -> v128 {
+        let upper = u8x16_lt(u8x16_sub(chunk, u8x16_splat(b'A')), u8x16_splat(26));
+        v128_or(chunk, v128_and(upper, u8x16_splat(0x20)))
     }
 }

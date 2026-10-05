@@ -85,8 +85,24 @@ impl_block!(u128);
 
 /// The byte padded blocks hold past the haystack's end: it never occurs in
 /// UTF-8, so no needle row matches it
-#[cfg(target_arch = "x86_64")]
 pub(crate) const BLOCK_PAD: u8 = 0xFF;
+
+/// 64 zero bytes then 64 [`BLOCK_PAD`] bytes: the chunk at `64 - len` is the
+/// padding of a chunk's bytes from `len` on (see [`Backend::pad`])
+#[cfg(any(
+    target_arch = "x86_64",
+    target_arch = "aarch64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+pub(super) static PAD_FROM: [u8; 128] = {
+    let mut pad = [0; 128];
+    let mut i = 64;
+    while i < 128 {
+        pad[i] = BLOCK_PAD;
+        i += 1;
+    }
+    pad
+};
 
 /// A block as `N` chunks, of which the first `count` hold haystack bytes: the
 /// per-chunk compares stop there
@@ -96,19 +112,25 @@ pub(crate) struct ChunkBlock<C: Copy, const N: usize> {
     pub(crate) count: usize,
 }
 
-/// [`Backend::load_block`] for backends without masked loads: chunks past
-/// the end are skipped (their mask bits are clear)
+/// [`Backend::load_block`] for backends without masked loads, padding the
+/// last chunk when [`Backend::PADDED_BLOCKS`]
 #[inline(always)]
 pub(crate) unsafe fn load_block_chunks<B: Backend, const N: usize>(
     haystack: &[u8],
 ) -> (ChunkBlock<B::Chunk, N>, B::Block) {
     unsafe {
         debug_assert!(!haystack.is_empty());
-        let mut chunks = [B::splat(0); N];
+        // chunks past the haystack hold the padding too: a backend may
+        // compare them (NEON's packed compares)
+        let mut chunks = [B::splat(if B::PADDED_BLOCKS { BLOCK_PAD } else { 0 }); N];
         let count = haystack.len().div_ceil(B::LANES).min(N);
         // only the last chunk may pass the haystack's end
         let last = count - 1;
-        let tail = load_window::<B>(haystack, last * B::LANES, haystack.len()).0;
+        let mut tail = load_window::<B>(haystack, last * B::LANES, haystack.len()).0;
+        if B::PADDED_BLOCKS {
+            // (a block ending inside a longer haystack has nothing to pad)
+            tail = B::pad(tail, (haystack.len() - last * B::LANES).min(B::LANES));
+        }
         for (c, chunk) in chunks.iter_mut().enumerate().take(count) {
             *chunk = if c == last {
                 tail
