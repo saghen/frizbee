@@ -19,10 +19,10 @@ export interface Match {
 
 /**
  * Like `Match` but includes the indices of the chars in the haystack that matched
- * the needle in reverse order
+ * the needle in ascending order
  */
 export interface MatchIndices extends Match {
-  /** Indices of the chars in the haystack that matched the needle in reverse order */
+  /** Indices of the chars in the haystack that matched the needle in ascending order */
   indices: number[];
 }
 

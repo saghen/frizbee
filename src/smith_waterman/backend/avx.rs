@@ -17,7 +17,6 @@ pub struct AvxScore(__m256i);
 
 impl Backend for BackendAVX {
     const LANES: usize = 16;
-    const LANE_BYTES: usize = 2;
     type Bytes = AvxBytes;
     type Mask = AvxBytes;
     type Score = AvxScore;
@@ -265,15 +264,6 @@ impl ScoreVec for AvxScore {
             })
         }
     }
-    #[inline(always)]
-    unsafe fn find_lane(self, search: u16) -> usize {
-        unsafe {
-            let cmp = _mm256_cmpeq_epi16(self.0, _mm256_set1_epi16(search as i16));
-            let mask = _mm256_movemask_epi8(cmp) as u32;
-            (mask.trailing_zeros() as usize / 2).min(16)
-        }
-    }
-
     #[cfg(test)]
     fn from_lanes(values: &[u16]) -> Self {
         assert_eq!(values.len(), 16);
@@ -299,7 +289,6 @@ pub struct AvxU8Score(__m256i);
 
 impl Backend for BackendAVXU8 {
     const LANES: usize = 32;
-    const LANE_BYTES: usize = 1;
     type Bytes = AvxU8Bytes;
     type Mask = AvxU8Bytes;
     type Score = AvxU8Score;
@@ -499,16 +488,6 @@ impl ScoreVec for AvxU8Score {
             })
         }
     }
-    #[inline(always)]
-    unsafe fn find_lane(self, search: u16) -> usize {
-        unsafe {
-            let target = _mm256_set1_epi8(search as i8);
-            let cmp = _mm256_cmpeq_epi8(self.0, target);
-            let mask = _mm256_movemask_epi8(cmp) as u32;
-            (mask.trailing_zeros() as usize).min(32)
-        }
-    }
-
     #[cfg(test)]
     fn from_lanes(values: &[u16]) -> Self {
         assert_eq!(values.len(), 32);

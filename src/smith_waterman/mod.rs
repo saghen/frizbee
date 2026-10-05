@@ -60,16 +60,11 @@ use backend::{BackendNEON, BackendNEONU8};
 use backend::{BackendScalar8, BackendScalar16U8};
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 use backend::{BackendWasm, BackendWasmU8};
-use matrix::Matrix;
 
 mod algo;
 mod alignment;
-mod alignment_iter;
 pub(crate) mod backend;
 mod greedy;
-mod matrix;
-
-use alignment_iter::AlignmentPathIter;
 
 /// Builds the kernel for one SIMD tier with `#[target_feature]`
 macro_rules! kernel {
@@ -223,12 +218,6 @@ pub(crate) struct SmithWaterman<B: Backend> {
     case_sensitive: bool,
     scoring: Scoring,
     scoring_vecs: ScoringVecs<B::Score>,
-    score_matrix: Matrix<B>,
-    match_masks: Matrix<B>,
-    /// Number of LANES-wide chunks (incl. the leading zero column) actually
-    /// consumed by the most recent `score_haystack` call. The matrix stride is
-    /// always sized for `MAX_HAYSTACK_LEN` for zero-free reuse.
-    haystack_chunks: usize,
     /// Per row, the previous chunk's scores and gap scores, then as many
     /// zeroed entries for the first chunk
     chunk_rows: Vec<(B::Score, B::Score)>,
@@ -352,17 +341,19 @@ mod tests {
         let mut matcher =
             SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), case_sensitive);
 
-        let score = matcher.score_haystack_matrix(haystack.as_bytes(), true);
-        matcher
-            .has_alignment_path(score, max_typos)
-            .then_some(score)
+        // Every needle char the alignment doesn't match is a typo
+        let score = matcher.score_haystack(haystack.as_bytes(), true);
+        let matched = matcher
+            .alignment_indices(haystack.as_bytes(), 0, false, Some(max_typos))
+            .len();
+        (needle.len() - matched <= max_typos as usize).then_some(score)
     }
 
     fn get_indices(needle: &str, haystack: &str) -> Vec<u32> {
         let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
 
         matcher
-            .score_haystack_indices(haystack.as_bytes(), 0, None)
+            .score_indices_inline::<false>(haystack.as_bytes(), 0, None)
             .1
     }
 
@@ -370,7 +361,7 @@ mod tests {
         let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
 
         matcher
-            .score_haystack_unicode_indices(haystack.as_bytes(), 0, None)
+            .score_indices_inline::<true>(haystack.as_bytes(), 0, None)
             .1
     }
 
@@ -487,11 +478,24 @@ mod tests {
         assert!(get_score("fo", "foo") > get_score("fo", "faOo"));
     }
 
+    /// The traceback follows the step each cell's score came from, rather
+    /// than any match: "b" scores more at the prefix, with a gap after it
+    #[test]
+    fn indices_follow_the_scored_alignment() {
+        assert_eq!(
+            get_score("bx", "bbx"),
+            2 * CHAR_SCORE + PREFIX_BONUS - GAP_OPEN_PENALTY
+        );
+        assert_eq!(get_indices("bx", "bbx"), vec![0, 2]);
+        assert_eq!(get_indices("xxx", "xbxaxx"), vec![0, 4, 5]);
+        assert_eq!(get_unicode_indices("éx", "é😀éx"), vec![0, 1, 8]);
+    }
+
     #[test]
     fn tie_prone_alignment_indices_are_stable() {
-        assert_eq!(get_indices("aa", "aaa"), vec![1, 0]);
-        assert_eq!(get_indices("ab", "abab"), vec![1, 0]);
-        assert_eq!(get_indices("abc", "xabcabc"), vec![3, 2, 1]);
+        assert_eq!(get_indices("aa", "aaa"), vec![0, 1]);
+        assert_eq!(get_indices("ab", "abab"), vec![0, 1]);
+        assert_eq!(get_indices("abc", "xabcabc"), vec![1, 2, 3]);
     }
 
     #[test]
@@ -558,15 +562,15 @@ mod tests {
         assert_eq!(get_indices("a", "abc"), vec![0]);
         assert_eq!(get_indices("b", "abc"), vec![1]);
         assert_eq!(get_indices("c", "abc"), vec![2]);
-        assert_eq!(get_indices("ac", "________________abc"), vec![18, 16]);
+        assert_eq!(get_indices("ac", "________________abc"), vec![16, 18]);
         assert_eq!(get_indices("foo", "Uf"), vec![1]);
     }
 
     #[test]
     fn unicode_indices_expand_multibyte_scalars() {
-        assert_eq!(get_unicode_indices("é", "é"), vec![1, 0]);
-        assert_eq!(get_unicode_indices("😀", "😀"), vec![3, 2, 1, 0]);
-        assert_eq!(get_unicode_indices("aé", "aé"), vec![2, 1, 0]);
+        assert_eq!(get_unicode_indices("é", "é"), vec![0, 1]);
+        assert_eq!(get_unicode_indices("😀", "😀"), vec![0, 1, 2, 3]);
+        assert_eq!(get_unicode_indices("aé", "aé"), vec![0, 1, 2]);
     }
 
     #[test]
@@ -575,9 +579,9 @@ mod tests {
 
         assert_eq!(
             matcher
-                .score_haystack_unicode_indices("é".as_bytes(), 3, None)
+                .score_indices_inline::<true>("é".as_bytes(), 3, None)
                 .1,
-            vec![4, 3]
+            vec![3, 4]
         );
     }
 
@@ -587,25 +591,25 @@ mod tests {
 
         assert_eq!(
             matcher
-                .score_haystack_unicode_indices("é😀x".as_bytes(), 3, None)
+                .score_indices_inline::<true>("é😀x".as_bytes(), 3, None)
                 .1,
-            vec![9, 4, 3]
+            vec![3, 4, 9]
         );
     }
 
     #[test]
     fn unicode_indices_trace_through_multibyte_haystack_gaps() {
-        assert_eq!(get_unicode_indices("ab", "aéb"), vec![3, 0]);
-        assert_eq!(get_unicode_indices("ab", "aé😀b"), vec![7, 0]);
-        assert_eq!(get_unicode_indices("éx", "é😀x"), vec![6, 1, 0]);
+        assert_eq!(get_unicode_indices("ab", "aéb"), vec![0, 3]);
+        assert_eq!(get_unicode_indices("ab", "aé😀b"), vec![0, 7]);
+        assert_eq!(get_unicode_indices("éx", "é😀x"), vec![0, 1, 6]);
     }
 
     #[test]
     fn unicode_indices_handle_repeated_scalars_and_chunk_boundaries() {
-        assert_eq!(get_unicode_indices("éé", "ééé"), vec![3, 2, 1, 0]);
+        assert_eq!(get_unicode_indices("éé", "ééé"), vec![0, 1, 2, 3]);
         assert_eq!(
             get_unicode_indices("😀x", "_______😀x"),
-            vec![11, 10, 9, 8, 7]
+            vec![7, 8, 9, 10, 11]
         );
     }
 
@@ -613,20 +617,21 @@ mod tests {
     fn unicode_indices_do_not_split_multibyte_scalars_in_traceback() {
         // ensures that when we do traceback, we match all indices of multi-byte
         // unicode chars when they match
-        assert_eq!(get_unicode_indices("😀.a", "..😀a"), vec![6, 1]);
-        assert_eq!(get_unicode_indices("😀.é", "..😀é"), vec![7, 6, 1]);
-        assert_eq!(get_unicode_indices("😀 a", "  😀a"), vec![6, 1]);
-        assert_eq!(get_unicode_indices("😀é", "..😀é"), vec![7, 6, 5, 4, 3, 2]);
+        // The first `.` earns the prefix bonus, which outweighs the longer gap
+        assert_eq!(get_unicode_indices("😀.a", "..😀a"), vec![0, 6]);
+        assert_eq!(get_unicode_indices("😀.é", "..😀é"), vec![0, 6, 7]);
+        assert_eq!(get_unicode_indices("😀 a", "  😀a"), vec![0, 6]);
+        assert_eq!(get_unicode_indices("😀é", "..😀é"), vec![2, 3, 4, 5, 6, 7]);
     }
 
     #[test]
-    fn long_input_boundary_indices_stay_reverse_ordered() {
+    fn long_input_boundary_indices_stay_ordered() {
         for len in [1023, 1024, 1025] {
             let haystack = format!("{}abc", "x".repeat((len - 3) as usize));
             assert_eq!(get_score("abc", &haystack), 3 * CHAR_SCORE, "len={len}");
             assert_eq!(
                 get_indices("abc", &haystack),
-                vec![len - 1, len - 2, len - 3],
+                vec![len - 3, len - 2, len - 1],
                 "len={len}"
             );
         }

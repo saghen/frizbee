@@ -190,7 +190,7 @@ impl PartialEq for Match {
 impl Eq for Match {}
 
 /// Like [`Match`] but includes the indices of the chars in the haystack that
-/// matched the needle in reverse order
+/// matched the needle in ascending order
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct MatchIndices {
@@ -199,8 +199,8 @@ pub struct MatchIndices {
     pub index: u32,
     /// Matched the needle exactly (e.g. "foo" on "foo")
     pub exact: bool,
-    /// Indices of the chars in the haystack that matched the needle in reverse
-    /// order
+    /// Indices of the chars in the haystack that matched the needle in
+    /// ascending order
     pub indices: Vec<u32>,
 }
 

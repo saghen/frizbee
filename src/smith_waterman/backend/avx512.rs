@@ -36,7 +36,6 @@ pub struct Avx512U8Score(__m512i);
 
 impl Backend for BackendAVX512 {
     const LANES: usize = 32;
-    const LANE_BYTES: usize = 2;
     type Bytes = Avx512Bytes;
     type Mask = Avx512Mask;
     type Score = Avx512Score;
@@ -57,7 +56,6 @@ impl Backend for BackendAVX512 {
 
 impl Backend for BackendAVX512U8 {
     const LANES: usize = 64;
-    const LANE_BYTES: usize = 1;
     type Bytes = Avx512U8Bytes;
     type Mask = Avx512U8Mask;
     type Score = Avx512U8Score;
@@ -314,15 +312,6 @@ impl ScoreVec for Avx512Score {
     unsafe fn shift_right_padded<const L: i32>(self, prev: Self) -> Self {
         unsafe { Self(shift_right_u16_lanes::<L>(prev.0, self.0)) }
     }
-    #[inline(always)]
-    unsafe fn find_lane(self, search: u16) -> usize {
-        unsafe {
-            let target = _mm512_set1_epi16(search as i16);
-            let mask = _mm512_cmpeq_epi16_mask(self.0, target);
-            (mask.trailing_zeros() as usize).min(32)
-        }
-    }
-
     #[cfg(test)]
     fn from_lanes(values: &[u16]) -> Self {
         assert_eq!(values.len(), 32);
@@ -392,15 +381,6 @@ impl ScoreVec for Avx512U8Score {
     unsafe fn shift_right_padded<const L: i32>(self, prev: Self) -> Self {
         unsafe { Self(shift_right_lanes::<L>(prev.0, self.0)) }
     }
-    #[inline(always)]
-    unsafe fn find_lane(self, search: u16) -> usize {
-        unsafe {
-            let target = _mm512_set1_epi8(search as i8);
-            let mask = _mm512_cmpeq_epi8_mask(self.0, target);
-            mask.trailing_zeros() as usize
-        }
-    }
-
     #[cfg(test)]
     fn from_lanes(values: &[u16]) -> Self {
         assert_eq!(values.len(), 64);

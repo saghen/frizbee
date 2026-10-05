@@ -139,8 +139,8 @@ fn assert_indices_contract(case: &ApiCase, matches: &[Match], indices: &[MatchIn
             match_
                 .indices
                 .windows(2)
-                .all(|window| window[0] > window[1]),
-            "indices are not reverse ordered for {case:?}: {:?}",
+                .all(|window| window[0] < window[1]),
+            "indices are not ascending for {case:?}: {:?}",
             match_.indices
         );
         assert!(
@@ -466,9 +466,9 @@ fn unicode_matcher_zero_typo_uses_byte_offsets_and_exact_flags() {
     assert_eq!(indices_views(&matcher_indices), indices_views(&indices));
     assert_eq!(indices.len(), 2);
     assert_eq!((indices[0].index, indices[0].exact), (0, false));
-    assert_eq!(indices[0].indices, vec![5, 4, 3, 2]);
+    assert_eq!(indices[0].indices, vec![2, 3, 4, 5]);
     assert_eq!((indices[1].index, indices[1].exact), (1, true));
-    assert_eq!(indices[1].indices, vec![3, 2, 1, 0]);
+    assert_eq!(indices[1].indices, vec![0, 1, 2, 3]);
 }
 
 #[test]
@@ -481,7 +481,7 @@ fn unicode_matcher_indices_cover_gaps_and_chunk_boundaries() {
     let gap_matches = Matcher::new("éx", &config).match_list(&gap_haystacks);
     let gap_indices = Matcher::new("éx", &config).match_list_indices(&gap_haystacks);
     assert_eq!(gap_indices.len(), 1);
-    assert_eq!(gap_indices[0].indices, vec![6, 1, 0]);
+    assert_eq!(gap_indices[0].indices, vec![0, 1, 6]);
     assert_eq!(
         (gap_indices[0].score, gap_indices[0].exact),
         (gap_matches[0].score, gap_matches[0].exact)
@@ -491,7 +491,7 @@ fn unicode_matcher_indices_cover_gaps_and_chunk_boundaries() {
     let boundary_matches = Matcher::new("😀x", &config).match_list(&boundary_haystacks);
     let boundary_indices = Matcher::new("😀x", &config).match_list_indices(&boundary_haystacks);
     assert_eq!(boundary_indices.len(), 1);
-    assert_eq!(boundary_indices[0].indices, vec![11, 10, 9, 8, 7]);
+    assert_eq!(boundary_indices[0].indices, vec![7, 8, 9, 10, 11]);
     assert_eq!(
         (boundary_indices[0].score, boundary_indices[0].exact),
         (boundary_matches[0].score, boundary_matches[0].exact)
@@ -524,7 +524,7 @@ fn long_prefiltered_fallback_preserves_scores_and_original_byte_offsets() {
         indices_views(&filtered_indices),
         indices_views(&unfiltered_indices)
     );
-    assert_eq!(filtered_indices[0].indices, vec![1202, 1]);
+    assert_eq!(filtered_indices[0].indices, vec![1, 1202]);
 
     let unicode_haystack = format!("xé{}b", "_".repeat(1200));
     let filtered = Matcher::new("éb", &filtered_config).match_list(&[&unicode_haystack]);
@@ -539,7 +539,7 @@ fn long_prefiltered_fallback_preserves_scores_and_original_byte_offsets() {
         indices_views(&filtered_indices),
         indices_views(&unfiltered_indices)
     );
-    assert_eq!(filtered_indices[0].indices, vec![1203, 2, 1]);
+    assert_eq!(filtered_indices[0].indices, vec![1, 2, 1203]);
 }
 
 #[cfg(feature = "typos")]
@@ -756,16 +756,16 @@ fn reverse_index_matches_sequential_and_parallel() {
 }
 
 #[test]
-fn public_indices_are_reverse_byte_offsets() {
+fn public_indices_are_ascending_byte_offsets() {
     let haystacks = ["xabcx", "a_b_c", "nomatch"];
     let config = Config::default().sort(SortStrategy::IndexAsc);
 
     let matches = Matcher::new("abc", &config).match_list_indices(&haystacks);
     assert_eq!(matches.len(), 2);
     assert_eq!(matches[0].index, 0);
-    assert_eq!(matches[0].indices, vec![3, 2, 1]);
+    assert_eq!(matches[0].indices, vec![1, 2, 3]);
     assert_eq!(matches[1].index, 1);
-    assert_eq!(matches[1].indices, vec![4, 2, 0]);
+    assert_eq!(matches[1].indices, vec![0, 2, 4]);
 }
 
 #[test]

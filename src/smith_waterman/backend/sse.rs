@@ -32,7 +32,6 @@ pub struct SseScore<const SSE41: bool>(__m128i);
 
 impl<const SSE41: bool> Backend for BackendSSE<SSE41> {
     const LANES: usize = 8;
-    const LANE_BYTES: usize = 2;
     type Bytes = SseBytes<SSE41>;
     type Mask = SseBytes<SSE41>;
     type Score = SseScore<SSE41>;
@@ -277,15 +276,6 @@ impl<const SSE41: bool> ScoreVec for SseScore<SSE41> {
             })
         }
     }
-    #[inline(always)]
-    unsafe fn find_lane(self, search: u16) -> usize {
-        unsafe {
-            let cmp = _mm_cmpeq_epi16(self.0, _mm_set1_epi16(search as i16));
-            let mask = _mm_movemask_epi8(cmp) as u32;
-            (mask.trailing_zeros() as usize / 2).min(8)
-        }
-    }
-
     #[cfg(test)]
     fn from_lanes(values: &[u16]) -> Self {
         assert_eq!(values.len(), 8);
@@ -311,7 +301,6 @@ pub struct SseU8Score<const SSE41: bool>(__m128i);
 
 impl<const SSE41: bool> Backend for BackendSSEU8<SSE41> {
     const LANES: usize = 16;
-    const LANE_BYTES: usize = 1;
     type Bytes = SseU8Bytes<SSE41>;
     type Mask = SseU8Bytes<SSE41>;
     type Score = SseU8Score<SSE41>;
@@ -484,15 +473,6 @@ impl<const SSE41: bool> ScoreVec for SseU8Score<SSE41> {
             })
         }
     }
-    #[inline(always)]
-    unsafe fn find_lane(self, search: u16) -> usize {
-        unsafe {
-            let cmp = _mm_cmpeq_epi8(self.0, _mm_set1_epi8(search as i8));
-            let mask = _mm_movemask_epi8(cmp) as u32;
-            (mask.trailing_zeros() as usize).min(16)
-        }
-    }
-
     #[cfg(test)]
     fn from_lanes(values: &[u16]) -> Self {
         assert_eq!(values.len(), 16);

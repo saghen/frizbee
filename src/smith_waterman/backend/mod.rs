@@ -9,8 +9,8 @@
 //! [`BytesVec`] type with no loss.
 //!
 //! The kernel itself is generic over [`Backend`] and the lane count threads
-//! through chunk arithmetic, the matrix stride, the alignment-path iterator,
-//! and the horizontal-gap propagation unroll.
+//! through chunk arithmetic, the matrix stride, and the horizontal-gap
+//! propagation unroll.
 //!
 //! Available backends:
 //!   - AVX-512: LANES = 32/64 (scoring u16 x 32 = 512-bit or u8 x 64 = 512-bit)
@@ -85,10 +85,6 @@ pub use wasm::{BackendWasm, BackendWasmU8};
 /// via [`Backend::widen_mask`].
 pub trait Backend: Sized + core::fmt::Debug + Clone + 'static {
     const LANES: usize;
-    /// Size of a single score lane in bytes. 1 for u8-element backends,
-    /// 2 for u16-element backends. Used by the alignment-path iterator to
-    /// read individual cells from the matrix's raw byte view.
-    const LANE_BYTES: usize;
     type Bytes: BytesVec<Mask = Self::Mask>;
     type Mask: MaskVec;
     type Score: ScoreVec;
@@ -272,12 +268,6 @@ pub trait ScoreVec: Copy + core::fmt::Debug {
     /// # Safety
     /// The backend's target features must be enabled at the call site.
     unsafe fn shift_right_padded<const L: i32>(self, prev: Self) -> Self;
-
-    /// Index of the lowest lane equal to `search`, or `LANES` if absent
-    ///
-    /// # Safety
-    /// The backend's target features must be enabled at the call site.
-    unsafe fn find_lane(self, search: u16) -> usize;
 
     // ----- Test-only helpers ---------------------------------------------
 

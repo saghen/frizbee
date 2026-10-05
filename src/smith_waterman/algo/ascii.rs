@@ -6,25 +6,9 @@ use crate::smith_waterman::{
 };
 
 impl<B: Backend> SmithWaterman<B> {
-    /// Scores the haystack without filling the matrices
+    /// Scores the haystack without filling a matrix
     #[inline(always)]
     pub(crate) fn score_haystack(&mut self, haystack: &[u8], include_prefix: bool) -> u16 {
-        self.score_haystack_impl::<false>(haystack, include_prefix)
-    }
-
-    /// Scores the haystack and fills the score matrix for the
-    /// alignment path
-    #[inline(always)]
-    pub(crate) fn score_haystack_matrix(&mut self, haystack: &[u8], include_prefix: bool) -> u16 {
-        self.score_haystack_impl::<true>(haystack, include_prefix)
-    }
-
-    #[inline(always)]
-    fn score_haystack_impl<const STORE: bool>(
-        &mut self,
-        haystack: &[u8],
-        include_prefix: bool,
-    ) -> u16 {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(
                 self.needle.as_bytes(),
@@ -39,13 +23,7 @@ impl<B: Backend> SmithWaterman<B> {
 
         let scoring = &self.scoring;
         let haystack_chunks = haystack.len().div_ceil(B::LANES) + 1;
-        self.haystack_chunks = haystack_chunks;
 
-        // Matrix stride is fixed at construction. Row 0 and column 0 are
-        // always zero (never written by the inner loop), so no re-zeroing is
-        // needed between calls
-        let score_matrix = &mut self.score_matrix;
-        let match_masks = &mut self.match_masks;
         let chunk_rows = self.chunk_rows.as_mut_ptr();
         let needle_len = self.needle.len();
 
@@ -160,8 +138,7 @@ impl<B: Backend> SmithWaterman<B> {
                     let gap_open_penalty_masked = match_mask.and(gap_open_penalty);
                     let mut row_scores = diag_scores.max(up_scores);
                     // Gaps can't raise the last row's max: skip it there
-                    // unless the matrix is stored
-                    if STORE || row_idx != needle_len {
+                    if row_idx != needle_len {
                         let gap_source_scores = row_scores.subs(gap_open_penalty_masked);
                         let (prev_chunk_row_scores, prev_chunk_gap_scores) =
                             prev_chunk_rows.add(row_idx - 1).read();
@@ -174,11 +151,6 @@ impl<B: Backend> SmithWaterman<B> {
                         );
                         chunk_rows.add(row_idx - 1).write((row_scores, gap_scores));
                         prev_chunk_prev_row_scores = prev_chunk_row_scores;
-
-                        if STORE {
-                            score_matrix.set(row_idx, col_idx, row_scores);
-                            match_masks.set(row_idx, col_idx, match_mask);
-                        }
                     }
                     prev_row_scores = row_scores;
                     up_penalty = gap_extend_penalty.add(gap_open_penalty_masked);

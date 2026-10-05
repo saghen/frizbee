@@ -180,11 +180,11 @@ mod tests {
     }
 
     #[test]
-    fn indices_are_contiguous_reversed() {
+    fn indices_are_contiguous() {
         let matches =
             Matcher::new("abc", &config(Matching::Substring)).match_list_indices(&["xxabcxx"]);
         assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].indices, vec![4, 3, 2]);
+        assert_eq!(matches[0].indices, vec![2, 3, 4]);
     }
 
     #[test]
@@ -364,12 +364,11 @@ mod tests {
 
     #[test]
     fn unicode_indices_span_whole_utf8_run() {
-        // Matched indices are byte offsets covering the full UTF-8 run,
-        // reversed.
+        // Matched indices are byte offsets covering the full UTF-8 run
         let matches =
             Matcher::new("é다", &config(Matching::Substring)).match_list_indices(&["xxé다yy"]);
         assert_eq!(matches.len(), 1);
         // "xx" is two bytes; "é" occupies bytes 2..4, "다" bytes 4..7.
-        assert_eq!(matches[0].indices, vec![6, 5, 4, 3, 2]);
+        assert_eq!(matches[0].indices, vec![2, 3, 4, 5, 6]);
     }
 }

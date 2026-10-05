@@ -111,12 +111,9 @@ impl PyMatchIndices {
 }
 
 impl PyMatchIndices {
-    /// Converts the core's reverse UTF-8 byte offsets into ascending Python
-    /// character indices
+    /// Converts the core's UTF-8 byte offsets into Python character indices
     fn from_core(matched: frizbee::MatchIndices, haystack: &str) -> Self {
-        let mut byte_indices = matched.indices;
-        byte_indices.sort_unstable();
-
+        let byte_indices = matched.indices;
         let mut indices = Vec::with_capacity(byte_indices.len());
         let mut byte_indices = byte_indices.into_iter().peekable();
         for (char_index, (start, character)) in haystack.char_indices().enumerate() {

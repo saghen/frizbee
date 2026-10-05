@@ -16,7 +16,6 @@ pub struct NeonScore(uint16x8_t);
 
 impl Backend for BackendNEON {
     const LANES: usize = 8;
-    const LANE_BYTES: usize = 2;
     type Bytes = NeonBytes;
     type Mask = NeonBytes;
     type Score = NeonScore;
@@ -221,23 +220,6 @@ impl ScoreVec for NeonScore {
             })
         }
     }
-    #[inline(always)]
-    unsafe fn find_lane(self, search: u16) -> usize {
-        unsafe {
-            // Compare lanes; each matching u16 becomes 0xFFFF, others 0.
-            // Narrow to a byte-per-lane mask, then trailing_zeros locates the
-            // first match.
-            let cmp = vceqq_u16(self.0, vdupq_n_u16(search));
-            let narrowed = vmovn_u16(cmp);
-            let bits = vget_lane_u64::<0>(vreinterpret_u64_u8(narrowed));
-            if bits == 0 {
-                8
-            } else {
-                bits.trailing_zeros() as usize / 8
-            }
-        }
-    }
-
     #[cfg(test)]
     fn from_lanes(values: &[u16]) -> Self {
         assert_eq!(values.len(), 8);
@@ -263,7 +245,6 @@ pub struct NeonU8Score(uint8x16_t);
 
 impl Backend for BackendNEONU8 {
     const LANES: usize = 16;
-    const LANE_BYTES: usize = 1;
     type Bytes = NeonU8Bytes;
     type Mask = NeonU8Bytes;
     type Score = NeonU8Score;
@@ -464,22 +445,6 @@ impl ScoreVec for NeonU8Score {
             })
         }
     }
-    #[inline(always)]
-    unsafe fn find_lane(self, search: u16) -> usize {
-        unsafe {
-            let cmp = vceqq_u8(self.0, vdupq_n_u8(search as u8));
-            // Narrow each 8-bit lane to a 4-bit nibble so the full mask fits
-            // in a u64, then trailing_zeros locates the first match.
-            let narrowed = vshrn_n_u16::<4>(vreinterpretq_u16_u8(cmp));
-            let bits = vget_lane_u64::<0>(vreinterpret_u64_u8(narrowed));
-            if bits == 0 {
-                16
-            } else {
-                bits.trailing_zeros() as usize / 4
-            }
-        }
-    }
-
     #[cfg(test)]
     fn from_lanes(values: &[u16]) -> Self {
         assert_eq!(values.len(), 16);

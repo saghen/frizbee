@@ -167,20 +167,6 @@ fn check_score_horizontal_max<B: Backend>() {
     }
 }
 
-fn check_score_find_lane<B: Backend>() {
-    unsafe {
-        // for 32 lanes, step of 7 stays under 224, fits in u8
-        let a_in: Vec<u16> = (0..B::LANES).map(|i| (i as u16) * 7).collect();
-        let a = B::Score::from_lanes(&a_in);
-        for (i, &v) in a_in.iter().enumerate() {
-            assert_eq!(a.find_lane(v), i);
-        }
-        // search for a value that can't appear in the data
-        // works for both u8 and u16 backends
-        assert_eq!(a.find_lane(251), B::LANES);
-    }
-}
-
 fn check_score_shift_right_padded_at<B: Backend, const L: i32>() {
     unsafe {
         // Distinct values for `a` and `p` that all fit in u8
@@ -241,7 +227,6 @@ fn check_backend_contract<B: Backend>() {
     check_score_first_lane::<B>();
     check_score_max_add_subs::<B>();
     check_score_horizontal_max::<B>();
-    check_score_find_lane::<B>();
     check_score_shift_right_padded::<B>();
 }
 

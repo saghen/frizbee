@@ -65,7 +65,7 @@ int main(void) {
                                            &one_indices_len));
   assert(one.index == 42);
   assert(one_indices_len == 3);
-  assert(one_indices[0] == 5 && one_indices[1] == 3 && one_indices[2] == 0);
+  assert(one_indices[0] == 0 && one_indices[1] == 3 && one_indices[2] == 5);
 
   frizbee_matcher_free(matcher);
   frizbee_matcher_free(NULL); // no-op

@@ -226,16 +226,6 @@ impl<const LANES: usize> ScoreVec for ScalarScoreU16<LANES> {
         Self(out)
     }
 
-    #[inline(always)]
-    unsafe fn find_lane(self, search: u16) -> usize {
-        for (idx, &lane) in self.0.iter().enumerate() {
-            if lane == search {
-                return idx;
-            }
-        }
-        LANES
-    }
-
     #[cfg(test)]
     fn from_lanes(values: &[u16]) -> Self {
         assert_eq!(values.len(), LANES);
@@ -321,17 +311,6 @@ impl<const LANES: usize> ScoreVec for ScalarScoreU8<LANES> {
         Self(out)
     }
 
-    #[inline(always)]
-    unsafe fn find_lane(self, search: u16) -> usize {
-        let search = search as u8;
-        for (idx, &lane) in self.0.iter().enumerate() {
-            if lane == search {
-                return idx;
-            }
-        }
-        LANES
-    }
-
     #[cfg(test)]
     fn from_lanes(values: &[u16]) -> Self {
         assert_eq!(values.len(), LANES);
@@ -355,7 +334,6 @@ macro_rules! scalar_backend {
     (
         $backend:ident,
         $lanes:tt,
-        $lane_bytes:literal,
         $score:ty
     ) => {
         #[derive(Debug, Clone, Copy)]
@@ -363,7 +341,6 @@ macro_rules! scalar_backend {
 
         impl Backend for $backend {
             const LANES: usize = $lanes;
-            const LANE_BYTES: usize = $lane_bytes;
             type Bytes = ScalarBytes<$lanes>;
             type Mask = ScalarBytes<$lanes>;
             type Score = $score;
@@ -382,19 +359,19 @@ macro_rules! scalar_backend {
     };
 }
 
-scalar_backend!(BackendScalar8, 8, 2, ScalarScoreU16<8>);
-scalar_backend!(BackendScalar16U8, 16, 1, ScalarScoreU8<16>);
+scalar_backend!(BackendScalar8, 8, ScalarScoreU16<8>);
+scalar_backend!(BackendScalar16U8, 16, ScalarScoreU8<16>);
 
 // Test only backends used to assert correctness in the SIMD backends
 #[cfg(target_arch = "x86_64")]
 #[cfg(test)]
-scalar_backend!(TestScalar16, 16, 2, ScalarScoreU16<16>);
+scalar_backend!(TestScalar16, 16, ScalarScoreU16<16>);
 #[cfg(target_arch = "x86_64")]
 #[cfg(test)]
-scalar_backend!(TestScalar32, 32, 2, ScalarScoreU16<32>);
+scalar_backend!(TestScalar32, 32, ScalarScoreU16<32>);
 #[cfg(target_arch = "x86_64")]
 #[cfg(test)]
-scalar_backend!(TestScalar32U8, 32, 1, ScalarScoreU8<32>);
+scalar_backend!(TestScalar32U8, 32, ScalarScoreU8<32>);
 #[cfg(target_arch = "x86_64")]
 #[cfg(test)]
-scalar_backend!(TestScalar64U8, 64, 1, ScalarScoreU8<64>);
+scalar_backend!(TestScalar64U8, 64, ScalarScoreU8<64>);

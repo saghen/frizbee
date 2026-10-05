@@ -364,9 +364,27 @@ mod tests {
         let matches = Matcher::new("abc", &config).match_list_indices(&haystacks);
         assert_eq!(matches.len(), 2);
         assert_eq!(matches[0].index, 0);
-        assert_eq!(matches[0].indices, vec![3, 2, 1]);
+        assert_eq!(matches[0].indices, vec![1, 2, 3]);
         assert_eq!(matches[1].index, 1);
-        assert_eq!(matches[1].indices, vec![4, 2, 0]);
+        assert_eq!(matches[1].indices, vec![0, 2, 4]);
+    }
+
+    #[test]
+    #[cfg(feature = "typos")]
+    fn match_list_indices_stay_within_the_typo_budget() {
+        let haystack = "is thisreal/components//components/ real";
+        let no_typos = vec![0, 1, 2, 3, 4, 5, 6, 35, 36, 37, 38, 39];
+        let one_typo = (0..=10).collect::<Vec<_>>();
+        for (max_typos, indices) in [
+            (Some(0), no_typos),
+            (Some(1), one_typo.clone()),
+            (None, one_typo),
+        ] {
+            let config = Config::default().max_typos(max_typos);
+            let matches = Matcher::new("is this real", &config).match_list_indices(&[haystack]);
+            assert_eq!(matches.len(), 1);
+            assert_eq!(matches[0].indices, indices);
+        }
     }
 
 }

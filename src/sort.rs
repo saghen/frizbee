@@ -82,12 +82,12 @@ pub(crate) fn sort_indices_by_score(matches: &mut Vec<MatchIndices>) {
     );
 }
 
-/// Sorts `indices` descending with an insertion sort (small O(n))
-pub(crate) fn sort_indices_desc(indices: &mut [u32]) {
+/// Sorts `indices` ascending with an insertion sort (small O(n))
+pub(crate) fn sort_indices(indices: &mut [u32]) {
     for i in 1..indices.len() {
         let index = indices[i];
         let mut j = i;
-        while j > 0 && indices[j - 1] < index {
+        while j > 0 && indices[j - 1] > index {
             indices[j] = indices[j - 1];
             j -= 1;
         }

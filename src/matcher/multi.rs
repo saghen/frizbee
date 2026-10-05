@@ -73,9 +73,9 @@ impl Matcher {
                 combined.indices.extend(m.indices);
             }
         }
-        // Indices are reported in reverse order, and patterns may share matched
-        // chars.
-        crate::sort::sort_indices_desc(&mut combined.indices);
+        // Indices are reported in ascending order, and patterns may share
+        // matched chars.
+        crate::sort::sort_indices(&mut combined.indices);
         combined.indices.dedup();
         Some(combined)
     }
@@ -261,9 +261,9 @@ mod tests {
                 assert_eq!(m.index, i.index, "query: {query:?}");
                 assert_eq!(m.score, i.score, "query: {query:?}");
                 assert_eq!(m.exact, i.exact, "query: {query:?}");
-                // Indices must be strictly descending (reverse order, deduped)
+                // Indices must be strictly ascending (deduped)
                 assert!(
-                    i.indices.windows(2).all(|w| w[0] > w[1]),
+                    i.indices.windows(2).all(|w| w[0] < w[1]),
                     "query: {query:?}, indices: {:?}",
                     i.indices
                 );
@@ -276,7 +276,7 @@ mod tests {
         let mut matcher = multi("foo fo", &Config::default());
         let indices = matcher.match_list_indices(&["foo"]);
         assert_eq!(indices.len(), 1);
-        assert_eq!(indices[0].indices, vec![2, 1, 0]);
+        assert_eq!(indices[0].indices, vec![0, 1, 2]);
     }
 
     #[test]

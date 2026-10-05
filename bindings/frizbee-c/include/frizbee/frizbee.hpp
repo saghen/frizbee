@@ -31,7 +31,7 @@ inline std::size_t max_needle_len(const Scoring &scoring) {
 }
 
 /// Like `Match` but includes the indices of the chars in the haystack that
-/// matched the needle in reverse order
+/// matched the needle in ascending order
 struct MatchIndices {
   std::uint16_t score;
   std::uint32_t index;

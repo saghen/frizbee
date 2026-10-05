@@ -60,7 +60,6 @@ pub struct WasmScore(v128);
 
 impl Backend for BackendWasm {
     const LANES: usize = 8;
-    const LANE_BYTES: usize = 2;
     type Bytes = WasmBytes;
     type Mask = WasmBytes;
     type Score = WasmScore;
@@ -249,13 +248,6 @@ impl ScoreVec for WasmScore {
             })
         }
     }
-    #[inline(always)]
-    unsafe fn find_lane(self, search: u16) -> usize {
-        let cmp = u16x8_eq(self.0, u16x8_splat(search));
-        let mask = i16x8_bitmask(cmp) as u32;
-        (mask.trailing_zeros() as usize).min(8)
-    }
-
     #[cfg(test)]
     fn from_lanes(values: &[u16]) -> Self {
         assert_eq!(values.len(), 8);
@@ -281,7 +273,6 @@ pub struct WasmU8Score(v128);
 
 impl Backend for BackendWasmU8 {
     const LANES: usize = 16;
-    const LANE_BYTES: usize = 1;
     type Bytes = WasmU8Bytes;
     type Mask = WasmU8Bytes;
     type Score = WasmU8Score;
@@ -535,13 +526,6 @@ impl ScoreVec for WasmU8Score {
             })
         }
     }
-    #[inline(always)]
-    unsafe fn find_lane(self, search: u16) -> usize {
-        let cmp = u8x16_eq(self.0, u8x16_splat(search as u8));
-        let mask = u8x16_bitmask(cmp) as u32;
-        (mask.trailing_zeros() as usize).min(16)
-    }
-
     #[cfg(test)]
     fn from_lanes(values: &[u16]) -> Self {
         assert_eq!(values.len(), 16);
