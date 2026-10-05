@@ -24,6 +24,8 @@ pub struct UnicodeChar {
     pub chars: [u8; 4],
     pub flipped_chars: [u8; 4],
     pub len: usize,
+    /// whether the case-flipped chars differ from the original chars
+    pub has_flip: bool,
 }
 
 impl UnicodeChar {
@@ -43,6 +45,7 @@ impl UnicodeChar {
             chars,
             flipped_chars,
             len: c.len_utf8(),
+            has_flip: c != flipped_c,
         }
     }
 }
