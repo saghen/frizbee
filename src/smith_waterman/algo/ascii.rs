@@ -1,4 +1,4 @@
-use super::MAX_HAYSTACK_LEN;
+use super::{MAX_HAYSTACK_LEN, unicode::valid_haystack_lanes};
 use crate::smith_waterman::{
     ScoringVecs, SmithWaterman,
     backend::{Backend, BytesVec, MaskVec, ScoreVec},
@@ -72,6 +72,7 @@ impl<B: Backend> SmithWaterman<B> {
             let mut prev_chunk_char_is_delimiter_mask = B::Mask::zero();
             let mut prev_chunk_is_lower_mask = B::Mask::zero();
             let mut max_scores = B::Score::zero();
+            let mut prev_row_scores = B::Score::zero();
 
             for col_idx in 1..haystack_chunks {
                 let haystack_chunk = B::Bytes::load_partial(
@@ -79,6 +80,10 @@ impl<B: Backend> SmithWaterman<B> {
                     (col_idx - 1) * B::LANES,
                     haystack.len(),
                 );
+
+                max_scores = max_scores.max(prev_row_scores);
+                prev_row_scores = B::Score::zero();
+
                 // Bonus for matching a capital letter after a lowercase letter
                 let is_upper_mask = haystack_chunk
                     .lt(B::Bytes::splat(b'Z' + 1))
@@ -128,7 +133,6 @@ impl<B: Backend> SmithWaterman<B> {
                 let mut up_penalty = gap_extend_penalty;
                 // The previous chunk's row above, shifted in by the diagonal
                 let mut prev_chunk_prev_row_scores = B::Score::zero();
-                let mut prev_row_scores = B::Score::zero();
 
                 for (row_idx, (needle_char, flipped_case_needle_char)) in
                     self.needle_simd.iter().enumerate().map(|(i, c)| (i + 1, c))
@@ -180,13 +184,13 @@ impl<B: Backend> SmithWaterman<B> {
                     prev_row_scores = row_scores;
                     up_penalty = gap_extend_penalty.add(gap_open_penalty_masked);
                 }
-
-                // Last row of the matrix at this chunk
-                max_scores = max_scores.max(prev_row_scores);
                 prefix_bonus_masked = B::Score::zero();
             }
 
-            max_scores.horizontal_max()
+            // Mask out lanes beyond the haystack's end
+            let last_chunk_start = haystack.len().saturating_sub(1) / B::LANES * B::LANES;
+            let valid = B::widen_mask(valid_haystack_lanes::<B>(haystack.len(), last_chunk_start));
+            max_scores.max(prev_row_scores.and(valid)).horizontal_max()
         }
     }
 }
