@@ -1,5 +1,5 @@
 #[cfg(target_arch = "x86_64")]
-use crate::smith_waterman::needle_fits_in_u8;
+use crate::smith_waterman::avx512_u8_fits;
 use crate::sort::radix_sort_matches;
 use crate::{Config, Match, MatchIndices, Pattern};
 use alloc::{vec, vec::Vec};
@@ -463,14 +463,17 @@ impl Matcher {
         #[cfg(target_arch = "x86_64")]
         {
             let unicode = config.unicode.respects_unicode_for(needle);
-            if needle_fits_in_u8(needle, unicode, &config.scoring) {
+            let use_u8 = avx512_u8_fits(needle, unicode, &config.scoring);
+            if use_u8 {
                 if MatcherAVX512U8::is_available() {
                     return MatcherBackend::AVX512U8(unsafe {
                         MatcherAVX512U8::build(needle, config)
                     });
                 }
-            } else if MatcherAVX512::is_available() {
-                return MatcherBackend::AVX512(unsafe { MatcherAVX512::build(needle, config) });
+            } else {
+                if MatcherAVX512::is_available() {
+                    return MatcherBackend::AVX512(unsafe { MatcherAVX512::build(needle, config) });
+                }
             }
             if MatcherAVX::is_available() {
                 return MatcherBackend::AVX(unsafe { MatcherAVX::build(needle, config) });
@@ -845,6 +848,46 @@ mod tests {
             panic!("expected a single pattern");
         };
         assert!(is_u8(&pattern.backend));
+    }
+
+    /// AVX-512 runs ASCII needles on the u8 kernel only within its scan's
+    /// ramp (9 bytes with the default scoring), the u16 kernel past it,
+    /// and scores them alike
+    #[test]
+    #[cfg(target_arch = "x86_64")]
+    fn avx512_u8_kernel_needs_the_ramp_headroom() {
+        if !MatcherAVX512U8::is_available() {
+            return;
+        }
+        let haystacks = ["xcomponentsx/a/b", "c_o_m_p_o_n_e_n_t_s", "compon/ents"];
+        for (needle, u8) in [("component", true), ("components", false)] {
+            let config = Config::default()
+                .max_typos(None)
+                .sort(crate::SortStrategy::IndexAsc);
+            let mut matcher = Matcher::new(needle, &config);
+            let CompiledPatterns::Single(pattern) = &matcher.patterns else {
+                panic!("expected a single pattern");
+            };
+            assert_eq!(matches!(pattern.backend, MatcherBackend::AVX512U8(_)), u8);
+            let scores: Vec<_> = matcher
+                .match_list(&haystacks)
+                .iter()
+                .map(|m| m.score)
+                .collect();
+            let want: Vec<_> = haystacks
+                .iter()
+                .map(|h| {
+                    crate::smith_waterman::reference::score_with_exact_bonus(
+                        needle,
+                        h,
+                        &config.scoring,
+                        false,
+                        false,
+                    )
+                })
+                .collect();
+            assert_eq!(scores, want, "{needle}");
+        }
     }
 
     #[test]

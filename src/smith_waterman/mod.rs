@@ -109,6 +109,15 @@ pub(crate) fn needle_fits_in_u8(needle: &str, unicode: bool, scoring: &Scoring) 
     score_fits_in_u8(rows, scoring)
 }
 
+/// Whether AVX-512 scores the needle with its u8 kernel: when no score can
+/// saturate, and for ASCII needles within its scan's ramp
+#[cfg(target_arch = "x86_64")]
+pub(crate) fn avx512_u8_fits(needle: &str, unicode: bool, scoring: &Scoring) -> bool {
+    let ramp = BackendAVX512U8::ASCII_SCAN_RAMP;
+    needle_fits_in_u8(needle, unicode, scoring)
+        && (unicode || u8_scan_ramp_fits(needle.len(), scoring, ramp))
+}
+
 /// Returns true if every possible Smith-Waterman matrix cell value for this
 /// row count and scoring config fits in a u8. The u8 backends are otherwise
 /// identical to the u16 backends but with double the lane count (64 cells/chunk
@@ -136,6 +145,15 @@ pub(crate) fn score_fits_in_u8(rows: usize, scoring: &Scoring) -> bool {
     // No cell holds more than [`Scoring::max_score`], which the diagonal
     // transiently exceeds by the mismatch penalty before subtracting it
     scoring.max_score(rows) + scoring.mismatch_penalty as u64 <= u8::MAX as u64
+}
+
+/// Whether the ASCII kernel's ramped scan of `ramp` lanes is exact for this
+/// row count (see [`Backend::ASCII_SCAN_RAMP`]): no cell saturates (see
+/// [`score_fits_in_u8`]), nor a gap source plus the ramp
+pub(crate) fn u8_scan_ramp_fits(rows: usize, scoring: &Scoring, ramp: usize) -> bool {
+    score_fits_in_u8(rows, scoring)
+        && scoring.max_score(rows) + (ramp * scoring.gap_extend_penalty as usize) as u64
+            <= u8::MAX as u64
 }
 
 /// Scoring constants splatted once at construction, so the outlined kernels

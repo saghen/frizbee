@@ -5,7 +5,8 @@ use super::super::Backend;
 use super::super::{BackendScalar8, BackendScalar16U8};
 use super::generator::{ByteCursor, run_generated_inputs, test_bound};
 use crate::Scoring;
-use crate::smith_waterman::{Kernel, SmithWaterman, score_fits_in_u8};
+use crate::smith_waterman::reference::u8_kernel_fits;
+use crate::smith_waterman::{Kernel, SmithWaterman};
 
 /// randomized matcher invocation: which needle, haystack, and config to run
 #[derive(Debug, Clone)]
@@ -56,7 +57,7 @@ fn miri_inputs() -> &'static [&'static [u8]] {
 /// (`all()` for the always-present scalar backends), `$reference` is the
 /// lane-matched scalar oracle used by the randomized test, and `$is_u8` marks
 /// backends whose score must fit in u8 (so the caller can gate them on
-/// [`score_fits_in_u8`]).
+/// [`u8_kernel_fits`]).
 macro_rules! for_each_backend {
     ($callback:ident !( $($ctx:tt)* )) => {
         $callback!($($ctx)* ; all(), "Scalar-u16", BackendScalar8, BackendScalar8, false);
@@ -158,7 +159,7 @@ macro_rules! assert_score_row {
      $cfg:meta, $label:literal, $backend:ty, $reference:ty, $is_u8:literal) => {
         #[cfg($cfg)]
         {
-            if !$is_u8 || score_fits_in_u8($needle.len(), &Scoring::default()) {
+            if !$is_u8 || u8_kernel_fits::<$backend>($needle.len(), &Scoring::default(), false) {
                 assert_score_backend::<$backend>($label, $needle, $haystack, $want);
             }
         }
@@ -171,7 +172,7 @@ macro_rules! assert_indices_row {
      $cfg:meta, $label:literal, $backend:ty, $reference:ty, $is_u8:literal) => {
         #[cfg($cfg)]
         {
-            if !$is_u8 || score_fits_in_u8($needle.len(), &Scoring::default()) {
+            if !$is_u8 || u8_kernel_fits::<$backend>($needle.len(), &Scoring::default(), false) {
                 assert_indices_backend::<$backend>($label, $needle, $haystack, $want.clone());
             }
         }
@@ -293,7 +294,8 @@ macro_rules! assert_case_row {
      $cfg:meta, $label:literal, $backend:ty, $reference:ty, $is_u8:literal) => {
         #[cfg($cfg)]
         {
-            if !$is_u8 || score_fits_in_u8($case.needle.len(), &Scoring::default()) {
+            if !$is_u8 || u8_kernel_fits::<$backend>($case.needle.len(), &Scoring::default(), false)
+            {
                 assert_backend_matches_reference::<$backend, $reference>(
                     $label,
                     &$case.needle,

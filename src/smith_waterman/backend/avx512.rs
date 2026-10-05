@@ -109,6 +109,54 @@ impl Backend for BackendAVX512U8 {
     }
 
     gap_dispatch!(64);
+
+    const ASCII_SCAN_RAMP: usize = 63;
+
+    /// The ramp `gap_extend * j`, then `gap_extend` (the previous chunk's
+    /// step)
+    #[inline(always)]
+    unsafe fn ascii_gap_steps(gap_extend: u16) -> [Self::Score; 10] {
+        let mut ramp = [0u8; 64];
+        for (j, lane) in ramp.iter_mut().enumerate() {
+            *lane = gap_extend.saturating_mul(j as u16).min(255) as u8;
+        }
+        unsafe {
+            let mut steps = [Avx512U8Score::splat(gap_extend); 10];
+            steps[0] = Avx512U8Score(_mm512_loadu_si512(ramp.as_ptr() as *const __m512i));
+            steps
+        }
+    }
+
+    /// The scan decays by `gap_extend` per lane, so it's the plain prefix max
+    /// of `v` plus the ramp `gap_extend * j`, minus the ramp (see
+    /// `u8_scan_ramp_fits`): within each 128-bit segment, then from the last
+    /// lane of every earlier segment and of the previous chunk
+    #[inline(always)]
+    unsafe fn ascii_scan(
+        v: Self::Score,
+        prev: Self::Score,
+        steps: &[Self::Score; 10],
+        scores: Self::Score,
+    ) -> (Self::Score, Self::Score) {
+        unsafe {
+            let ramp = steps[0];
+            let carry = Avx512U8Score(_mm512_permutexvar_epi8(_mm512_set1_epi8(63), prev.0));
+            let carry = carry.subs(steps[1]);
+            let v = v.add(ramp);
+            let v = v
+                .max(carry)
+                .max(in_segment::<1>(v))
+                .max(in_segment::<2>(v).max(in_segment::<3>(v)));
+            let v = v
+                .max(in_segment::<4>(v))
+                .max(in_segment::<8>(v).max(in_segment::<12>(v)));
+            let v = v
+                .max(segment_end(v, 0))
+                .max(segment_end(v, 1).max(segment_end(v, 2)));
+            let scan = v.subs(ramp);
+            (scan, scan.max(scores))
+        }
+    }
 }
 
 impl BytesVec for Avx512Bytes {
@@ -439,6 +487,37 @@ unsafe fn quarters(v: __m512i) -> (__m128i, __m128i, __m128i, __m128i) {
             _mm512_extracti32x4_epi32::<2>(v),
             _mm512_extracti32x4_epi32::<3>(v),
         )
+    }
+}
+
+/// Zero-filled shift within 128-bit segments by `L` lanes
+#[inline(always)]
+unsafe fn in_segment<const L: i32>(v: Avx512U8Score) -> Avx512U8Score {
+    unsafe { Avx512U8Score(_mm512_bslli_epi128::<L>(v.0)) }
+}
+
+/// The last lane of the segment `k + 1` segments back in every lane of a
+/// segment. Segments without one take their own lanes, which a decay (or the
+/// ramp) keeps below the scan
+#[inline(always)]
+unsafe fn segment_end(v: Avx512U8Score, k: usize) -> Avx512U8Score {
+    static SEGMENT_ENDS: [[u8; 64]; 3] = {
+        let mut arr = [[0u8; 64]; 3];
+        let mut i = 0;
+        while i < 3 * 64 {
+            let (k, j) = (i / 64 + 1, i % 64);
+            arr[k - 1][j] = if j / 16 >= k {
+                ((j / 16 - k) * 16 + 15) as u8
+            } else {
+                j as u8
+            };
+            i += 1;
+        }
+        arr
+    };
+    unsafe {
+        let idx = _mm512_loadu_si512(SEGMENT_ENDS[k].as_ptr() as *const __m512i);
+        Avx512U8Score(_mm512_permutexvar_epi8(idx, v.0))
     }
 }
 

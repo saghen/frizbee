@@ -48,7 +48,7 @@
 //! ones are scored greedily), and the u8 kernels only for needles whose every
 //! cell fits in a u8. Within those limits a kernel must equal this reference.
 
-use super::score_fits_in_u8;
+use super::{backend::Backend, score_fits_in_u8, u8_scan_ramp_fits};
 use crate::Scoring;
 use alloc::{string::String, vec, vec::Vec};
 
@@ -483,4 +483,14 @@ impl Rng {
     pub(crate) fn string(&mut self, alphabet: &[char], len: usize) -> String {
         (0..len).map(|_| self.pick(alphabet)).collect()
     }
+}
+
+/// [`score_fits_in_u8`] for backend `B`'s u8 kernel, whose ASCII (not
+/// `unicode`) scan may also need its ramp's headroom (see
+/// [`Backend::ASCII_SCAN_RAMP`])
+pub(crate) fn u8_kernel_fits<B: Backend>(rows: usize, scoring: &Scoring, unicode: bool) -> bool {
+    score_fits_in_u8(rows, scoring)
+        && (unicode
+            || B::ASCII_SCAN_RAMP == 0
+            || u8_scan_ramp_fits(rows, scoring, B::ASCII_SCAN_RAMP))
 }

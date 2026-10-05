@@ -38,8 +38,9 @@ use crate::smith_waterman::{SmithWatermanWasm, SmithWatermanWasmU8};
 pub type MatcherAVX512U8 = MatcherImpl<PrefilterAVX512, SmithWatermanAVX512U8>;
 #[cfg(target_arch = "x86_64")]
 pub type MatcherAVX512 = MatcherImpl<PrefilterAVX512, SmithWatermanAVX512>;
-// The u8 and u16 AVX-512 kernels need different features (VBMI), so they
-// stay separate backends; every other tier picks the width at construction
+// Every tier picks u8 or u16 per needle at construction: AVX-512 in
+// `get_backend` (separate backends, the u8 kernel needs VBMI), the others in
+// `ScoreWidth`
 #[cfg(target_arch = "x86_64")]
 pub type MatcherAVX = MatcherImpl<PrefilterAVX, ScoreWidth<SmithWatermanAVXU8, SmithWatermanAVX>>;
 #[cfg(target_arch = "x86_64")]

@@ -522,7 +522,7 @@ mod tests {
         #[cfg(target_arch = "x86_64")]
         {
             check!(MatcherAVX512);
-            // (needles whose u8 scores can't saturate)
+            // (needles whose u8 scores can't saturate, ASCII within its scan's ramp)
             check!(MatcherAVX512U8, ["policy", "니다"]);
             check!(MatcherAVX);
             check!(MatcherSSE);

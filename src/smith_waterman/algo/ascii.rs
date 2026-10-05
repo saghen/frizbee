@@ -3,6 +3,7 @@ use crate::smith_waterman::{
     ScoringVecs, SmithWaterman,
     backend::{Backend, BytesVec, MaskVec, ScoreVec},
     greedy::match_greedy,
+    u8_scan_ramp_fits,
 };
 
 impl<B: Backend> SmithWaterman<B> {
@@ -65,6 +66,11 @@ impl<B: Backend> SmithWaterman<B> {
         include_prefix: [bool; N],
     ) -> [u16; N] {
         const { assert!(N == 1 || !STORE) };
+        // (the ramped scan needs the headroom, see `Backend::ASCII_SCAN_RAMP`)
+        debug_assert!(
+            B::ASCII_SCAN_RAMP == 0
+                || u8_scan_ramp_fits(self.needle.len(), &self.scoring, B::ASCII_SCAN_RAMP)
+        );
         let mut max_len = 0;
         for haystack in haystacks {
             max_len = max_len.max(haystack.len());
@@ -169,12 +175,8 @@ impl<B: Backend> SmithWaterman<B> {
                             let sources = row_scores.subs(open);
                             let (prev_chunk_row, prev_chunk_scan) = carry_in.read();
                             let scan;
-                            (scan, row_scores) = B::horizontal_scan(
-                                sources,
-                                prev_chunk_scan,
-                                &gap_steps,
-                                row_scores,
-                            );
+                            (scan, row_scores) =
+                                B::ascii_scan(sources, prev_chunk_scan, &gap_steps, row_scores);
                             carry_out.write((row_scores, scan));
                             prev_chunk_row_above[s] = prev_chunk_row;
 
