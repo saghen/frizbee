@@ -6,7 +6,8 @@ use alloc::{
     vec::Vec,
 };
 
-/// Magic numbers for `TYPOS` specialization keys beyond literal 0/1/2
+/// Magic numbers for `TYPOS` specialization keys beyond 0: any typo budget
+/// (read at runtime) and no prefilter
 pub(super) const MANY_TYPOS: u16 = u16::MAX;
 pub(super) const NO_PREFILTER: u16 = u16::MAX - 1;
 
@@ -56,7 +57,7 @@ pub struct MatcherImpl<P: PrefilterKernel, S: SmithWatermanKernel> {
     needle: String,
     config: Config,
     min_haystack_len: usize,
-    prefilter: P,
+    pub(super) prefilter: P,
     pub(super) smith_waterman: S,
 }
 
@@ -93,7 +94,13 @@ where
         haystack_index_offset: u32,
         matches: &mut Vec<Match>,
     ) {
-        let max_typos = self.max_typos_runtime::<TYPOS>();
+        // `MANY_TYPOS` reads the budget at runtime, 0 is specialized, and
+        // `NO_PREFILTER` doesn't use it
+        let max_typos = if TYPOS == MANY_TYPOS {
+            self.config.max_typos.unwrap_or(0)
+        } else {
+            TYPOS
+        };
         let mut pending = None;
         for (index, haystack_str) in (haystack_index_offset..).zip(haystacks.iter()) {
             let haystack = haystack_str.as_ref().as_bytes();
@@ -163,7 +170,9 @@ where
 
         let (matched, start_pos, end_pos) = match max_typos {
             None => (true, 0, haystack.len()),
-            Some(max_typos) => self.prefilter_haystack::<MANY_TYPOS, UNICODE>(haystack, max_typos),
+            Some(max_typos) => self
+                .prefilter
+                .match_haystack_typos::<UNICODE>(haystack, max_typos),
         };
         if !matched {
             return None;
@@ -191,17 +200,9 @@ where
             NO_PREFILTER => (true, 0, haystack.len()),
             0 if UNICODE => self.prefilter.match_haystack_unicode(haystack),
             0 => self.prefilter.match_haystack(haystack),
-            1 if UNICODE => self.prefilter.match_haystack_unicode_1_typo(haystack),
-            1 => self.prefilter.match_haystack_1_typo(haystack),
-            2 if UNICODE => self.prefilter.match_haystack_unicode_2_typos(haystack),
-            2 => self.prefilter.match_haystack_2_typos(haystack),
-            MANY_TYPOS if UNICODE => self
+            _ => self
                 .prefilter
-                .match_haystack_unicode_many_typos(haystack, max_typos),
-            MANY_TYPOS => self
-                .prefilter
-                .match_haystack_many_typos(haystack, max_typos),
-            _ => unreachable!("unsupported typo count specialization"),
+                .match_haystack_typos::<UNICODE>(haystack, max_typos),
         }
     }
 
@@ -284,18 +285,6 @@ where
         } else {
             self.smith_waterman
                 .score_haystack_indices(haystack, haystack_start_pos)
-        }
-    }
-
-    /// The runtime typo budget for a `TYPOS` specialization: 0/1/2 encode the
-    /// count directly, `MANY_TYPOS` reads it from the config, and
-    /// `NO_PREFILTER` never uses it.
-    #[inline(always)]
-    fn max_typos_runtime<const TYPOS: u16>(&self) -> u16 {
-        if TYPOS == MANY_TYPOS {
-            self.config.max_typos.unwrap_or(0)
-        } else {
-            TYPOS
         }
     }
 }

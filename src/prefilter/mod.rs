@@ -53,19 +53,23 @@ impl UnicodeChar {
 pub(crate) fn case_needle(needle: &[u8], case_sensitive: bool) -> Vec<(u8, u8)> {
     needle
         .iter()
-        .map(|&c| {
-            (
-                c,
-                if case_sensitive {
-                    c
-                } else if c.is_ascii_lowercase() {
-                    c.to_ascii_uppercase()
-                } else {
-                    c.to_ascii_lowercase()
-                },
-            )
-        })
+        .map(|&c| case_byte(c, case_sensitive))
         .collect()
+}
+
+/// A needle byte and its opposite ASCII case (itself when case sensitive)
+#[inline(always)]
+pub(crate) fn case_byte(c: u8, case_sensitive: bool) -> (u8, u8) {
+    (
+        c,
+        if case_sensitive {
+            c
+        } else if c.is_ascii_lowercase() {
+            c.to_ascii_uppercase()
+        } else {
+            c.to_ascii_lowercase()
+        },
+    )
 }
 
 /// Returns a vector of pairs of Unicode characters, where the first is the
@@ -109,12 +113,11 @@ pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
 
     fn match_haystack(&self, haystack: &[u8]) -> Window;
     fn match_haystack_unicode(&self, haystack: &[u8]) -> Window;
-    fn match_haystack_1_typo(&self, haystack: &[u8]) -> Window;
-    fn match_haystack_unicode_1_typo(&self, haystack: &[u8]) -> Window;
-    fn match_haystack_2_typos(&self, haystack: &[u8]) -> Window;
-    fn match_haystack_unicode_2_typos(&self, haystack: &[u8]) -> Window;
-    fn match_haystack_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window;
-    fn match_haystack_unicode_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window;
+    fn match_haystack_typos<const UNICODE: bool>(
+        &mut self,
+        haystack: &[u8],
+        max_typos: u16,
+    ) -> Window;
 }
 
 impl<B: Backend> Kernel for Prefilter<B> {
@@ -139,33 +142,12 @@ impl<B: Backend> Kernel for Prefilter<B> {
     }
 
     #[inline(always)]
-    fn match_haystack_1_typo(&self, haystack: &[u8]) -> Window {
-        unsafe { self.match_haystack_1_typo(haystack) }
-    }
-
-    #[inline(always)]
-    fn match_haystack_unicode_1_typo(&self, haystack: &[u8]) -> Window {
-        unsafe { self.match_haystack_unicode_1_typo(haystack) }
-    }
-
-    #[inline(always)]
-    fn match_haystack_2_typos(&self, haystack: &[u8]) -> Window {
-        unsafe { self.match_haystack_2_typos(haystack) }
-    }
-
-    #[inline(always)]
-    fn match_haystack_unicode_2_typos(&self, haystack: &[u8]) -> Window {
-        unsafe { self.match_haystack_unicode_2_typos(haystack) }
-    }
-
-    #[inline(always)]
-    fn match_haystack_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
-        unsafe { self.match_haystack_many_typos(haystack, max_typos) }
-    }
-
-    #[inline(always)]
-    fn match_haystack_unicode_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
-        unsafe { self.match_haystack_unicode_many_typos(haystack, max_typos) }
+    fn match_haystack_typos<const UNICODE: bool>(
+        &mut self,
+        haystack: &[u8],
+        max_typos: u16,
+    ) -> Window {
+        unsafe { Prefilter::match_haystack_typos::<UNICODE>(self, haystack, max_typos as usize) }
     }
 }
 
@@ -212,6 +194,15 @@ mod tests {
                 "needle={needle:?} haystack={haystack:?} max_typos={max_typos}"
             );
         }
+    }
+
+    #[test]
+    fn large_typo_budget_on_long_haystack() {
+        let needle = "ab".repeat(40);
+        let haystack = "a_".repeat(100);
+        assert!(matched(&needle, &haystack, 70));
+        assert!(matched(&needle, &haystack, 63));
+        assert!(!matched(&needle, &"_".repeat(200), 63));
     }
 
     #[test]
@@ -694,9 +685,7 @@ mod tests {
         let mut prefilter = P::new(needle, case_sensitive);
         match max_typos {
             0 => prefilter.match_haystack(haystack),
-            1 => prefilter.match_haystack_1_typo(haystack),
-            2 => prefilter.match_haystack_2_typos(haystack),
-            _ => prefilter.match_haystack_many_typos(haystack, max_typos),
+            _ => prefilter.match_haystack_typos::<false>(haystack, max_typos),
         }
     }
 
@@ -709,9 +698,7 @@ mod tests {
         let mut prefilter = P::new(needle, case_sensitive);
         match max_typos {
             0 => prefilter.match_haystack_unicode(haystack),
-            1 => prefilter.match_haystack_unicode_1_typo(haystack),
-            2 => prefilter.match_haystack_unicode_2_typos(haystack),
-            _ => prefilter.match_haystack_unicode_many_typos(haystack, max_typos),
+            _ => prefilter.match_haystack_typos::<true>(haystack, max_typos),
         }
     }
 
