@@ -88,10 +88,8 @@ impl_block!(u128);
 #[cfg(target_arch = "x86_64")]
 pub(crate) const BLOCK_PAD: u8 = 0xFF;
 
-/// A block as `N` chunks, of which the first `count` hold haystack bytes:
-/// the per-chunk compares stop there, so a short haystack does not pay for
-/// the whole block (the count is the same for every needle byte of a
-/// haystack, which keeps the loop predictable)
+/// A block as `N` chunks, of which the first `count` hold haystack bytes: the
+/// per-chunk compares stop there
 #[derive(Clone, Copy)]
 pub(crate) struct ChunkBlock<C: Copy, const N: usize> {
     pub(crate) chunks: [C; N],
@@ -105,10 +103,18 @@ pub(crate) unsafe fn load_block_chunks<B: Backend, const N: usize>(
     haystack: &[u8],
 ) -> (ChunkBlock<B::Chunk, N>, B::Block) {
     unsafe {
+        debug_assert!(!haystack.is_empty());
         let mut chunks = [B::splat(0); N];
         let count = haystack.len().div_ceil(B::LANES).min(N);
+        // only the last chunk may pass the haystack's end
+        let last = count - 1;
+        let tail = load_window::<B>(haystack, last * B::LANES, haystack.len()).0;
         for (c, chunk) in chunks.iter_mut().enumerate().take(count) {
-            *chunk = load_window::<B>(haystack, c * B::LANES, haystack.len()).0;
+            *chunk = if c == last {
+                tail
+            } else {
+                B::load(haystack.as_ptr().add(c * B::LANES))
+            };
         }
         (
             ChunkBlock { chunks, count },
@@ -124,9 +130,25 @@ pub(crate) unsafe fn eq_block_chunks<B: Backend, const N: usize>(
     needle: B::Chunk,
 ) -> B::Block {
     let mut bits = B::Block::from(0);
-    for (c, &chunk) in block.chunks.iter().enumerate().take(block.count) {
-        let eq = unsafe { B::eq(chunk, needle) };
-        bits = bits | (B::Block::from(eq.into()) << (c * B::LANES));
+    // Unrolled, so the shifts are constant (a variable u128 shift is slow)
+    for (c, &chunk) in block.chunks.iter().enumerate() {
+        if c < block.count {
+            let eq = unsafe { B::eq(chunk, needle) };
+            bits = bits | (B::Block::from(eq.into()) << (c * B::LANES));
+        }
     }
     bits
+}
+
+/// The `remaining` bytes at `ptr`, zero padded. Only the copy is outlined, so
+/// the caller loads it with its target features
+///
+/// # Safety
+/// `ptr` must point to `remaining <= N` readable bytes.
+#[cold]
+#[inline(never)]
+pub(crate) unsafe fn copy_partial<const N: usize>(ptr: *const u8, remaining: usize) -> [u8; N] {
+    let mut data = [0u8; N];
+    unsafe { core::ptr::copy_nonoverlapping(ptr, data.as_mut_ptr(), remaining) };
+    data
 }

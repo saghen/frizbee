@@ -1,5 +1,5 @@
-use super::copy_partial;
 use crate::prefilter::algo::can_overread;
+use crate::prefilter::backend::copy_partial;
 use core::arch::aarch64::*;
 
 use super::{Backend, BytesVec, MaskVec, ScoreVec, keep_first};

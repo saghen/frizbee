@@ -622,6 +622,89 @@ mod tests {
         }
     }
 
+    /// Haystacks of every length up to past a block, ending at the end of a
+    /// page followed by an unmapped one and starting at the start of a page
+    /// preceded by one: loads around them may only read the pages they occupy
+    #[test]
+    #[cfg(all(target_os = "linux", not(miri)))]
+    fn loads_stay_within_mapped_pages() {
+        unsafe extern "C" {
+            fn sysconf(name: i32) -> isize;
+            fn mmap(addr: *mut u8, len: usize, prot: i32, flags: i32, fd: i32, off: i64)
+            -> *mut u8;
+            fn mprotect(addr: *mut u8, len: usize, prot: i32) -> i32;
+            fn munmap(addr: *mut u8, len: usize) -> i32;
+        }
+        const SC_PAGESIZE: i32 = 30;
+        const PROT_READ_WRITE: i32 = 3;
+        const MAP_PRIVATE_ANONYMOUS: i32 = 0x22;
+
+        let page = unsafe { sysconf(SC_PAGESIZE) } as usize;
+        // a readable page between two unmapped ones
+        let map = unsafe {
+            mmap(
+                core::ptr::null_mut(),
+                3 * page,
+                0,
+                MAP_PRIVATE_ANONYMOUS,
+                -1,
+                0,
+            )
+        };
+        assert!(!map.is_null() && map as isize != -1, "mmap failed");
+        let data = unsafe { map.add(page) };
+        assert_eq!(unsafe { mprotect(data, page, PROT_READ_WRITE) }, 0);
+
+        let fill = |chars: &[char], len: usize| {
+            let mut text = String::new();
+            for c in chars.iter().cycle() {
+                if text.len() + c.len_utf8() > len {
+                    break;
+                }
+                text.push(*c);
+            }
+            let pad = len - text.len();
+            text + &"x".repeat(pad)
+        };
+        let ascii: Vec<char> = "the_ab/c-quick_bXc".chars().collect();
+        let unicode: Vec<char> = "가니a다é😀하는".chars().collect();
+        for len in 0..=200 {
+            let texts = [fill(&ascii, len), fill(&unicode, len)];
+            for at in [0, page - len] {
+                for text in &texts {
+                    let haystack = unsafe {
+                        core::ptr::copy_nonoverlapping(text.as_ptr(), data.add(at), len);
+                        core::str::from_utf8_unchecked(core::slice::from_raw_parts(
+                            data.add(at),
+                            len,
+                        ))
+                    };
+                    for max_typos in 0..=2 {
+                        for needle in ["abc", "a/z", "the"] {
+                            result_generic(needle, haystack, max_typos);
+                        }
+                        for needle in ["니다", "a😀", "하"] {
+                            unicode_result_generic_typos(needle, haystack, max_typos, false);
+                        }
+                    }
+                    // long needles run the u16 kernels
+                    for needle in [
+                        "abc",
+                        "니다",
+                        "the_ab/c-quick_bX",
+                        "가니a다é😀하는가니a다é😀하는가",
+                    ] {
+                        for max_typos in [Some(0), None] {
+                            let config = crate::Config::default().max_typos(max_typos);
+                            crate::Matcher::new(needle, &config).match_list(&[haystack]);
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(unsafe { munmap(map, 3 * page) }, 0);
+    }
+
     fn result_generic(needle: &str, haystack: &str, max_typos: u16) -> (bool, usize, usize) {
         let haystack = haystack.as_bytes();
         let scalar_result = kernel_result::<PrefilterScalar>(needle, haystack, max_typos, false);

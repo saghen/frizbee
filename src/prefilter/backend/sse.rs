@@ -10,8 +10,8 @@ impl Backend for PrefilterSSEBackend {
 
     type Chunk = __m128i;
     type Mask = u16;
-    type Block = u64;
-    type Chunks = ChunkBlock<__m128i, 4>;
+    type Block = u128;
+    type Chunks = ChunkBlock<__m128i, 8>;
 
     fn is_available() -> bool {
         crate::cpuid::detect().sse2
@@ -45,7 +45,7 @@ impl Backend for PrefilterSSEBackend {
 
     #[inline(always)]
     unsafe fn load_block(haystack: &[u8]) -> (Self::Chunks, Self::Block) {
-        unsafe { load_block_chunks::<Self, 4>(haystack) }
+        unsafe { load_block_chunks::<Self, 8>(haystack) }
     }
 
     #[inline(always)]
@@ -61,6 +61,6 @@ impl Backend for PrefilterSSEBackend {
 
     #[inline(always)]
     unsafe fn eq_block(chunks: &Self::Chunks, needle: Self::Chunk) -> Self::Block {
-        unsafe { eq_block_chunks::<Self, 4>(chunks, needle) }
+        unsafe { eq_block_chunks::<Self, 8>(chunks, needle) }
     }
 }

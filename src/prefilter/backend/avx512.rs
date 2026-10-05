@@ -2,6 +2,7 @@ use core::arch::x86_64::*;
 
 use super::Backend;
 use super::block::BLOCK_PAD;
+use crate::prefilter::algo::can_overread;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct PrefilterAVX512Backend;
@@ -54,16 +55,25 @@ impl Backend for PrefilterAVX512Backend {
 
     #[inline(always)]
     unsafe fn load_block(haystack: &[u8]) -> (Self::Chunks, Self::Block) {
-        // Two masked loads merging into the padding, unconditionally: a
-        // masked-off byte is never read, so neither the page past the
-        // haystack nor a zero second mask needs a branch
+        // Plain loads with the padding OR'd in. Masked loads are only used
+        // when the block crosses a page: they stall on cache misses, and
+        // slow down the scorer's later loads of the same haystack
         unsafe {
             let (ptr, remaining) = (haystack.as_ptr(), haystack.len());
             let pad = _mm512_set1_epi8(BLOCK_PAD as i8);
             let m0 = _bzhi_u64(u64::MAX, remaining.min(64) as u32);
             let m1 = _bzhi_u64(u64::MAX, remaining.saturating_sub(64).min(64) as u32);
-            let c0 = _mm512_mask_loadu_epi8(pad, m0, ptr as *const i8);
-            let c1 = _mm512_mask_loadu_epi8(pad, m1, ptr.wrapping_add(64) as *const i8);
+            let (c0, c1) = if can_overread(ptr, 128) {
+                (
+                    _mm512_or_si512(Self::load(ptr), _mm512_movm_epi8(!m0)),
+                    _mm512_or_si512(Self::load(ptr.wrapping_add(64)), _mm512_movm_epi8(!m1)),
+                )
+            } else {
+                (
+                    _mm512_mask_loadu_epi8(pad, m0, ptr as *const i8),
+                    _mm512_mask_loadu_epi8(pad, m1, ptr.wrapping_add(64) as *const i8),
+                )
+            };
             ([c0, c1], ((m1 as u128) << 64) | m0 as u128)
         }
     }

@@ -33,7 +33,9 @@ pub(crate) use sse::PrefilterSSEBackend;
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
 pub(crate) use wasm::PrefilterWasmBackend;
 
-pub(crate) use block::{BlockMask, ChunkBlock, Narrow, eq_block_chunks, load_block_chunks};
+pub(crate) use block::{
+    BlockMask, ChunkBlock, Narrow, copy_partial, eq_block_chunks, load_block_chunks,
+};
 
 #[cfg(target_arch = "x86_64")]
 pub use avx::PrefilterAVX;
@@ -152,7 +154,7 @@ pub(crate) trait Backend: Sized + Debug + Clone + 'static {
     /// the backend's target features must be enabled.
     #[inline(always)]
     unsafe fn load_partial(ptr: *const u8, remaining: usize, _mask: Self::Mask) -> Self::Chunk {
-        unsafe { load_partial_copy::<Self>(ptr, remaining) }
+        unsafe { Self::load(copy_partial::<64>(ptr, remaining).as_ptr()) }
     }
 
     /// # Safety
@@ -167,8 +169,7 @@ pub(crate) trait Backend: Sized + Debug + Clone + 'static {
     }
 
     /// Whether [`Backend::load_block`] fills the bytes past the haystack with
-    /// [`BLOCK_PAD`](block::BLOCK_PAD) (through masked loads), so occurrence
-    /// masks need no masking
+    /// [`BLOCK_PAD`](block::BLOCK_PAD), so occurrence masks need no masking
     const PADDED_BLOCKS: bool = false;
 
     /// Loads the chunks of the block at the start of `haystack`, with the
@@ -190,14 +191,4 @@ pub(crate) trait Backend: Sized + Debug + Clone + 'static {
     /// # Safety
     /// The backend's target features must be enabled.
     unsafe fn fold_block(chunks: &mut Self::Chunks);
-}
-
-#[cold]
-#[inline(never)]
-unsafe fn load_partial_copy<B: Backend>(ptr: *const u8, remaining: usize) -> B::Chunk {
-    unsafe {
-        let mut data = [0u8; 64];
-        core::ptr::copy_nonoverlapping(ptr, data.as_mut_ptr(), remaining);
-        B::load(data.as_ptr())
-    }
 }
