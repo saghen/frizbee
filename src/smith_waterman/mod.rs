@@ -79,8 +79,8 @@ macro_rules! kernel {
         pub type $name = $kernel;
 
         impl Kernel for $name {
-            fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self {
-                <$kernel>::new(needle, scoring, case_sensitive)
+            fn new(needle: &str, scoring: &Scoring, case_sensitive: bool, unicode: bool) -> Self {
+                <$kernel>::new(needle, scoring, case_sensitive, unicode)
             }
 
             fn is_available() -> bool {
@@ -166,12 +166,24 @@ kernel!(
     ScoreWidth<BackendScalar16U8, BackendScalar8>
 );
 
+/// [`score_fits_in_u8`] for the needle's score matrix, which has a row per
+/// scalar in the Unicode kernel and a row per byte in the ASCII kernel
+#[inline]
+pub(crate) fn needle_fits_in_u8(needle: &str, unicode: bool, scoring: &Scoring) -> bool {
+    let rows = if unicode {
+        needle.chars().count()
+    } else {
+        needle.len()
+    };
+    score_fits_in_u8(rows, scoring)
+}
+
 /// Returns true if every possible Smith-Waterman matrix cell value for this
-/// needle length and scoring config fits in a u8. The u8 backends are otherwise
+/// row count and scoring config fits in a u8. The u8 backends are otherwise
 /// identical to the u16 backends but with double the lane count (64 cells/chunk
 /// on AVX-512, 32 on AVX2, 16 on SSE/NEON).
 #[inline]
-pub(crate) fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
+pub(crate) fn score_fits_in_u8(rows: usize, scoring: &Scoring) -> bool {
     let max_constant = (scoring.match_score as usize + scoring.mismatch_penalty as usize)
         .max(scoring.gap_open_penalty as usize)
         .max(scoring.gap_extend_penalty as usize)
@@ -192,7 +204,7 @@ pub(crate) fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
 
     // No cell holds more than [`Scoring::max_score`], which the diagonal
     // transiently exceeds by the mismatch penalty before subtracting it
-    scoring.max_score(needle_len) + scoring.mismatch_penalty as u64 <= u8::MAX as u64
+    scoring.max_score(rows) + scoring.mismatch_penalty as u64 <= u8::MAX as u64
 }
 
 /// Scoring constants splatted once at construction, so the outlined kernels
@@ -248,8 +260,8 @@ macro_rules! either {
 }
 
 impl<B8: Backend, B16: Backend> ScoreWidth<B8, B16> {
-    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self {
-        if score_fits_in_u8(needle.len(), scoring) {
+    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool, unicode: bool) -> Self {
+        if needle_fits_in_u8(needle, unicode, scoring) {
             Self::U8(SmithWaterman::new(needle, scoring, case_sensitive))
         } else {
             Self::U16(SmithWaterman::new(needle, scoring, case_sensitive))
@@ -286,7 +298,9 @@ impl<B8: Backend, B16: Backend> ScoreWidth<B8, B16> {
 
 /// The Smith Waterman kernel of one SIMD tier
 pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
-    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self;
+    /// `unicode`: the needle is scored by its scalars, one row each, which
+    /// picks the score width (see [`needle_fits_in_u8`])
+    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool, unicode: bool) -> Self;
     fn is_available() -> bool;
 
     /// Inlined into the caller, for loops which score every haystack

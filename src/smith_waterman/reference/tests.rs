@@ -131,6 +131,12 @@ fn random_scoring(rng: &mut Rng) -> Scoring {
 // Kernels
 // ---------------------------------------------------------------------------
 
+/// A kernel under test, built for the ASCII and the Unicode kernels
+struct Both<K> {
+    ascii: K,
+    unicode: K,
+}
+
 /// What the tests read from a kernel, without its type
 trait Scorer {
     /// The score, and the indices traced through the stored matrix (relative
@@ -167,6 +173,17 @@ macro_rules! impl_scorer {
 impl_scorer!(SmithWaterman<B>, B: Backend);
 impl_scorer!(ScoreWidth<B8, B16>, B8: Backend, B16: Backend);
 
+impl<K: Scorer> Scorer for Both<K> {
+    fn run(&mut self, haystack: &[u8], unicode: bool, start_pos: usize) -> (u16, (u16, Vec<u32>)) {
+        let kernel = if unicode {
+            &mut self.unicode
+        } else {
+            &mut self.ascii
+        };
+        kernel.run(haystack, unicode, start_pos)
+    }
+}
+
 /// Every kernel available on this machine for the needle and scoring, labeled
 /// `<tier>-<lanes>x<bits>`, or `<tier>-auto` for the kernel picking the width
 fn kernels(needle: &str, cs: bool, s: &Scoring) -> Vec<(&'static str, Box<dyn Scorer>)> {
@@ -186,7 +203,10 @@ fn kernels(needle: &str, cs: bool, s: &Scoring) -> Vec<(&'static str, Box<dyn Sc
             if <$u16>::is_available() {
                 all.push((
                     $label,
-                    Box::new(ScoreWidth::<$u8, $u16>::new(needle, s, cs)),
+                    Box::new(Both {
+                        ascii: ScoreWidth::<$u8, $u16>::new(needle, s, cs, false),
+                        unicode: ScoreWidth::<$u8, $u16>::new(needle, s, cs, true),
+                    }),
                 ));
             }
         };

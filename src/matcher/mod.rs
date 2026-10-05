@@ -871,6 +871,22 @@ mod tests {
     }
 
     #[test]
+    fn unicode_needle_width_counts_scalars() {
+        // 8 scalars but 24 bytes: one row per scalar in the Unicode kernel,
+        // one per byte in the ASCII kernel
+        let needle = "그것은무엇입니까";
+        let is_u8_with = |unicode| {
+            let matcher = Matcher::new(needle, &Config::default().unicode(unicode));
+            let CompiledPatterns::Single(pattern) = &matcher.patterns else {
+                panic!("expected a single pattern");
+            };
+            is_u8(&pattern.backend)
+        };
+        assert!(is_u8_with(crate::UnicodeMatching::Smart));
+        assert!(!is_u8_with(crate::UnicodeMatching::Ignore));
+    }
+
+    #[test]
     fn reuse_handles_state_changes() {
         let long_needle = "abcdefghijklmnopqrst";
         let first_haystacks = [
