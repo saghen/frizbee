@@ -8,9 +8,7 @@
 //! 64-byte vectors, while other backends can alias [`MaskVec`] to their
 //! [`BytesVec`] type with no loss.
 //!
-//! The kernel itself is generic over [`Backend`] and the lane count threads
-//! through chunk arithmetic, the matrix stride, and the horizontal-gap
-//! propagation unroll.
+//! The kernel itself is generic over [`Backend`] and its lane count.
 //!
 //! Available backends:
 //!   - AVX-512: LANES = 32/64 (scoring u16 x 32 = 512-bit or u8 x 64 = 512-bit)
@@ -49,6 +47,47 @@ macro_rules! gap_dispatch {
 }
 
 use crate::smith_waterman::algo::ascii_gap::GAP_STEPS;
+
+/// `n` (0..=64) 0xFF bytes then zeros for masking lanes in vectors
+#[cfg(any(
+    target_arch = "x86_64",
+    target_arch = "aarch64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+#[inline(always)]
+pub(crate) fn keep_first_mask(n: usize) -> *const u8 {
+    #[repr(C, align(64))]
+    struct KeepFirst([u8; 128]);
+    static KEEP_FIRST: KeepFirst = {
+        let mut bytes = [0; 128];
+        let mut i = 0;
+        while i < 64 {
+            bytes[i] = 0xFF;
+            i += 1;
+        }
+        KeepFirst(bytes)
+    };
+    debug_assert!(n <= 64);
+    unsafe { KEEP_FIRST.0.as_ptr().add(64 - n) }
+}
+
+/// Copy `remaining` bytes at `ptr`, zero padded
+///
+/// # Safety
+/// `ptr` must point to `remaining <= N` readable bytes.
+#[cfg(any(
+    target_arch = "x86_64",
+    target_arch = "aarch64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+// with safe_read every partial chunk comes here
+#[cfg_attr(not(feature = "safe_read"), cold, inline(never))]
+#[cfg_attr(feature = "safe_read", inline(always))]
+pub(crate) unsafe fn copy_partial<const N: usize>(ptr: *const u8, remaining: usize) -> [u8; N] {
+    let mut data = [0u8; N];
+    unsafe { core::ptr::copy_nonoverlapping(ptr, data.as_mut_ptr(), remaining) };
+    data
+}
 
 #[cfg(target_arch = "x86_64")]
 mod avx;

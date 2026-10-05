@@ -1,7 +1,9 @@
 use core::arch::x86_64::*;
 use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
 
-use super::{Backend, BytesVec, MaskVec, ScoreVec};
+use crate::prefilter::algo::can_overread;
+
+use super::{Backend, BytesVec, MaskVec, ScoreVec, keep_first_mask};
 
 /// 32-lane u16 scoring (512-bit __m512i), 32-lane u8 input (low half of
 /// __m512i).
@@ -97,13 +99,16 @@ impl BytesVec for Avx512Bytes {
     #[inline(always)]
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         unsafe {
-            let remaining = len.saturating_sub(start).min(32);
+            let remaining = len.saturating_sub(start);
             if remaining == 0 {
                 return Self(_mm512_setzero_si512());
             }
             let ptr = data.add(start);
-            let mask: __mmask64 = ((1u64 << remaining).wrapping_sub(1)) as __mmask64;
-            Self(_mm512_maskz_loadu_epi8(mask, ptr as *const i8))
+            Self(match remaining {
+                0 => unreachable!(),
+                1..32 => load_partial_si256(ptr, remaining),
+                32.. => _mm512_zextsi256_si512(_mm256_loadu_si256(ptr as *const __m256i)),
+            })
         }
     }
 
@@ -152,12 +157,7 @@ impl BytesVec for Avx512U8Bytes {
             let ptr = data.add(start);
             Self(match remaining {
                 0 => unreachable!(),
-                1..64 => {
-                    // lanes outside mask are zeroed and don't access memory,
-                    // so a partial chunk at the haystack tail is page-safe
-                    let mask: __mmask64 = (1u64 << remaining).wrapping_sub(1);
-                    _mm512_maskz_loadu_epi8(mask, ptr as *const i8)
-                }
+                1..64 => load_partial(ptr, remaining),
                 64.. => _mm512_loadu_si512(ptr as *const __m512i),
             })
         }
@@ -482,6 +482,36 @@ unsafe fn shift_right_lanes<const L: i32>(prev: __m512i, cur: __m512i) -> __m512
             };
             let idx = unsafe { _mm512_loadu_si512(idx_arr.as_ptr() as *const __m512i) };
             unsafe { _mm512_permutex2var_epi8(prev, idx, cur) }
+        }
+    }
+}
+
+#[inline(always)]
+unsafe fn load_partial(ptr: *const u8, n: usize) -> __m512i {
+    unsafe {
+        if can_overread(ptr, 64) {
+            let mask = keep_first_mask(n);
+            _mm512_and_si512(
+                _mm512_loadu_si512(ptr as *const __m512i),
+                _mm512_loadu_si512(mask as *const __m512i),
+            )
+        } else {
+            _mm512_maskz_loadu_epi8((1u64 << n) - 1, ptr as *const i8)
+        }
+    }
+}
+
+#[inline(always)]
+unsafe fn load_partial_si256(ptr: *const u8, n: usize) -> __m512i {
+    unsafe {
+        if can_overread(ptr, 32) {
+            let mask = keep_first_mask(n);
+            _mm512_zextsi256_si512(_mm256_and_si256(
+                _mm256_loadu_si256(ptr as *const __m256i),
+                _mm256_loadu_si256(mask as *const __m256i),
+            ))
+        } else {
+            _mm512_maskz_loadu_epi8((1u64 << n) - 1, ptr as *const i8)
         }
     }
 }
