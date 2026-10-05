@@ -70,6 +70,8 @@ mod alignment_iter;
 pub(crate) mod backend;
 mod greedy;
 mod matrix;
+#[cfg(test)]
+pub(crate) mod reference;
 
 use alignment_iter::AlignmentPathIter;
 

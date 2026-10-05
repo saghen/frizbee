@@ -540,7 +540,8 @@ impl Scoring {
     /// with `rows`.
     ///
     /// With the default scoring this bounds 13 rows at 254, where
-    /// "/aC/aC/aC/aC/" scores 13 * (12 + 4) + 12 + 4 * (4 + 4) = 252.
+    /// "/aC/aC/aC/aC/" scores 13 * (12 + 4) + 12 + 4 * (4 + 4) = 252. Why the
+    /// bound holds is on the test checking it (`width_matches_reference`).
     pub(crate) fn max_score(&self, rows: usize) -> u64 {
         let rows = rows as u64;
         let delimiter = self.delimiter_bonus as u64;
