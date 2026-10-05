@@ -73,7 +73,7 @@ impl Matcher {
             }
         }
         // Indices are reported in reverse order, and patterns may share matched chars.
-        combined.indices.sort_unstable_by(|a, b| b.cmp(a));
+        crate::sort::sort_indices_desc(&mut combined.indices);
         combined.indices.dedup();
         Some(combined)
     }

@@ -321,7 +321,7 @@ impl Matcher {
             matches.reverse();
         }
         if self.config.sort.is_by_score() {
-            matches.sort_by_key(|m| core::cmp::Reverse(m.score));
+            crate::sort::sort_indices_by_score(&mut matches);
         }
         matches
     }
