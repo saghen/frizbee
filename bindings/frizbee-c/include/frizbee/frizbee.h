@@ -137,7 +137,9 @@ typedef struct frizbee_scoring_t {
    */
   uint16_t match_score;
   /**
-   * Penalty for a mismatch (substitution)
+   * Penalty for a mismatch (substitution). `match_score + mismatch_penalty`
+   * must not exceed `u16::MAX`: the fuzzy scorer sums them before subtracting
+   * the penalty, so a larger sum makes every matched char score less
    */
   uint16_t mismatch_penalty;
   /**

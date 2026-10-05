@@ -62,7 +62,9 @@ class Scoring:
 
     @property
     def mismatch_penalty(self) -> int:
-        """Penalty for a mismatch (substitution)."""
+        """Penalty for a mismatch (substitution). ``match_score + mismatch_penalty``
+        must not exceed 65535: the fuzzy scorer sums them before subtracting the
+        penalty, so a larger sum makes every matched char score less."""
 
     @property
     def gap_open_penalty(self) -> int:

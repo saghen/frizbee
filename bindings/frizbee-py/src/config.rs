@@ -73,7 +73,10 @@ str_enum!(parse_sort, sort_to_str, SortStrategy, "sort", {
 pub(crate) struct PyScoring {
     /// Score for a matching character between needle and haystack
     match_score: u16,
-    /// Penalty for a mismatch (substitution)
+    /// Penalty for a mismatch (substitution). `match_score + mismatch_penalty`
+    /// must not exceed `u16::MAX`: the fuzzy scorer sums them before
+    /// subtracting the penalty, so a larger sum makes every matched char score
+    /// less
     mismatch_penalty: u16,
     /// Penalty for opening a gap (deletion/insertion)
     gap_open_penalty: u16,

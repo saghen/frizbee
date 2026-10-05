@@ -87,7 +87,10 @@ pub enum frizbee_sort_strategy_t {
 pub struct frizbee_scoring_t {
     /// Score for a matching character between needle and haystack
     pub match_score: u16,
-    /// Penalty for a mismatch (substitution)
+    /// Penalty for a mismatch (substitution). `match_score + mismatch_penalty`
+    /// must not exceed `u16::MAX`: the fuzzy scorer sums them before
+    /// subtracting the penalty, so a larger sum makes every matched char score
+    /// less
     pub mismatch_penalty: u16,
     /// Penalty for opening a gap (deletion/insertion)
     pub gap_open_penalty: u16,

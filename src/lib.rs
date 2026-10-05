@@ -457,7 +457,10 @@ impl Matching {
 pub struct Scoring {
     /// Score for a matching character between needle and haystack
     pub match_score: u16,
-    /// Penalty for a mismatch (substitution)
+    /// Penalty for a mismatch (substitution). `match_score + mismatch_penalty`
+    /// must not exceed `u16::MAX`: the fuzzy scorer sums them before
+    /// subtracting the penalty, so a larger sum makes every matched char score
+    /// less
     pub mismatch_penalty: u16,
     /// Penalty for opening a gap (deletion/insertion)
     pub gap_open_penalty: u16,
@@ -504,41 +507,70 @@ impl Scoring {
     /// score. Longer needles still match, but their scores may saturate at
     /// `u16::MAX`
     pub fn max_needle_len(&self) -> usize {
-        let max_per_char = self.match_score.saturating_add(self.max_per_char_bonus());
-        // A zero per-char score can never overflow regardless of needle length
-        if max_per_char == 0 {
-            return usize::MAX;
-        }
-
         // The diagonal transiently holds the score plus the mismatch penalty
         // before subtracting it
-        let headroom = u16::MAX
-            .saturating_sub(self.max_one_time_bonus())
-            .saturating_sub(self.prefix_bonus)
-            .saturating_sub(self.exact_match_bonus)
-            .saturating_sub(self.mismatch_penalty);
-        let max_needle_len = headroom / max_per_char;
-        max_needle_len as usize
+        let fits = |rows: usize| {
+            self.max_score(rows) + self.exact_match_bonus as u64 + self.mismatch_penalty as u64
+                <= u16::MAX as u64
+        };
+        // Every row adds at least 1/6 to the bound unless it can't grow at all
+        const ROWS_LIMIT: usize = 6 * (u16::MAX as usize + 1);
+        if fits(ROWS_LIMIT) {
+            return usize::MAX;
+        }
+        // The bound only grows with the row count: binary search the last fit
+        let (mut fitting, mut overflowing) = (0, ROWS_LIMIT);
+        if !fits(fitting) {
+            return 0;
+        }
+        while overflowing - fitting > 1 {
+            let mid = fitting + (overflowing - fitting) / 2;
+            if fits(mid) {
+                fitting = mid;
+            } else {
+                overflowing = mid;
+            }
+        }
+        fitting
     }
 
-    /// Max additional score that a needle character can receive, aside from the
-    /// match score
-    pub(crate) fn max_per_char_bonus(&self) -> u16 {
-        let bonus = self.delimiter_bonus.max(self.capitalization_bonus);
-        let amortized = bonus
-            .div_ceil(2)
-            .max(bonus.saturating_sub(self.gap_open_penalty));
-        amortized.saturating_add(self.matching_case_bonus)
-    }
+    /// Upper bound of every Smith-Waterman score matrix cell for a needle of
+    /// `rows` chars (bytes in the ASCII kernels, scalars in the Unicode
+    /// kernels), excluding the `exact_match_bonus` added after scoring. Grows
+    /// with `rows`.
+    ///
+    /// With the default scoring this bounds 13 rows at 254, where
+    /// "/aC/aC/aC/aC/" scores 13 * (12 + 4) + 12 + 4 * (4 + 4) = 252.
+    pub(crate) fn max_score(&self, rows: usize) -> u64 {
+        let rows = rows as u64;
+        let delimiter = self.delimiter_bonus as u64;
+        let capitalization = self.capitalization_bonus as u64;
+        let gap = self.gap_open_penalty.max(self.gap_extend_penalty) as u64;
+        let single = delimiter.max(capitalization);
+        let pair = delimiter + capitalization;
 
-    /// Max bonus given to a score one time, aside from the prefix or exact
-    /// bonuses
-    pub(crate) fn max_one_time_bonus(&self) -> u16 {
-        let bonus = self.delimiter_bonus.max(self.capitalization_bonus);
-        let amortized = bonus
-            .div_ceil(2)
-            .max(bonus.saturating_sub(self.gap_open_penalty));
-        bonus - amortized
+        // `rate` per row, times 6 to stay integral
+        let rate6 = (2 * pair)
+            .max(3 * pair.saturating_sub(gap))
+            .max(3 * single)
+            .max(6 * single.saturating_sub(gap));
+        let blocks = |rows: u64| {
+            let mut bonus = rate6 * rows / 6;
+            if rows >= 1 {
+                bonus = bonus.max(single + rate6 * (rows - 1) / 6);
+            }
+            if rows >= 2 {
+                bonus = bonus.max(pair + rate6 * (rows - 2) / 6);
+            }
+            bonus
+        };
+        let mut bonus = blocks(rows);
+        if rows >= 1 {
+            bonus = bonus.max(self.prefix_bonus as u64 + blocks(rows - 1));
+        }
+
+        let per_char = self.match_score as u64 + self.matching_case_bonus as u64;
+        rows * per_char + bonus
     }
 }
 
@@ -548,6 +580,6 @@ mod tests {
 
     #[test]
     fn max_needle_len_default() {
-        assert_eq!(Scoring::default().max_needle_len(), 3639);
+        assert_eq!(Scoring::default().max_needle_len(), 3509);
     }
 }

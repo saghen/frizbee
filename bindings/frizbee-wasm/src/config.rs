@@ -19,7 +19,11 @@ export type SortStrategy = 'scoreThenIndexAsc' | 'scoreThenIndexDesc' | 'indexAs
 export interface Scoring {
   /** Score for a matching character between needle and haystack */
   matchScore?: number;
-  /** Penalty for a mismatch (substitution) */
+  /**
+   * Penalty for a mismatch (substitution). `matchScore + mismatchPenalty` must
+   * not exceed 65535: the fuzzy scorer sums them before subtracting the
+   * penalty, so a larger sum makes every matched char score less
+   */
   mismatchPenalty?: number;
   /** Penalty for opening a gap (deletion/insertion) */
   gapOpenPenalty?: number;
