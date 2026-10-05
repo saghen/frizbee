@@ -130,6 +130,8 @@ mod sort;
 use r#const::*;
 
 pub use matcher::Matcher;
+#[doc(hidden)]
+pub use matcher::RawStr;
 pub use pattern::{Pattern, PatternConfig};
 pub use sort::radix_sort_matches;
 

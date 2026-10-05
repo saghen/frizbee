@@ -294,16 +294,16 @@ impl PyMatcher {
                     temporary.as_strs()
                 };
                 let inner = &mut self.inner;
-                py.detach(move || inner.match_list_parallel(&strs, threads))
+                py.detach(move || inner.match_list_parallel_raw(&strs, threads))
             }
             None => {
                 if let Ok(haystacks) = haystacks.cast::<PyHaystacks>() {
                     let haystacks = haystacks.borrow();
                     let strs = haystacks.as_strs();
                     let inner = &mut self.inner;
-                    py.detach(move || inner.match_list(&strs))
+                    py.detach(move || inner.match_list_raw(&strs))
                 } else {
-                    with_haystacks(haystacks, |strs| Ok(self.inner.match_list(strs)))?
+                    with_haystacks(haystacks, |strs| Ok(self.inner.match_list_raw(strs)))?
                 }
             }
         };

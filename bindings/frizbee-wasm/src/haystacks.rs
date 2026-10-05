@@ -2,6 +2,7 @@
 //! glue (`new`/`push`) or the wrapper's single `TextEncoder` pass
 //! (`reserve`/`bytesView`/`offsetsView`/`commit`).
 
+use frizbee::RawStr;
 use js_sys::{Uint8Array, Uint32Array};
 use wasm_bindgen::prelude::*;
 
@@ -27,7 +28,7 @@ impl Haystacks {
     }
 
     /// Views of every haystack, borrowed from the arena
-    pub(crate) fn as_strs(&self) -> Vec<&str> {
+    pub(crate) fn as_strs(&self) -> Vec<RawStr<'_>> {
         self.offsets
             .windows(2)
             // SAFETY: the arena only ever holds bytes copied from `&str`s or written
@@ -35,6 +36,7 @@ impl Haystacks {
             .map(|span| unsafe {
                 core::str::from_utf8_unchecked(&self.bytes[span[0] as usize..span[1] as usize])
             })
+            .map(RawStr::from)
             .collect()
     }
 }

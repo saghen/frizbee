@@ -3,7 +3,7 @@
 
 use std::ptr;
 
-use frizbee::Matcher;
+use frizbee::{Matcher, RawStr};
 
 use crate::config::{config_or_default, frizbee_config_t, frizbee_str_t};
 
@@ -64,32 +64,20 @@ unsafe fn str_from_c<'a>(s: frizbee_str_t) -> &'a str {
     unsafe { std::str::from_utf8_unchecked(std::slice::from_raw_parts(s.ptr.cast(), s.len)) }
 }
 
-/// `frizbee_str_t` usable as a core-matcher haystack. `repr(transparent)` so
-/// the caller's `frizbee_str_t` array can be reinterpreted as
-/// `&[haystack_str_t]` and passed to the core matcher without a per-call copy
-#[repr(transparent)]
-struct haystack_str_t(frizbee_str_t);
-
-impl AsRef<str> for haystack_str_t {
-    fn as_ref(&self) -> &str {
-        // SAFETY: the caller promised the bytes are valid UTF-8 (see `frizbee_str_t`)
-        unsafe { str_from_c(self.0) }
-    }
-}
-
-// SAFETY: threads only read the caller's bytes, which must stay valid and
-// unmodified for the duration of the call
-unsafe impl Sync for haystack_str_t {}
+const _: () = assert!(
+    size_of::<RawStr>() == size_of::<frizbee_str_t>()
+        && align_of::<RawStr>() == align_of::<frizbee_str_t>()
+);
 
 /// SAFETY: the caller promises `haystacks` points to `len` valid
-/// `frizbee_str_t`
-unsafe fn haystacks_from_c<'a>(
-    haystacks: *const frizbee_str_t,
-    len: usize,
-) -> &'a [haystack_str_t] {
+/// `frizbee_str_t`, whose bytes stay valid and unmodified for the call
+unsafe fn haystacks_from_c<'a>(haystacks: *const frizbee_str_t, len: usize) -> &'a [RawStr<'a>] {
     if len == 0 {
         return &[];
     }
+    // `RawStr` has the same C layout as `frizbee_str_t` (pointer, then length,
+    // where the pointer may be NULL only when the length is 0), so the caller's
+    // array is passed through without a copy
     unsafe { std::slice::from_raw_parts(haystacks.cast(), len) }
 }
 
@@ -189,7 +177,7 @@ pub unsafe extern "C" fn frizbee_matcher_match_list(
 ) -> frizbee_matches_t {
     let matcher = unsafe { matcher_from_c(matcher) };
     let haystacks = unsafe { haystacks_from_c(haystacks, haystacks_len) };
-    matcher.match_list(haystacks).into()
+    matcher.match_list_raw(haystacks).into()
 }
 
 /// Like `frizbee_matcher_match_list`, matching in parallel on `threads` real
@@ -205,7 +193,7 @@ pub unsafe extern "C" fn frizbee_matcher_match_list_parallel(
 ) -> frizbee_matches_t {
     let matcher = unsafe { matcher_from_c(matcher) };
     let haystacks = unsafe { haystacks_from_c(haystacks, haystacks_len) };
-    matcher.match_list_parallel(haystacks, threads).into()
+    matcher.match_list_parallel_raw(haystacks, threads).into()
 }
 
 /// Releases a match list returned by `frizbee_matcher_match_list` or

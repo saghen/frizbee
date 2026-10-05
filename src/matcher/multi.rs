@@ -1,4 +1,5 @@
 use super::Matcher;
+use super::RawStr;
 use super::backend::MatcherBackend;
 use crate::{Match, MatchIndices};
 use alloc::vec::Vec;
@@ -105,7 +106,7 @@ impl Matcher {
             }
         }
 
-        let mut gathered: Vec<&str> = Vec::new();
+        let mut gathered: Vec<RawStr<'_>> = Vec::new();
         let mut hits: Vec<Match> = Vec::new();
         for (pattern_idx, pattern) in patterns.iter_mut().enumerate() {
             if Some(pattern_idx) == base_pattern_idx || candidates.is_empty() {
@@ -113,11 +114,9 @@ impl Matcher {
             }
 
             gathered.clear();
-            gathered.extend(
-                candidates
-                    .iter()
-                    .map(|m| haystacks[(m.index - haystack_index_offset) as usize].as_ref()),
-            );
+            gathered.extend(candidates.iter().map(|m| {
+                RawStr::from(haystacks[(m.index - haystack_index_offset) as usize].as_ref())
+            }));
             hits.clear();
             Self::dispatch_pattern_into(pattern, &gathered, 0, &mut hits);
 

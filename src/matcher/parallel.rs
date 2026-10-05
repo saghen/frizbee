@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 
-use super::Matcher;
+use super::{Matcher, RawStr};
 use crate::k_merge::{
     k_merge_matches_by_index_asc, k_merge_matches_by_index_desc,
     k_merge_matches_by_score_then_index_asc, k_merge_matches_by_score_then_index_desc,
@@ -13,6 +13,17 @@ const ITEMS_PER_THREAD: usize = if cfg!(miri) { 4 } else { 2000 };
 const CHUNK_SIZE: usize = if cfg!(miri) { 8 } else { 2048 };
 
 impl Matcher {
+    /// [`Matcher::match_list_parallel`] for the bindings (see [`RawStr`])
+    #[doc(hidden)]
+    #[inline(never)]
+    pub fn match_list_parallel_raw(
+        &mut self,
+        haystacks: &[RawStr<'_>],
+        threads: usize,
+    ) -> Vec<Match> {
+        self.match_list_parallel(haystacks, threads)
+    }
+
     /// Matches a list of haystacks in parallel on multiple real threads,
     /// returning a list of [`Match`] values.
     ///
