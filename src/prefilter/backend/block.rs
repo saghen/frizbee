@@ -51,6 +51,8 @@ pub(crate) trait BlockMask:
     fn carrying_add(self, rhs: Self, carry: bool) -> (Self, bool);
     /// Every bit when `cond`, none otherwise
     fn all_if(cond: bool) -> Self;
+    /// Every bit above the lowest set bit (none when zero)
+    fn above_lowest(self) -> Self;
 }
 
 macro_rules! impl_block {
@@ -68,6 +70,11 @@ macro_rules! impl_block {
             #[inline(always)]
             fn all_if(cond: bool) -> Self {
                 (cond as $ty).wrapping_neg()
+            }
+
+            #[inline(always)]
+            fn above_lowest(self) -> Self {
+                !(self ^ self.wrapping_sub(1))
             }
         }
     };

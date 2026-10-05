@@ -52,7 +52,10 @@ impl Kernel for PrefilterAVX {
     }
 
     #[inline(always)]
-    fn match_haystack(&self, haystack: &[u8]) -> Window {
+    fn match_haystack<const UNICODE: bool>(&self, haystack: &[u8]) -> Window {
+        if UNICODE {
+            return unsafe { self.inner.match_haystack::<true>(haystack) };
+        }
         let len = haystack.len();
         if len == 0 {
             return (false, 0, len);
@@ -163,11 +166,6 @@ impl Kernel for PrefilterAVX {
         }
 
         (false, match_start_pos, len)
-    }
-
-    #[inline(always)]
-    fn match_haystack_unicode(&self, haystack: &[u8]) -> Window {
-        unsafe { self.inner.match_haystack_unicode(haystack) }
     }
 
     #[inline(always)]

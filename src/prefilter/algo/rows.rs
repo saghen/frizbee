@@ -1,9 +1,9 @@
-//! The needle rows of the typo walk: where each row (a byte, or a whole
-//! scalar for Unicode needles) occurs in a block of haystack bytes, and the
-//! walk within one block.
+//! The needle rows shared by the 0-typo and typo walks: where each row (a
+//! byte, or a whole scalar for Unicode needles) occurs in a block, chunk or
+//! two chunks of haystack bytes, and the walk within one block.
 
-use super::Prefilter;
 use super::typos::{lcs_row, walk_bytes};
+use super::{Prefilter, load_window};
 use crate::prefilter::{
     UnicodeChar, Window,
     backend::{Backend, BlockMask, Narrow},
@@ -79,7 +79,66 @@ where
     }
 }
 
+/// Positions of `chunk` where a needle scalar (either case) ends
+#[inline(always)]
+unsafe fn row_ends<B: Backend>(chunk: B::Chunk, row: &ScalarRow<B>) -> u64 {
+    unsafe {
+        let mut ends = scalar_ends::<B>(chunk, &row.bytes, row.char.len);
+        if row.char.has_flip {
+            ends |= scalar_ends::<B>(chunk, &row.flipped, row.char.len);
+        }
+        ends
+    }
+}
+
+/// Positions of `chunk` where the `len` (1 to 4) bytes of a scalar end, one
+/// bit per byte: the compares of its bytes shifted into place and ANDed
+#[inline(always)]
+unsafe fn scalar_ends<B: Backend>(chunk: B::Chunk, bytes: &[B::Chunk; 4], len: usize) -> u64 {
+    unsafe {
+        // unrolled per width: a loop over `len` costs the 0-typo walk
+        match len {
+            1 => eq_bits::<B>(chunk, bytes[0]),
+            2 => eq_bits::<B>(chunk, bytes[1]) & (eq_bits::<B>(chunk, bytes[0]) << 1),
+            3 => {
+                eq_bits::<B>(chunk, bytes[2])
+                    & (eq_bits::<B>(chunk, bytes[1]) << 1)
+                    & (eq_bits::<B>(chunk, bytes[0]) << 2)
+            }
+            _ => {
+                eq_bits::<B>(chunk, bytes[3])
+                    & (eq_bits::<B>(chunk, bytes[2]) << 1)
+                    & (eq_bits::<B>(chunk, bytes[1]) << 2)
+                    & (eq_bits::<B>(chunk, bytes[0]) << 3)
+            }
+        }
+    }
+}
+
+#[inline(always)]
+unsafe fn eq_bits<B: Backend>(chunk: B::Chunk, needle: B::Chunk) -> u64 {
+    unsafe { B::eq(chunk, needle) }.into()
+}
+
 impl<B: Backend> Prefilter<B> {
+    /// Positions of `chunk` where needle row `i` ends, and the row's length
+    /// less one (from an end back to its start)
+    #[inline(always)]
+    pub(super) unsafe fn chunk_occ<const UNICODE: bool>(
+        &self,
+        chunk: B::Chunk,
+        i: usize,
+    ) -> (u64, usize) {
+        unsafe {
+            if !UNICODE {
+                let needle = *self.needle_ascii.get_unchecked(i);
+                return (B::occ(chunk, needle).into(), 0);
+            }
+            let row = self.needle_scalars.get_unchecked(i);
+            (row_ends::<B>(chunk, row), row.char.len - 1)
+        }
+    }
+
     #[inline(always)]
     pub(super) fn rows<const UNICODE: bool>(&self) -> usize {
         if UNICODE {
@@ -142,11 +201,61 @@ impl<B: Backend> Prefilter<B> {
             prefilter: self,
             block: unsafe { self.load_block::<UNICODE>(haystack) },
         };
-        unsafe { walk_single::<M, _>(&rows, self.rows::<UNICODE>(), max_typos) }
+        unsafe { walk_single::<M, _, false>(&rows, self.rows::<UNICODE>(), max_typos) }
+    }
+
+    /// [`Self::match_single_block`] for haystacks of at most one chunk, from
+    /// that chunk's compares (`valid` masks the haystack's bytes)
+    #[inline(always)]
+    pub(super) unsafe fn match_single_chunk<const UNICODE: bool, const GREEDY: bool>(
+        &self,
+        chunk: B::Chunk,
+        valid: u64,
+        max_typos: usize,
+    ) -> Window {
+        let rows = ChunkRows::<B, UNICODE> {
+            prefilter: self,
+            chunk,
+            valid,
+        };
+        unsafe { walk_single::<u64, _, GREEDY>(&rows, self.rows::<UNICODE>(), max_typos) }
+    }
+
+    /// The greedy walk of [`Self::match_single_chunk`] for ASCII haystacks of
+    /// one to two chunks, over the first chunk and the in-bounds one at the
+    /// end when both fit a u64 (AVX2, SSE, wasm), else (AVX-512) the bounded
+    /// one after the first
+    #[inline(always)]
+    pub(super) unsafe fn match_two_chunks(&self, haystack: &[u8]) -> Window {
+        let len = haystack.len();
+        debug_assert!(len > B::LANES && len <= 2 * B::LANES);
+        let head = unsafe { B::load(haystack.as_ptr()) };
+        let n = self.rows::<false>();
+        if 2 * B::LANES <= 64 {
+            let shift = len - B::LANES;
+            let tail = unsafe { B::load(haystack.as_ptr().add(shift)) };
+            let rows = TwoChunkRows::<B> {
+                prefilter: self,
+                head,
+                tail,
+                valid: u64::MAX,
+                shift,
+            };
+            return unsafe { walk_single::<u64, _, true>(&rows, n, 0) };
+        }
+        let (tail, valid) = unsafe { load_window::<B>(haystack, B::LANES, len) };
+        let rows = TwoChunkRows::<B> {
+            prefilter: self,
+            head,
+            tail,
+            valid: valid.into(),
+            shift: B::LANES,
+        };
+        unsafe { walk_single::<B::Block, _, true>(&rows, n, 0) }
     }
 }
 
-/// Occurrences of needle row `i` within one block: where it ends,
+/// Occurrences of needle row `i` within one block or chunk: where it ends,
 /// and where those occurrences start
 pub(super) trait SingleRows<M: BlockMask> {
     /// Whether a row is one compare (ASCII), cheap enough to read at several
@@ -176,16 +285,60 @@ where
     }
 }
 
-/// Bytes shared by consecutive blocks of the multi-block walk, so that every
+/// Bytes shared by consecutive chunks of the chunk walks, so that every
 /// scalar lies within one of them
 #[inline(always)]
 pub(super) const fn overlap<const UNICODE: bool>() -> usize {
     if UNICODE { UNICODE_OVERLAP } else { 0 }
 }
 
-/// The LCS walk over a haystack within one block of `M::BITS` bytes
+struct ChunkRows<'a, B: Backend, const UNICODE: bool> {
+    prefilter: &'a Prefilter<B>,
+    chunk: B::Chunk,
+    valid: u64,
+}
+
+impl<B: Backend, const UNICODE: bool> SingleRows<u64> for ChunkRows<'_, B, UNICODE> {
+    const ASCII: bool = !UNICODE;
+
+    #[inline(always)]
+    unsafe fn occ(&self, i: usize) -> (u64, u64) {
+        unsafe {
+            let (occ, back) = self.prefilter.chunk_occ::<UNICODE>(self.chunk, i);
+            let occ = occ & self.valid;
+            (occ, occ >> back)
+        }
+    }
+}
+
+/// The ASCII rows of [`Prefilter::match_two_chunks`]: `tail` (its haystack
+/// bytes `valid`) starts at `shift`
+struct TwoChunkRows<'a, B: Backend> {
+    prefilter: &'a Prefilter<B>,
+    head: B::Chunk,
+    tail: B::Chunk,
+    valid: u64,
+    shift: usize,
+}
+
+impl<B: Backend, M: BlockMask> SingleRows<M> for TwoChunkRows<'_, B> {
+    const ASCII: bool = true;
+
+    #[inline(always)]
+    unsafe fn occ(&self, i: usize) -> (M, M) {
+        unsafe {
+            let (head, _) = self.prefilter.chunk_occ::<false>(self.head, i);
+            let (tail, _) = self.prefilter.chunk_occ::<false>(self.tail, i);
+            let occ = M::from(head) | (M::from(tail & self.valid) << self.shift);
+            (occ, occ)
+        }
+    }
+}
+
+/// The walk over a haystack within one block (or chunk) of `M::BITS` bytes:
+/// greedy for 0 typos, the LCS otherwise
 #[inline(always)]
-unsafe fn walk_single<M: BlockMask, R: SingleRows<M>>(
+unsafe fn walk_single<M: BlockMask, R: SingleRows<M>, const GREEDY: bool>(
     rows: &R,
     n: usize,
     max_typos: usize,
@@ -193,6 +346,23 @@ unsafe fn walk_single<M: BlockMask, R: SingleRows<M>>(
     // Row 0 is read unchecked: empty needles never reach the prefilter
     // (`Matcher::compile` skips them)
     debug_assert!(n > 0);
+    if GREEDY {
+        debug_assert_eq!(max_typos, 0);
+        // The greedy walk is shorter: each row keeps its occurrences past the
+        // lowest one of the previous row
+        let (first, head) = unsafe { rows.occ(0) };
+        let mut reached = first;
+        let mut tail = first;
+        for i in 1..n {
+            (tail, _) = unsafe { rows.occ(i) };
+            reached = tail & reached.above_lowest();
+        }
+        if reached.is_zero() {
+            return (false, 0, 0);
+        }
+        return (true, head.trailing_zeros(), M::BITS - tail.leading_zeros());
+    }
+
     // Only the first and last `max_typos + 1` rows feed the window: ASCII
     // rows are peeled off the middle loop, Unicode rows (many compares each)
     // are read at one site and masked

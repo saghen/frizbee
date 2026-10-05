@@ -3,7 +3,7 @@ use core::arch::aarch64::*;
 use super::{Backend, BitMaskOps, ChunkBlock, eq_block_chunks, load_block_chunks};
 
 /// Four bits per lane, so NEON comparisons only need SHRN to pack their lanes
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct NeonMask(u64);
 
 impl From<NeonMask> for u64 {
@@ -42,11 +42,6 @@ impl BitMaskOps for NeonMask {
     #[inline(always)]
     fn leading_zeros(self) -> usize {
         self.0.leading_zeros() as usize / 4
-    }
-
-    #[inline(always)]
-    fn or(self, other: Self) -> Self {
-        Self(self.0 | other.0)
     }
 
     #[inline(always)]
@@ -151,8 +146,6 @@ mod tests {
             assert_eq!(mask.is_zero(), bits == 0);
             assert_eq!(mask.trailing_zeros(), bits.trailing_zeros() as usize);
             assert_eq!(mask.leading_zeros(), bits.leading_zeros() as usize);
-            assert_eq!(mask.or(NeonMask(0)), mask);
-            assert_eq!(mask.or(NeonMask::all()), NeonMask::all());
 
             let mut remaining = mask;
             let mut scalar = bits;
@@ -181,10 +174,6 @@ mod tests {
                 assert_eq!(
                     cleared.leading_zeros(),
                     scalar_cleared.leading_zeros() as usize
-                );
-                assert_eq!(
-                    cleared.partial_cmp(&prefix),
-                    scalar_cleared.partial_cmp(&scalar_prefix)
                 );
             }
         }

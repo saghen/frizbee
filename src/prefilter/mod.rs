@@ -113,8 +113,8 @@ pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
     fn new(needle: &str, case_sensitive: bool) -> Self;
     fn is_available() -> bool;
 
-    fn match_haystack(&self, haystack: &[u8]) -> Window;
-    fn match_haystack_unicode(&self, haystack: &[u8]) -> Window;
+    /// Matches with 0 typos, on bytes or on Unicode scalars
+    fn match_haystack<const UNICODE: bool>(&self, haystack: &[u8]) -> Window;
     fn match_haystack_typos<const UNICODE: bool>(
         &mut self,
         haystack: &[u8],
@@ -134,13 +134,8 @@ impl<B: Backend> Kernel for Prefilter<B> {
     }
 
     #[inline(always)]
-    fn match_haystack(&self, haystack: &[u8]) -> Window {
-        unsafe { self.match_haystack(haystack) }
-    }
-
-    #[inline(always)]
-    fn match_haystack_unicode(&self, haystack: &[u8]) -> Window {
-        unsafe { self.match_haystack_unicode(haystack) }
+    fn match_haystack<const UNICODE: bool>(&self, haystack: &[u8]) -> Window {
+        unsafe { Prefilter::match_haystack::<UNICODE>(self, haystack) }
     }
 
     #[inline(always)]
@@ -156,6 +151,7 @@ impl<B: Backend> Kernel for Prefilter<B> {
 #[cfg(test)]
 mod tests {
     use super::{Kernel, Window, backend::PrefilterScalar};
+    use crate::smith_waterman::reference::Rng;
     use proptest::prelude::*;
     use proptest::test_runner::{Config as ProptestConfig, TestCaseError, TestRunner};
     use std::any::Any;
@@ -469,6 +465,36 @@ mod tests {
     }
 
     #[test]
+    fn ascii_walks_around_two_chunks() {
+        // dense matches in haystacks around the two chunk walk's limits
+        // (64 and 128 bytes), where its halves share a byte
+        let mut rng = Rng(0x2545_f491_4f6c_dd1d);
+        let alphabet = b"abAx";
+        for _ in 0..if cfg!(miri) { 4 } else { 20_000 } {
+            let needle_len = 1 + rng.below(6);
+            let needle = rng.string(&['a', 'b', 'A'], needle_len);
+            let haystack_len = 56 + rng.below(80);
+            let sparse = rng.below(4);
+            let haystack = (0..haystack_len)
+                .map(|_| {
+                    alphabet[if rng.below(4) < sparse {
+                        3
+                    } else {
+                        rng.below(4)
+                    }]
+                })
+                .collect();
+            let case = PrefilterCase {
+                needle,
+                haystack,
+                max_typos: 0,
+                case_sensitive: rng.below(2) == 0,
+            };
+            assert_case_matches_oracle(&case);
+        }
+    }
+
+    #[test]
     fn reference_oracle_chunk_boundaries() {
         for prefix_len in [0usize, 1, 7, 8, 15, 16, 31, 32, 63, 64] {
             let mut haystack = vec![b'x'; prefix_len];
@@ -543,6 +569,54 @@ mod tests {
                         haystack: haystack.to_owned(),
                         max_typos,
                     });
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unicode_walks_across_chunk_boundaries() {
+        // places the needle's scalars across every chunk and block boundary
+        // (16, 32, 64 and 128 bytes) and the haystack's end around the
+        // single chunk walk's limit
+        let needles = [("니다", "가"), ("a니", "é"), ("é다", "a"), ("다", "ab")];
+        for &(needle, filler) in &needles[..if cfg!(miri) { 2 } else { 4 }] {
+            let first = needle.chars().next().unwrap().to_string();
+            let last = needle.chars().last().unwrap().to_string();
+            let (prefixes, suffixes) = if cfg!(miri) {
+                (vec![21], vec![0, 64])
+            } else {
+                (
+                    (0..48).collect(),
+                    vec![0, 1, 2, 3, 13, 29, 31, 61, 63, 64, 70],
+                )
+            };
+            for &prefix in &prefixes {
+                for &suffix in &suffixes {
+                    let pad = |n: usize| filler.repeat(n);
+                    let haystacks = [
+                        pad(prefix) + needle + &"z".repeat(suffix),
+                        pad(prefix) + &first + &pad(suffix) + &last,
+                        pad(prefix) + &last + &pad(suffix) + &first,
+                        pad(prefix) + &first + &pad(suffix),
+                    ];
+                    for haystack in haystacks {
+                        for max_typos in 0..=if cfg!(miri) { 1 } else { 2 } {
+                            let case = UnicodePrefilterCase {
+                                needle: needle.to_owned(),
+                                haystack: haystack.clone(),
+                                max_typos,
+                            };
+                            assert_unicode_case_matches_oracle(&case);
+                            let result =
+                                unicode_result_generic_typos(needle, &haystack, max_typos, true);
+                            if max_typos == 0 && result.0 {
+                                let start = haystack.find(&first).unwrap();
+                                let end = haystack.rfind(&last).unwrap() + last.len();
+                                assert_eq!(result, (true, start, end), "window for {case:?}");
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -686,7 +760,7 @@ mod tests {
     ) -> Window {
         let mut prefilter = P::new(needle, case_sensitive);
         match max_typos {
-            0 => prefilter.match_haystack(haystack),
+            0 => prefilter.match_haystack::<false>(haystack),
             _ => prefilter.match_haystack_typos::<false>(haystack, max_typos),
         }
     }
@@ -699,7 +773,7 @@ mod tests {
     ) -> Window {
         let mut prefilter = P::new(needle, case_sensitive);
         match max_typos {
-            0 => prefilter.match_haystack_unicode(haystack),
+            0 => prefilter.match_haystack::<true>(haystack),
             _ => prefilter.match_haystack_typos::<true>(haystack, max_typos),
         }
     }

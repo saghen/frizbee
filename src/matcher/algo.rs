@@ -249,8 +249,7 @@ where
     ) -> Window {
         match TYPOS {
             NO_PREFILTER => (true, 0, haystack.len()),
-            0 if UNICODE => self.prefilter.match_haystack_unicode(haystack),
-            0 => self.prefilter.match_haystack(haystack),
+            0 => self.prefilter.match_haystack::<UNICODE>(haystack),
             _ => self
                 .prefilter
                 .match_haystack_typos::<UNICODE>(haystack, max_typos),

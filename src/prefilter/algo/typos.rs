@@ -22,8 +22,8 @@
 //! `k + 1` rows and ends after the last occurrence of any of the last `k + 1`.
 //!
 
-use super::Prefilter;
 use super::rows::{SingleRows, overlap};
+use super::{Prefilter, load_window};
 use crate::prefilter::{
     Window,
     backend::{Backend, BitMaskOps, BlockMask},
@@ -45,6 +45,12 @@ impl<B: Backend> Prefilter<B> {
         }
         if len == 0 {
             return (false, 0, 0);
+        }
+        if UNICODE && len <= B::LANES {
+            let (chunk, valid) = unsafe { load_window::<B>(haystack, 0, len) };
+            return unsafe {
+                self.match_single_chunk::<true, false>(chunk, valid.into(), max_typos)
+            };
         }
         if B::Block::BITS > 64 && len <= 64 && (!UNICODE || B::LANES < 32) {
             unsafe { self.match_single_block::<UNICODE, u64>(haystack, max_typos) }
