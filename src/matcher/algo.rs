@@ -233,11 +233,15 @@ where
             index: candidate.index,
             score,
             exact,
+            // no cell scores in a window without a needle char
             #[cfg(feature = "match_end_col")]
-            end_col: self
-                .smith_waterman
-                .match_end_col(candidate.haystack, UNICODE)
-                .saturating_add(candidate.start_pos.min(u16::MAX as usize) as u16),
+            end_col: if raw_score == 0 {
+                0
+            } else {
+                self.smith_waterman
+                    .match_end_col(candidate.haystack, UNICODE, raw_score)
+                    .saturating_add(candidate.start_pos.min(u16::MAX as usize) as u16)
+            },
         }
     }
 

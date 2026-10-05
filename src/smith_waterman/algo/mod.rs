@@ -223,8 +223,11 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
         SmithWaterman::score_haystack_unicode(self, haystack, haystack_start_pos == 0)
     }
 
+    /// Inlined into the backend's `#[target_feature]` list loop: outlined,
+    /// every SIMD intrinsic in it becomes a call
     #[cfg(feature = "match_end_col")]
-    fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16 {
+    #[inline(always)]
+    fn match_end_col(&self, haystack: &[u8], unicode: bool, score: u16) -> u16 {
         if haystack.len() > MAX_HAYSTACK_LEN {
             return match_greedy(
                 self.needle.as_bytes(),
@@ -237,24 +240,24 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             .unwrap_or(0)
             .min(u16::MAX as u32) as u16;
         }
+        if score == 0 {
+            return 0;
+        }
 
-        // The unicode scorer walks one row per codepoint, the ASCII scorer one per byte
+        // The score is the final row's max, so its first occurrence ends the
+        // match. The unicode scorer walks one row per codepoint, the ASCII
+        // scorer one per byte
         let final_row = if unicode {
             self.needle_unicode.len()
         } else {
             self.needle.len()
         };
-        let mut match_end_col: u16 = 0;
-        let mut max_score = 0;
         for col_idx in 1..(haystack.len().div_ceil(B::LANES) + 1) {
-            let chunk_scores = self.score_matrix.get(final_row, col_idx);
-            let chunk_max_score = unsafe { chunk_scores.horizontal_max() };
-            if chunk_max_score > max_score {
-                max_score = chunk_max_score;
-                let lane = unsafe { chunk_scores.find_lane(chunk_max_score) };
-                match_end_col = ((col_idx - 1) * B::LANES + lane) as u16;
+            let lane = unsafe { self.score_matrix.get(final_row, col_idx).find_lane(score) };
+            if lane != B::LANES {
+                return ((col_idx - 1) * B::LANES + lane) as u16;
             }
         }
-        match_end_col
+        0
     }
 }
