@@ -131,6 +131,12 @@ fn random_scoring(rng: &mut Rng) -> Scoring {
 // Kernels
 // ---------------------------------------------------------------------------
 
+/// A kernel under test, built for the ASCII and the Unicode kernels
+struct Both<K> {
+    ascii: K,
+    unicode: K,
+}
+
 /// What the tests read from a kernel, without its type
 trait Scorer {
     /// The score, and the indices traced through the stored matrix (relative
@@ -138,17 +144,18 @@ trait Scorer {
     fn run(&mut self, haystack: &[u8], unicode: bool, start_pos: usize) -> (u16, (u16, Vec<u32>));
 }
 
-impl<K: Kernel> Scorer for K {
+impl<K: Kernel> Scorer for Both<K> {
     fn run(&mut self, haystack: &[u8], unicode: bool, start_pos: usize) -> (u16, (u16, Vec<u32>)) {
         let (score, (indices_score, indices)) = if unicode {
             (
-                self.score_haystack_unicode(haystack, start_pos),
-                self.score_haystack_unicode_indices(haystack, start_pos),
+                self.unicode.score_haystack_unicode(haystack, start_pos),
+                self.unicode
+                    .score_haystack_unicode_indices(haystack, start_pos),
             )
         } else {
             (
-                self.score_haystack(haystack, start_pos),
-                self.score_haystack_indices(haystack, start_pos),
+                self.ascii.score_haystack(haystack, start_pos),
+                self.ascii.score_haystack_indices(haystack, start_pos),
             )
         };
         let relative = indices.into_iter().map(|i| i - start_pos as u32);
@@ -159,24 +166,27 @@ impl<K: Kernel> Scorer for K {
 /// Every kernel available on this machine for the needle and scoring, labeled
 /// `<tier>-<lanes>x<bits>`, or `<tier>-auto` for the kernel picking the width
 fn kernels(needle: &str, cs: bool, s: &Scoring) -> Vec<(&'static str, Box<dyn Scorer>)> {
-    fn build<K: Kernel>(needle: &str, cs: bool, s: &Scoring) -> Box<dyn Scorer> {
-        Box::new(K::new(needle, s, cs))
+    fn both<K: Kernel>(needle: &str, cs: bool, s: &Scoring) -> Box<dyn Scorer> {
+        Box::new(Both {
+            ascii: K::new(needle, s, cs, false),
+            unicode: K::new(needle, s, cs, true),
+        })
     }
     let mut all: Vec<(&'static str, Box<dyn Scorer>)> = Vec::new();
     macro_rules! push {
         ($label:literal, $b:ty, u8) => {
             if <$b>::is_available() && score_fits_in_u8(needle.len(), s) {
-                all.push(($label, build::<SmithWaterman<$b>>(needle, cs, s)));
+                all.push(($label, both::<SmithWaterman<$b>>(needle, cs, s)));
             }
         };
         ($label:literal, $b:ty, u16) => {
             if <$b>::is_available() {
-                all.push(($label, build::<SmithWaterman<$b>>(needle, cs, s)));
+                all.push(($label, both::<SmithWaterman<$b>>(needle, cs, s)));
             }
         };
         ($label:literal, $u8:ty, $u16:ty) => {
             if <$u16>::is_available() {
-                let k = build::<ScoreWidth<SmithWaterman<$u8>, SmithWaterman<$u16>>>(needle, cs, s);
+                let k = both::<ScoreWidth<SmithWaterman<$u8>, SmithWaterman<$u16>>>(needle, cs, s);
                 all.push(($label, k));
             }
         };
@@ -550,7 +560,7 @@ fn reference_fixed_cases() {
         ("axb", "ab", 2 * char_score + s.prefix_bonus - 5),
     ] {
         assert_eq!(ascii(needle, haystack, &s), want);
-        let mut sw = SmithWaterman::<BackendScalar8>::new(needle, &s, false);
+        let mut sw = <SmithWaterman<BackendScalar8> as Kernel>::new(needle, &s, false, false);
         assert_eq!(sw.score_haystack(haystack.as_bytes(), true), want);
     }
 

@@ -97,10 +97,16 @@ impl<B: Backend> SmithWaterman<B> {
         })
         .unwrap_or_else(|| (0, vec![]))
     }
+
+    /// [`Kernel::new`] in tests, where the width doesn't matter
+    #[cfg(test)]
+    pub(crate) fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self {
+        <Self as Kernel>::new(needle, scoring, case_sensitive, false)
+    }
 }
 
 impl<B: Backend> Kernel for SmithWaterman<B> {
-    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self {
+    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool, _unicode: bool) -> Self {
         let needle_simd = case_needle(needle.as_bytes(), case_sensitive)
             .iter()
             .map(|(c1, c2)| unsafe { (B::Bytes::splat(*c1), B::Bytes::splat(*c2)) })

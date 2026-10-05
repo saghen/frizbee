@@ -66,6 +66,7 @@ where
     #[inline(always)]
     pub fn new(needle: &str, config: &Config) -> Self {
         let case_sensitive = config.casing.respects_case_for(needle);
+        let unicode = config.unicode.respects_unicode_for(needle);
         Self {
             needle: needle.to_string(),
             config: config.clone(),
@@ -74,7 +75,7 @@ where
                 .map(|max| needle.chars().count().saturating_sub(max as usize))
                 .unwrap_or(0),
             prefilter: P::new(needle, case_sensitive),
-            smith_waterman: S::new(needle, &config.scoring, case_sensitive),
+            smith_waterman: S::new(needle, &config.scoring, case_sensitive, unicode),
         }
     }
 

@@ -1,4 +1,5 @@
-use crate::smith_waterman::score_fits_in_u8;
+#[cfg(target_arch = "x86_64")]
+use crate::smith_waterman::needle_fits_in_u8;
 use crate::sort::radix_sort_matches;
 use crate::{Config, Match, MatchIndices, Pattern};
 use alloc::{vec, vec::Vec};
@@ -461,7 +462,8 @@ impl Matcher {
 
         #[cfg(target_arch = "x86_64")]
         {
-            if score_fits_in_u8(needle.len(), &config.scoring) {
+            let unicode = config.unicode.respects_unicode_for(needle);
+            if needle_fits_in_u8(needle, unicode, &config.scoring) {
                 if MatcherAVX512U8::is_available() {
                     return MatcherBackend::AVX512U8(unsafe {
                         MatcherAVX512U8::build(needle, config)
@@ -852,6 +854,22 @@ mod tests {
             panic!("expected a single pattern");
         };
         assert!(!is_u8(&pattern.backend));
+    }
+
+    #[test]
+    fn unicode_needle_width_counts_scalars() {
+        // 8 scalars but 24 bytes: one row per scalar in the Unicode kernel,
+        // one per byte in the ASCII kernel
+        let needle = "그것은무엇입니까";
+        let is_u8_with = |unicode| {
+            let matcher = Matcher::new(needle, &Config::default().unicode(unicode));
+            let CompiledPatterns::Single(pattern) = &matcher.patterns else {
+                panic!("expected a single pattern");
+            };
+            is_u8(&pattern.backend)
+        };
+        assert!(is_u8_with(crate::UnicodeMatching::Smart));
+        assert!(!is_u8_with(crate::UnicodeMatching::Ignore));
     }
 
     #[test]

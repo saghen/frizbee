@@ -97,12 +97,24 @@ pub type SmithWatermanScalar = SmithWaterman<BackendScalar8>;
 #[cfg(scalar_fallback)]
 pub type SmithWatermanScalarU8 = SmithWaterman<BackendScalar16U8>;
 
+/// [`score_fits_in_u8`] for the needle's score matrix, which has a row per
+/// scalar in the Unicode kernel and a row per byte in the ASCII kernel
+#[inline]
+pub(crate) fn needle_fits_in_u8(needle: &str, unicode: bool, scoring: &Scoring) -> bool {
+    let rows = if unicode {
+        needle.chars().count()
+    } else {
+        needle.len()
+    };
+    score_fits_in_u8(rows, scoring)
+}
+
 /// Returns true if every possible Smith-Waterman matrix cell value for this
-/// needle length and scoring config fits in a u8. The u8 backends are otherwise
+/// row count and scoring config fits in a u8. The u8 backends are otherwise
 /// identical to the u16 backends but with double the lane count (64 cells/chunk
 /// on AVX-512, 32 on AVX2, 16 on SSE/NEON).
 #[inline]
-pub(crate) fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
+pub(crate) fn score_fits_in_u8(rows: usize, scoring: &Scoring) -> bool {
     let max_constant = (scoring.match_score as usize + scoring.mismatch_penalty as usize)
         .max(scoring.gap_open_penalty as usize)
         .max(scoring.gap_extend_penalty as usize)
@@ -123,7 +135,7 @@ pub(crate) fn score_fits_in_u8(needle_len: usize, scoring: &Scoring) -> bool {
 
     // No cell holds more than [`Scoring::max_score`], which the diagonal
     // transiently exceeds by the mismatch penalty before subtracting it
-    scoring.max_score(needle_len) + scoring.mismatch_penalty as u64 <= u8::MAX as u64
+    scoring.max_score(rows) + scoring.mismatch_penalty as u64 <= u8::MAX as u64
 }
 
 /// Scoring constants splatted once at construction, so the outlined kernels
@@ -179,11 +191,11 @@ macro_rules! either {
 }
 
 impl<U8: Kernel, U16: Kernel> Kernel for ScoreWidth<U8, U16> {
-    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self {
-        if score_fits_in_u8(needle.len(), scoring) {
-            Self::U8(U8::new(needle, scoring, case_sensitive))
+    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool, unicode: bool) -> Self {
+        if needle_fits_in_u8(needle, unicode, scoring) {
+            Self::U8(U8::new(needle, scoring, case_sensitive, unicode))
         } else {
-            Self::U16(U16::new(needle, scoring, case_sensitive))
+            Self::U16(U16::new(needle, scoring, case_sensitive, unicode))
         }
     }
 
@@ -226,7 +238,9 @@ impl<U8: Kernel, U16: Kernel> Kernel for ScoreWidth<U8, U16> {
 }
 
 pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
-    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool) -> Self;
+    /// `unicode`: the needle is scored by its scalars, one row each, which
+    /// picks the score width (see [`needle_fits_in_u8`])
+    fn new(needle: &str, scoring: &Scoring, case_sensitive: bool, unicode: bool) -> Self;
     fn is_available() -> bool;
     fn score_haystack_indices(
         &mut self,
@@ -272,8 +286,12 @@ mod tests {
         max_typos: u16,
         case_sensitive: bool,
     ) -> Option<u16> {
-        let mut matcher =
-            SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), case_sensitive);
+        let mut matcher = <SmithWaterman<BackendScalar8> as Kernel>::new(
+            needle,
+            &Scoring::default(),
+            case_sensitive,
+            false,
+        );
 
         // Every needle char the alignment doesn't match is a typo
         let score = matcher.score_haystack_matrix(haystack.as_bytes(), true);
