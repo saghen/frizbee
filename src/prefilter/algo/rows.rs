@@ -6,7 +6,7 @@ use super::Prefilter;
 use super::typos::{lcs_row, walk_bytes};
 use crate::prefilter::{
     UnicodeChar, Window,
-    backend::{Backend, BitMaskOps, BlockMask},
+    backend::{Backend, BlockMask, Narrow},
 };
 
 /// Overlap between chunks due to unicode chars being up 4 bytes long
@@ -45,21 +45,35 @@ impl<B: Backend> ScalarRow<B> {
 /// A block of haystack bytes with the mask of the bytes inside the haystack
 pub(super) type Block<B> = (<B as Backend>::Chunks, <B as Backend>::Block);
 
-/// Positions of the block equal to `needle`
+/// Positions of the block equal to `needle`, among the low `M::BITS` bytes
 #[inline(always)]
-unsafe fn byte_occ<B: Backend>((chunks, valid): &Block<B>, needle: B::Chunk) -> B::Block {
+unsafe fn byte_occ<B: Backend, M: BlockMask>((chunks, valid): &Block<B>, needle: B::Chunk) -> M
+where
+    B::Block: Narrow<M>,
+{
     let occ = unsafe { B::eq_block(chunks, needle) };
     // padding never equals a needle byte
-    if B::PADDED_BLOCKS { occ } else { occ & *valid }
+    if B::PADDED_BLOCKS {
+        occ.narrow()
+    } else {
+        (occ & *valid).narrow()
+    }
 }
 
 /// Positions of the block where the `len` bytes of a scalar end
 #[inline(always)]
-unsafe fn scalar_occ<B: Backend>(block: &Block<B>, bytes: &[B::Chunk; 4], len: usize) -> B::Block {
+unsafe fn scalar_occ<B: Backend, M: BlockMask>(
+    block: &Block<B>,
+    bytes: &[B::Chunk; 4],
+    len: usize,
+) -> M
+where
+    B::Block: Narrow<M>,
+{
     unsafe {
-        let mut occ = byte_occ::<B>(block, bytes[len - 1]);
+        let mut occ = byte_occ::<B, M>(block, bytes[len - 1]);
         for back in 1..len {
-            occ = occ & (byte_occ::<B>(block, bytes[len - 1 - back]) << back);
+            occ = occ & (byte_occ::<B, M>(block, bytes[len - 1 - back]) << back);
         }
         occ
     }
@@ -91,21 +105,24 @@ impl<B: Backend> Prefilter<B> {
     /// Positions among `unseen` where needle row `i` ends, and where those
     /// occurrences start
     #[inline(always)]
-    pub(super) unsafe fn row_occ<const UNICODE: bool>(
+    pub(super) unsafe fn row_occ<const UNICODE: bool, M: BlockMask>(
         &self,
         block: &Block<B>,
-        unseen: B::Block,
+        unseen: M,
         i: usize,
-    ) -> (B::Block, B::Block) {
+    ) -> (M, M)
+    where
+        B::Block: Narrow<M>,
+    {
         unsafe {
             if !UNICODE {
-                let occ = byte_occ::<B>(block, self.needle_ascii.get_unchecked(i).0) & unseen;
+                let occ = byte_occ::<B, M>(block, self.needle_ascii.get_unchecked(i).0) & unseen;
                 return (occ, occ);
             }
             let row = self.needle_scalars.get_unchecked(i);
-            let mut occ = scalar_occ::<B>(block, &row.bytes, row.char.len);
+            let mut occ = scalar_occ::<B, M>(block, &row.bytes, row.char.len);
             if row.char.has_flip {
-                occ = occ | scalar_occ::<B>(block, &row.flipped, row.char.len);
+                occ = occ | scalar_occ::<B, M>(block, &row.flipped, row.char.len);
             }
             let occ = occ & unseen;
             (occ, occ >> (row.char.len - 1))
@@ -113,16 +130,19 @@ impl<B: Backend> Prefilter<B> {
     }
 
     #[inline(always)]
-    pub(super) unsafe fn match_single_block<const UNICODE: bool>(
+    pub(super) unsafe fn match_single_block<const UNICODE: bool, M: BlockMask>(
         &self,
         haystack: &[u8],
         max_typos: usize,
-    ) -> Window {
+    ) -> Window
+    where
+        B::Block: Narrow<M>,
+    {
         let rows = BlockRows::<B, UNICODE> {
             prefilter: self,
             block: unsafe { self.load_block::<UNICODE>(haystack) },
         };
-        unsafe { walk_single(&rows, self.rows::<UNICODE>(), max_typos, haystack.len()) }
+        unsafe { walk_single::<M, _>(&rows, self.rows::<UNICODE>(), max_typos, haystack.len()) }
     }
 }
 
@@ -141,14 +161,17 @@ struct BlockRows<'a, B: Backend, const UNICODE: bool> {
     block: Block<B>,
 }
 
-impl<B: Backend, const UNICODE: bool> SingleRows<B::Block> for BlockRows<'_, B, UNICODE> {
+impl<B: Backend, M: BlockMask, const UNICODE: bool> SingleRows<M> for BlockRows<'_, B, UNICODE>
+where
+    B::Block: Narrow<M>,
+{
     const ASCII: bool = !UNICODE;
 
     #[inline(always)]
-    unsafe fn occ(&self, i: usize) -> (B::Block, B::Block) {
+    unsafe fn occ(&self, i: usize) -> (M, M) {
         unsafe {
             self.prefilter
-                .row_occ::<UNICODE>(&self.block, B::Block::all(), i)
+                .row_occ::<UNICODE, M>(&self.block, M::all(), i)
         }
     }
 }

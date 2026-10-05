@@ -46,8 +46,10 @@ impl<B: Backend> Prefilter<B> {
         if len == 0 {
             return (false, 0, 0);
         }
-        if len <= B::Block::BITS {
-            unsafe { self.match_single_block::<UNICODE>(haystack, max_typos) }
+        if B::Block::BITS > 64 && len <= 64 && (!UNICODE || B::LANES < 32) {
+            unsafe { self.match_single_block::<UNICODE, u64>(haystack, max_typos) }
+        } else if len <= B::Block::BITS {
+            unsafe { self.match_single_block::<UNICODE, B::Block>(haystack, max_typos) }
         } else {
             unsafe { self.match_multi_block::<UNICODE>(haystack, max_typos) }
         }
@@ -84,7 +86,8 @@ impl<B: Backend> Prefilter<B> {
             let mut tail = B::Block::from(0);
 
             for i in 0..n {
-                let (occ, occ_start) = unsafe { self.row_occ::<UNICODE>(&block, unseen, i) };
+                let (occ, occ_start) =
+                    unsafe { self.row_occ::<UNICODE, B::Block>(&block, unseen, i) };
                 if i <= max_typos {
                     head = head | occ_start;
                 }
