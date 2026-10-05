@@ -538,37 +538,8 @@ impl Scoring {
     /// excluding the `exact_match_bonus` added after scoring. Grows with `rows`.
     ///
     /// With the default scoring this bounds 13 rows at 254, where "/aC/aC/aC/aC/"
-    /// scores 13 * (12 + 4) + 12 + 4 * (4 + 4) = 252.
-    ///
-    /// A cell is the score of its best local alignment. Matching a needle char
-    /// gains at most `match_score + matching_case_bonus` plus the bonus of its
-    /// haystack column, every other step only subtracts, and an alignment uses
-    /// each row at most once. So a cell is at most `rows` per-char gains plus the
-    /// bonuses of the matched columns minus the penalties paid between them.
-    ///
-    /// A column's bonus is one of: `prefix_bonus` (first column only, which has no
-    /// previous char), `delimiter_bonus` ("D", a non-delimiter after a
-    /// delimiter), `capitalization_bonus` ("C", an uppercase letter after a
-    /// lowercase letter) or none. They constrain each other on adjacent columns:
-    /// a D column isn't a delimiter, so the next column can't be D (but can be C,
-    /// e.g. "/aC"), and a C column is uppercase, so the next column has no bonus.
-    /// So the matched columns with a D or C bonus form blocks of adjacent columns,
-    /// each "D", "C" or "DC" (at most `single = max(D, C)` or `pair = D + C`).
-    /// Two consecutive blocks are separated by at least one row without a bonus
-    /// (a matched char without one, a mismatch or a skipped needle char), or by
-    /// skipping haystack columns within one row: a left gap out of the block's
-    /// matched cell, which pays at least `gap = max(gap_open, gap_extend)` (the
-    /// kernels charge `gap_open - gap_extend`, clamped at zero, on top of the
-    /// extend penalty).
-    ///
-    /// Pairing each block with the separator after it, every pair earns at most
-    /// `rate` bonus per row, the best of `pair / 3` (DC and a row), `(pair - gap) /
-    /// 2` (DC and a gap), `single / 2` and `single - gap`. The last block needs no
-    /// separator, so with `rows` rows the D and C bonuses sum to at most
-    /// `blocks(rows) = max(rate * rows, single + rate * (rows - 1), pair + rate *
-    /// (rows - 2))`, rounded down as scores are integers. A matched first column
-    /// adds the prefix bonus and uses a row, and may directly precede a block, so
-    /// the bonuses sum to at most `max(blocks(rows), prefix + blocks(rows - 1))`.
+    /// scores 13 * (12 + 4) + 12 + 4 * (4 + 4) = 252. Why the bound holds is
+    /// on the test checking it (`width_matches_reference`).
     pub(crate) fn max_score(&self, rows: usize) -> u64 {
         let rows = rows as u64;
         let delimiter = self.delimiter_bonus as u64;
