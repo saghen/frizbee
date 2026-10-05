@@ -1,48 +1,9 @@
 use core::arch::wasm32::*;
 
+use super::copy_partial;
 use crate::prefilter::algo::can_overread;
 
-use super::{Backend, BytesVec, MaskVec, ScoreVec};
-
-/// Lane indices 0..16, used to build variable byte-shift swizzles
-/// (out-of-range swizzle indices read as zero).
-const IOTA: v128 = u8x16(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-
-/// Safe page-bounded read of 0..8 bytes into a little-endian u64
-#[inline(always)]
-unsafe fn load_u64_partial_safe(ptr: *const u8, len: usize) -> u64 {
-    unsafe {
-        debug_assert!(len < 8);
-        match len {
-            0 => 0,
-            1 => *ptr as u64,
-            2 => (ptr as *const u16).read_unaligned() as u64,
-            3 => {
-                let lo = (ptr as *const u16).read_unaligned() as u64;
-                let hi = *ptr.add(2) as u64;
-                lo | (hi << 16)
-            }
-            4 => (ptr as *const u32).read_unaligned() as u64,
-            5 => {
-                let lo = (ptr as *const u32).read_unaligned() as u64;
-                let hi = *ptr.add(4) as u64;
-                lo | (hi << 32)
-            }
-            6 => {
-                let lo = (ptr as *const u32).read_unaligned() as u64;
-                let hi = (ptr.add(4) as *const u16).read_unaligned() as u64;
-                lo | (hi << 32)
-            }
-            7 => {
-                let lo = (ptr as *const u32).read_unaligned() as u64;
-                let mid = (ptr.add(4) as *const u16).read_unaligned() as u64;
-                let hi = *ptr.add(6) as u64;
-                lo | (mid << 32) | (hi << 48)
-            }
-            _ => core::hint::unreachable_unchecked(),
-        }
-    }
-}
+use super::{Backend, BytesVec, MaskVec, ScoreVec, keep_first};
 
 /// 8-lane u16 scoring (128-bit v128), 8-lane u8 input (low half of v128).
 #[derive(Debug, Clone, Copy)]
@@ -102,18 +63,22 @@ impl BytesVec for WasmBytes {
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         unsafe {
             let remaining = len.saturating_sub(start);
+            let ptr = data.wrapping_add(start);
+            if remaining >= 8 {
+                return Self(v128_load64_zero(ptr as *const u64));
+            }
             if remaining == 0 {
                 return Self(u64x2_splat(0));
             }
-            let ptr = data.add(start);
-            Self(match remaining {
-                8.. => v128_load64_zero(ptr as *const u64),
-                1..=7 if can_overread(ptr, 8) => {
-                    let lo = v128_load64_zero(ptr as *const u64);
-                    let mask = u64x2((1u64 << (remaining * 8)) - 1, 0);
-                    v128_and(lo, mask)
-                }
-                _ => u64x2(load_u64_partial_safe(ptr, remaining), 0),
+            // A full load with the bytes past the end zeroed, unless it would
+            // cross into the next page
+            Self(if can_overread(ptr, 8) {
+                v128_and(
+                    v128_load64_zero(ptr as *const u64),
+                    v128_load64_zero(keep_first(remaining) as *const u64),
+                )
+            } else {
+                v128_load64_zero(copy_partial::<8>(ptr, remaining).as_ptr() as *const u64)
             })
         }
     }
@@ -319,29 +284,22 @@ impl BytesVec for WasmU8Bytes {
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         unsafe {
             let remaining = len.saturating_sub(start);
+            let ptr = data.wrapping_add(start);
+            if remaining >= 16 {
+                return Self(v128_load(ptr as *const v128));
+            }
             if remaining == 0 {
                 return Self(u64x2_splat(0));
             }
-            let ptr = data.add(start);
-            Self(match remaining {
-                0 => unreachable!(),
-                8 => v128_load64_zero(ptr as *const u64),
-                16.. => v128_load(ptr as *const v128),
-                1..=7 if can_overread(ptr, 8) => {
-                    let lo = v128_load64_zero(ptr as *const u64);
-                    let mask = u64x2((1u64 << (remaining * 8)) - 1, 0);
-                    v128_and(lo, mask)
-                }
-                1..=7 => u64x2(load_u64_partial_safe(ptr, remaining), 0),
-                9..=15 => {
-                    // low half loads bytes 0..8
-                    // high half re-loads the last 8 bytes and shifts them into place
-                    let lo = v128_load64_zero(ptr as *const u64);
-                    let hi = v128_load64_zero(ptr.add(remaining - 8) as *const u64);
-                    let shift = u8x16_splat((16 - remaining) as u8);
-                    let hi = u8x16_swizzle(hi, u8x16_add(IOTA, shift));
-                    u64x2_shuffle::<0, 2>(lo, hi)
-                }
+            // A full load with the bytes past the end zeroed, unless it would
+            // cross into the next page
+            Self(if can_overread(ptr, 16) {
+                v128_and(
+                    v128_load(ptr as *const v128),
+                    v128_load(keep_first(remaining) as *const v128),
+                )
+            } else {
+                v128_load(copy_partial::<16>(ptr, remaining).as_ptr() as *const v128)
             })
         }
     }

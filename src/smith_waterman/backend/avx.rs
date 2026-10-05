@@ -1,8 +1,9 @@
 use core::arch::x86_64::*;
 
+use super::copy_partial;
 use crate::prefilter::algo::can_overread;
 
-use super::{Backend, BytesVec, MaskVec, ScoreVec};
+use super::{Backend, BytesVec, MaskVec, ScoreVec, keep_first};
 
 /// 16-lane u16 scoring (256-bit __m256i), 16-lane u8 input (128-bit __m128i).
 #[derive(Debug, Clone, Copy)]
@@ -33,79 +34,26 @@ impl Backend for BackendAVX {
     gap_dispatch!(16);
 }
 
-/// Safe page-bounded read of 0..8 bytes into the low 64 bits of an __m128i.
-/// The high 8 bytes are zero.
-#[inline(always)]
-unsafe fn load_partial_safe(ptr: *const u8, len: usize) -> __m128i {
-    unsafe {
-        debug_assert!(len < 8);
-        let val: u64 = match len {
-            0 => 0,
-            1 => *ptr as u64,
-            2 => (ptr as *const u16).read_unaligned() as u64,
-            3 => {
-                let lo = (ptr as *const u16).read_unaligned() as u64;
-                let hi = *ptr.add(2) as u64;
-                lo | (hi << 16)
-            }
-            4 => (ptr as *const u32).read_unaligned() as u64,
-            5 => {
-                let lo = (ptr as *const u32).read_unaligned() as u64;
-                let hi = *ptr.add(4) as u64;
-                lo | (hi << 32)
-            }
-            6 => {
-                let lo = (ptr as *const u32).read_unaligned() as u64;
-                let hi = (ptr.add(4) as *const u16).read_unaligned() as u64;
-                lo | (hi << 32)
-            }
-            7 => {
-                let lo = (ptr as *const u32).read_unaligned() as u64;
-                let mid = (ptr.add(4) as *const u16).read_unaligned() as u64;
-                let hi = *ptr.add(6) as u64;
-                lo | (mid << 32) | (hi << 48)
-            }
-            _ => core::hint::unreachable_unchecked(),
-        };
-        _mm_cvtsi64_si128(val as i64)
-    }
-}
-
 /// Page-safe load of up to 16 bytes into an __m128i. `start` is the byte
 /// offset within `data` (of total length `len`). Out-of-range bytes are zero.
 #[inline(always)]
 pub(crate) unsafe fn load_partial_m128i(data: *const u8, start: usize, len: usize) -> __m128i {
     unsafe {
         let remaining = len.saturating_sub(start);
+        let ptr = data.wrapping_add(start);
+        if remaining >= 16 {
+            return _mm_loadu_si128(ptr as *const __m128i);
+        }
         if remaining == 0 {
             return _mm_setzero_si128();
         }
-        let ptr = data.add(start);
-        match remaining {
-            0 => unreachable!(),
-            8 => _mm_loadl_epi64(ptr as *const __m128i),
-            16.. => _mm_loadu_si128(ptr as *const __m128i),
-            1..=7 if can_overread(ptr, 8) => {
-                let lo = _mm_loadl_epi64(ptr as *const __m128i);
-                let mask = _mm_set_epi64x(0, (1i64 << (remaining * 8)) - 1);
-                _mm_and_si128(lo, mask)
-            }
-            1..=7 => load_partial_safe(ptr, remaining),
-            9..=15 => {
-                let lo = _mm_loadl_epi64(ptr as *const __m128i);
-                let hi = _mm_loadl_epi64(ptr.add(remaining - 8) as *const __m128i);
-                let hi = match 16 - remaining {
-                    1 => _mm_srli_si128::<1>(hi),
-                    2 => _mm_srli_si128::<2>(hi),
-                    3 => _mm_srli_si128::<3>(hi),
-                    4 => _mm_srli_si128::<4>(hi),
-                    5 => _mm_srli_si128::<5>(hi),
-                    6 => _mm_srli_si128::<6>(hi),
-                    7 => _mm_srli_si128::<7>(hi),
-                    _ => core::hint::unreachable_unchecked(),
-                };
-                _mm_unpacklo_epi64(lo, hi)
-            }
+        // A full load with the bytes past the end zeroed, unless it would
+        // cross into the next page
+        if can_overread(ptr, 16) {
+            let keep = _mm_loadu_si128(keep_first(remaining) as *const __m128i);
+            _mm_and_si128(_mm_loadu_si128(ptr as *const __m128i), keep)
+        } else {
+            _mm_loadu_si128(copy_partial::<16>(ptr, remaining).as_ptr() as *const __m128i)
         }
     }
 }
@@ -362,14 +310,24 @@ impl BytesVec for AvxU8Bytes {
     #[inline(always)]
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         unsafe {
-            // Fast path: full 32-byte unaligned load when enough remains.
-            if start + 32 <= len {
-                return Self(_mm256_loadu_si256(data.add(start) as *const __m256i));
+            let remaining = len.saturating_sub(start);
+            // `start` may be past `len` (the shorter haystack of a pair): the
+            // pointer is only formed with wrapping arithmetic
+            let ptr = data.wrapping_add(start);
+            if remaining >= 32 {
+                return Self(_mm256_loadu_si256(ptr as *const __m256i));
             }
-            // Otherwise compose two 16-byte page-safe loads.
-            let lo = load_partial_m128i(data, start, len);
-            let hi = load_partial_m128i(data, start + 16, len);
-            Self(_mm256_set_m128i(hi, lo))
+            if remaining == 0 {
+                return Self(_mm256_setzero_si256());
+            }
+            // A full load with the bytes past the end zeroed, unless it would
+            // cross into the next page
+            Self(if can_overread(ptr, 32) {
+                let keep = _mm256_loadu_si256(keep_first(remaining) as *const __m256i);
+                _mm256_and_si256(_mm256_loadu_si256(ptr as *const __m256i), keep)
+            } else {
+                _mm256_loadu_si256(copy_partial::<32>(ptr, remaining).as_ptr() as *const __m256i)
+            })
         }
     }
 

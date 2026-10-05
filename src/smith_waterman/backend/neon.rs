@@ -1,7 +1,8 @@
+use super::copy_partial;
 use crate::prefilter::algo::can_overread;
 use core::arch::aarch64::*;
 
-use super::{Backend, BytesVec, MaskVec, ScoreVec};
+use super::{Backend, BytesVec, MaskVec, ScoreVec, keep_first};
 
 /// 8-lane scoring (uint16x8_t, 128-bit), 8-byte bytes (uint8x8_t, 64-bit).
 #[derive(Debug, Clone, Copy)]
@@ -32,44 +33,6 @@ impl Backend for BackendNEON {
     gap_dispatch!(8);
 }
 
-impl NeonBytes {
-    #[inline(always)]
-    unsafe fn load_partial_safe(ptr: *const u8, len: usize) -> uint8x8_t {
-        unsafe {
-            debug_assert!(len < 8);
-            let val: u64 = match len {
-                0 => 0,
-                1 => *ptr as u64,
-                2 => (ptr as *const u16).read_unaligned() as u64,
-                3 => {
-                    let lo = (ptr as *const u16).read_unaligned() as u64;
-                    let hi = *ptr.add(2) as u64;
-                    lo | (hi << 16)
-                }
-                4 => (ptr as *const u32).read_unaligned() as u64,
-                5 => {
-                    let lo = (ptr as *const u32).read_unaligned() as u64;
-                    let hi = *ptr.add(4) as u64;
-                    lo | (hi << 32)
-                }
-                6 => {
-                    let lo = (ptr as *const u32).read_unaligned() as u64;
-                    let hi = (ptr.add(4) as *const u16).read_unaligned() as u64;
-                    lo | (hi << 32)
-                }
-                7 => {
-                    let lo = (ptr as *const u32).read_unaligned() as u64;
-                    let mid = (ptr.add(4) as *const u16).read_unaligned() as u64;
-                    let hi = *ptr.add(6) as u64;
-                    lo | (mid << 32) | (hi << 48)
-                }
-                _ => core::hint::unreachable_unchecked(),
-            };
-            vreinterpret_u8_u64(vdup_n_u64(val))
-        }
-    }
-}
-
 impl BytesVec for NeonBytes {
     type Mask = NeonBytes;
 
@@ -94,19 +57,19 @@ impl BytesVec for NeonBytes {
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         unsafe {
             let remaining = len.saturating_sub(start);
+            let ptr = data.wrapping_add(start);
+            if remaining >= 8 {
+                return Self(vld1_u8(ptr));
+            }
             if remaining == 0 {
                 return Self(vdup_n_u8(0));
             }
-            let ptr = data.add(start);
-            Self(match remaining {
-                8.. => vld1_u8(ptr),
-                1..=7 if can_overread(ptr, 8) => {
-                    let lo = vld1_u8(ptr);
-                    let indices = vld1_u8([0, 1, 2, 3, 4, 5, 6, 7].as_ptr());
-                    let mask = vclt_u8(indices, vdup_n_u8(remaining as u8));
-                    vand_u8(lo, mask)
-                }
-                _ => Self::load_partial_safe(ptr, remaining),
+            // A full load with the bytes past the end zeroed, unless it would
+            // cross into the next page
+            Self(if can_overread(ptr, 8) {
+                vand_u8(vld1_u8(ptr), vld1_u8(keep_first(remaining)))
+            } else {
+                vld1_u8(copy_partial::<8>(ptr, remaining).as_ptr())
             })
         }
     }
@@ -279,33 +242,6 @@ impl Backend for BackendNEONU8 {
     gap_dispatch!(16);
 }
 
-impl NeonU8Bytes {
-    #[inline(always)]
-    unsafe fn load_partial_safe(ptr: *const u8, len: usize) -> uint8x16_t {
-        unsafe {
-            debug_assert!(len < 16);
-            // Build via two 8-byte halves; reuse NeonBytes::load_partial_safe
-            // logic for chunks under 8
-            if len == 0 {
-                return vdupq_n_u8(0);
-            }
-            if len < 8 {
-                let lo = NeonBytes::load_partial_safe(ptr, len);
-                return vcombine_u8(lo, vdup_n_u8(0));
-            }
-            if len == 8 {
-                let lo = vld1_u8(ptr);
-                return vcombine_u8(lo, vdup_n_u8(0));
-            }
-            // 9..=15 - load 8 + remainder
-            let lo = vld1_u8(ptr);
-            let hi_len = len - 8;
-            let hi = NeonBytes::load_partial_safe(ptr.add(8), hi_len);
-            vcombine_u8(lo, hi)
-        }
-    }
-}
-
 impl BytesVec for NeonU8Bytes {
     type Mask = NeonU8Bytes;
 
@@ -330,20 +266,19 @@ impl BytesVec for NeonU8Bytes {
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         unsafe {
             let remaining = len.saturating_sub(start);
+            let ptr = data.wrapping_add(start);
+            if remaining >= 16 {
+                return Self(vld1q_u8(ptr));
+            }
             if remaining == 0 {
                 return Self(vdupq_n_u8(0));
             }
-            let ptr = data.add(start);
-            Self(match remaining {
-                16.. => vld1q_u8(ptr),
-                1..=15 if can_overread(ptr, 16) => {
-                    let loaded = vld1q_u8(ptr);
-                    let indices =
-                        vld1q_u8([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].as_ptr());
-                    let mask = vcltq_u8(indices, vdupq_n_u8(remaining as u8));
-                    vandq_u8(loaded, mask)
-                }
-                _ => Self::load_partial_safe(ptr, remaining),
+            // A full load with the bytes past the end zeroed, unless it would
+            // cross into the next page
+            Self(if can_overread(ptr, 16) {
+                vandq_u8(vld1q_u8(ptr), vld1q_u8(keep_first(remaining)))
+            } else {
+                vld1q_u8(copy_partial::<16>(ptr, remaining).as_ptr())
             })
         }
     }

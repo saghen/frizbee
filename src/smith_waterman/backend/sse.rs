@@ -1,8 +1,9 @@
 use core::arch::x86_64::*;
 
+use super::copy_partial;
 use crate::prefilter::algo::can_overread;
 
-use super::{Backend, BytesVec, MaskVec, ScoreVec};
+use super::{Backend, BytesVec, MaskVec, ScoreVec, keep_first};
 
 /// 8-lane u16 scoring (128-bit __mm128i)
 /// 8-lane u8 input (low half of __m128i)
@@ -36,45 +37,6 @@ impl Backend for BackendSSE {
     }
 
     gap_dispatch!(8);
-}
-
-impl SseBytes {
-    /// Safe page-bounded read of 0..8 bytes into the low 64 bits of an __m128i
-    #[inline(always)]
-    unsafe fn load_partial_safe(ptr: *const u8, len: usize) -> __m128i {
-        unsafe {
-            debug_assert!(len < 8);
-            let val: u64 = match len {
-                0 => 0,
-                1 => *ptr as u64,
-                2 => (ptr as *const u16).read_unaligned() as u64,
-                3 => {
-                    let lo = (ptr as *const u16).read_unaligned() as u64;
-                    let hi = *ptr.add(2) as u64;
-                    lo | (hi << 16)
-                }
-                4 => (ptr as *const u32).read_unaligned() as u64,
-                5 => {
-                    let lo = (ptr as *const u32).read_unaligned() as u64;
-                    let hi = *ptr.add(4) as u64;
-                    lo | (hi << 32)
-                }
-                6 => {
-                    let lo = (ptr as *const u32).read_unaligned() as u64;
-                    let hi = (ptr.add(4) as *const u16).read_unaligned() as u64;
-                    lo | (hi << 32)
-                }
-                7 => {
-                    let lo = (ptr as *const u32).read_unaligned() as u64;
-                    let mid = (ptr.add(4) as *const u16).read_unaligned() as u64;
-                    let hi = *ptr.add(6) as u64;
-                    lo | (mid << 32) | (hi << 48)
-                }
-                _ => core::hint::unreachable_unchecked(),
-            };
-            _mm_cvtsi64_si128(val as i64)
-        }
-    }
 }
 
 impl BytesVec for SseBytes {
@@ -113,18 +75,20 @@ impl BytesVec for SseBytes {
     unsafe fn load_partial(data: *const u8, start: usize, len: usize) -> Self {
         unsafe {
             let remaining = len.saturating_sub(start);
+            let ptr = data.wrapping_add(start);
+            if remaining >= 8 {
+                return Self(_mm_loadl_epi64(ptr as *const __m128i));
+            }
             if remaining == 0 {
                 return Self(_mm_setzero_si128());
             }
-            let ptr = data.add(start);
-            Self(match remaining {
-                8.. => _mm_loadl_epi64(ptr as *const __m128i),
-                1..=7 if can_overread(ptr, 8) => {
-                    let lo = _mm_loadl_epi64(ptr as *const __m128i);
-                    let mask = _mm_set_epi64x(0, (1i64 << (remaining * 8)) - 1);
-                    _mm_and_si128(lo, mask)
-                }
-                _ => Self::load_partial_safe(ptr, remaining),
+            // A full load with the bytes past the end zeroed, unless it would
+            // cross into the next page
+            Self(if can_overread(ptr, 8) {
+                let keep = _mm_loadl_epi64(keep_first(remaining) as *const __m128i);
+                _mm_and_si128(_mm_loadl_epi64(ptr as *const __m128i), keep)
+            } else {
+                _mm_loadl_epi64(copy_partial::<8>(ptr, remaining).as_ptr() as *const __m128i)
             })
         }
     }

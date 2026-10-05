@@ -50,6 +50,49 @@ macro_rules! gap_dispatch {
     };
 }
 
+/// A mask of `n` (0..=64) 0xFF bytes then zeros, for the partial loads: ANDed
+/// with a full load that stays within the page (see
+/// [`can_overread`](crate::prefilter::algo::can_overread))
+#[cfg(any(
+    target_arch = "x86_64",
+    target_arch = "aarch64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+#[inline(always)]
+pub(crate) fn keep_first(n: usize) -> *const u8 {
+    #[repr(C, align(64))]
+    struct KeepFirst([u8; 128]);
+    static KEEP_FIRST: KeepFirst = {
+        let mut bytes = [0; 128];
+        let mut i = 0;
+        while i < 64 {
+            bytes[i] = 0xFF;
+            i += 1;
+        }
+        KeepFirst(bytes)
+    };
+    debug_assert!(n <= 64);
+    unsafe { KEEP_FIRST.0.as_ptr().add(64 - n) }
+}
+
+/// The `remaining` bytes at `ptr`, zero padded. Only the copy is outlined, so
+/// the caller loads it with its target features
+///
+/// # Safety
+/// `ptr` must point to `remaining <= N` readable bytes.
+#[cfg(any(
+    target_arch = "x86_64",
+    target_arch = "aarch64",
+    all(target_arch = "wasm32", target_feature = "simd128")
+))]
+#[cold]
+#[inline(never)]
+pub(crate) unsafe fn copy_partial<const N: usize>(ptr: *const u8, remaining: usize) -> [u8; N] {
+    let mut data = [0u8; N];
+    unsafe { core::ptr::copy_nonoverlapping(ptr, data.as_mut_ptr(), remaining) };
+    data
+}
+
 #[cfg(target_arch = "x86_64")]
 mod avx;
 #[cfg(target_arch = "x86_64")]
