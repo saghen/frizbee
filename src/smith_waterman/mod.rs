@@ -167,8 +167,8 @@ pub(crate) struct SmithWaterman<B: Backend> {
     scoring: Scoring,
     scoring_vecs: ScoringVecs<B::Score>,
     score_matrix: Matrix<B>,
-    /// Per row, the previous chunk's scores and horizontal scan, then as many
-    /// zeroed entries for the first chunk
+    /// Per row and haystack of a group, the previous chunk's scores and
+    /// horizontal scan, with zeroed entries after the first haystack's
     row_carry: Vec<(B::Score, B::Score)>,
 }
 
@@ -227,6 +227,11 @@ impl<U8: Kernel, U16: Kernel> Kernel for ScoreWidth<U8, U16> {
     }
 
     #[inline(always)]
+    fn score_haystack_pair(&mut self, haystacks: [&[u8]; 2], start_pos: [usize; 2]) -> [u16; 2] {
+        either!(self, sw => sw.score_haystack_pair(haystacks, start_pos))
+    }
+
+    #[inline(always)]
     fn score_haystack_unicode(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16 {
         either!(self, sw => sw.score_haystack_unicode(haystack, haystack_start_pos))
     }
@@ -253,6 +258,8 @@ pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
         haystack_start_pos: usize,
     ) -> (u16, Vec<u32>);
     fn score_haystack(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16;
+    /// Scores two ASCII haystacks at once, without storing the matrices
+    fn score_haystack_pair(&mut self, haystacks: [&[u8]; 2], start_pos: [usize; 2]) -> [u16; 2];
     fn score_haystack_unicode(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16;
     #[cfg(feature = "match_end_col")]
     fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16;

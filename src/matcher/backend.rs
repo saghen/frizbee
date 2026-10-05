@@ -1,7 +1,7 @@
 //! Definitions for all target feature-specific implementations of the matcher
 
 use super::algo::{MatcherImpl, Scorer, Specialized};
-use crate::smith_waterman::ScoreWidth;
+use crate::smith_waterman::{Kernel, ScoreWidth};
 use crate::{Config, Match, MatchIndices};
 use alloc::vec::Vec;
 
@@ -137,6 +137,16 @@ macro_rules! impl_specialized {
                 haystack_start_pos: usize,
             ) -> u16 {
                 self.score_inline::<UNICODE>(haystack, haystack_start_pos)
+            }
+
+            #[inline(never)]
+            $(#[target_feature(enable = $feature)])?
+            unsafe fn score_pair(
+                &mut self,
+                haystacks: [&[u8]; 2],
+                start_pos: [usize; 2],
+            ) -> [u16; 2] {
+                Kernel::score_haystack_pair(&mut self.smith_waterman, haystacks, start_pos)
             }
         }
     };

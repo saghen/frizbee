@@ -1,5 +1,5 @@
 //! Every available kernel, and the matcher, against the reference DP: scores,
-//! indices (an optimal alignment, see [`indices_score`])
+//! indices (an optimal alignment, see [`indices_score`]) and pairs
 
 use super::{
     Rng, indices_score, opposite_case, optimal_indices, score, score_fits_in_u8, score_unicode,
@@ -142,6 +142,7 @@ trait Scorer {
     /// The score, and the indices traced through the stored matrix (relative
     /// to the haystack)
     fn run(&mut self, haystack: &[u8], unicode: bool, start_pos: usize) -> (u16, (u16, Vec<u32>));
+    fn pair(&mut self, haystacks: [&[u8]; 2], start_pos: [usize; 2]) -> [u16; 2];
 }
 
 impl<K: Kernel> Scorer for Both<K> {
@@ -160,6 +161,10 @@ impl<K: Kernel> Scorer for Both<K> {
         };
         let relative = indices.into_iter().map(|i| i - start_pos as u32);
         (score, (indices_score, relative.collect()))
+    }
+
+    fn pair(&mut self, haystacks: [&[u8]; 2], start_pos: [usize; 2]) -> [u16; 2] {
+        self.ascii.score_haystack_pair(haystacks, start_pos)
     }
 }
 
@@ -240,12 +245,13 @@ fn check_indices(case: &Case, s: &Scoring, (score, indices): &(u16, Vec<u32>)) -
 }
 
 /// Checks every kernel on the case: its score and indices against the
-/// reference. Returns the number of kernels checked
-fn check(case: &Case, s: &Scoring) -> usize {
+/// reference, and (ASCII) its pairs with `other` against its own
+/// scores. Returns the number of kernels checked
+fn check(case: &Case, s: &Scoring, other: &str) -> usize {
     let want = case.reference(&case.haystack, s);
     let (needle, haystack) = (case.needle.as_str(), case.haystack.as_bytes());
     let (cs, unicode) = (case.case_sensitive, case.unicode);
-    let msg = |label: &str| format!("{label} {case:?} {s:?}");
+    let msg = |label: &str| format!("{label} {case:?} other={other:?} {s:?}");
     let start = if case.include_prefix { 0 } else { 1 };
     let mut all = kernels(needle, cs, s);
     for (label, kernel) in &mut all {
@@ -254,6 +260,19 @@ fn check(case: &Case, s: &Scoring) -> usize {
         if let Some(err) = check_indices(case, s, &indices) {
             panic!("{}: {err}", msg(label));
         }
+        if unicode {
+            continue;
+        }
+        let (a, b) = (haystack, other.as_bytes());
+        let want_b = kernel.run(b, false, 1).0;
+        let paired = kernel.pair([a, b], [start, 1]);
+        assert_eq!(paired, [want, want_b], "{} paired", msg(label));
+        assert_eq!(
+            kernel.pair([b, a], [1, start]),
+            [want_b, want],
+            "{}",
+            msg(label)
+        );
     }
     all.len()
 }
@@ -267,6 +286,7 @@ fn kernels_match_reference() {
         _ => 10_000,
     };
     let mut rng = Rng(0x5eed_0f_2026);
+    let alphabet: Vec<char> = "abAB/_xyz".chars().collect();
     for _ in 0..iterations {
         let case = Case::generate(&mut rng);
         let scoring = random_scoring(&mut rng);
@@ -274,7 +294,12 @@ fn kernels_match_reference() {
         if case.needle.len() > scoring.max_needle_len() {
             continue;
         }
-        check(&case, &scoring);
+        // (also past the kernels' limit, scored greedily)
+        let mut other = random_haystack(&mut rng, &alphabet);
+        if rng.below(16) == 0 {
+            other = "x".repeat(1030);
+        }
+        check(&case, &scoring, &other);
 
         // The reference's own traceback is an optimal alignment
         let (needle, haystack) = (case.needle.as_str(), case.haystack.as_bytes());
@@ -325,7 +350,7 @@ fn kernels_match_reference() {
 fn width_matches_reference() {
     let iterations = if cfg!(miri) { 4 } else { 6_000 };
     let mut rng = Rng(0x9e37_79b9_7f4a_7c15);
-    let check_case = |needle: &str, haystack: &str, s: &Scoring, unicode, cs| {
+    let check_case = |needle: &str, haystack: &str, other: &str, s: &Scoring, unicode, cs| {
         let case = Case {
             needle: needle.to_string(),
             haystack: haystack.to_string(),
@@ -341,13 +366,20 @@ fn width_matches_reference() {
         let want = case.reference(haystack, s);
         assert!(s.max_score(rows) >= want as u64, "{case:?} {s:?}");
         if needle.len() <= s.max_needle_len() {
-            check(&case, s);
+            check(&case, s, other);
         }
     };
 
     // Scores 256, which the u8 kernel returns as 249
     let default = Scoring::default();
-    check_case("_a/d_bab_aaa_d", "_a/d_bab_aaa_d", &default, false, false);
+    check_case(
+        "_a/d_bab_aaa_d",
+        "_a/d_bab_aaa_d",
+        "x",
+        &default,
+        false,
+        false,
+    );
     // Adjacent delimiter and capitalization bonuses: 13 rows score 252, and a
     // 14th row skipped by an up gap leaves 247, both past the u8 kernels
     for (needle, haystack) in [
@@ -357,8 +389,8 @@ fn width_matches_reference() {
         ("/aC/aC/aC/aC/a", "x/aC/aC/aC/aC/a"),
         ("/ac/ac/ac/ac/a", "/aC/aC/aC/aC/a_"),
     ] {
-        check_case(needle, haystack, &default, false, false);
-        check_case(needle, haystack, &default, true, false);
+        check_case(needle, haystack, "/aC/a", &default, false, false);
+        check_case(needle, haystack, "/aC/a", &default, true, false);
     }
 
     for i in 0..iterations {
@@ -376,29 +408,31 @@ fn width_matches_reference() {
             Some(rows) if rng.below(2) == 0 => rows + rng.below(3),
             _ => 1 + rng.below(24),
         };
-        let haystack = if i % 2 == 0 {
+        let haystacks = if i % 2 == 0 {
             // Copies of a random needle with edits, so most rows score highly
             let alphabet: Vec<char> = if unicode { "aé/다B_" } else { "aAbB/_c" }
                 .chars()
                 .collect();
             let needle = rng.string(&alphabet, len);
-            let mut haystack = String::new();
-            for _ in 0..1 + rng.below(3) {
-                for c in needle.chars() {
-                    match rng.below(8) {
-                        0 => {}
-                        1 => haystack.push(rng.pick(&['x', 'Y', '/', '-', 'é'])),
-                        _ => haystack.push(c),
-                    }
-                    if rng.below(6) == 0 {
-                        haystack.extend(c.to_uppercase());
+            [(); 2].map(|_| {
+                let mut haystack = String::new();
+                for _ in 0..1 + rng.below(3) {
+                    for c in needle.chars() {
+                        match rng.below(8) {
+                            0 => {}
+                            1 => haystack.push(rng.pick(&['x', 'Y', '/', '-', 'é'])),
+                            _ => haystack.push(c),
+                        }
+                        if rng.below(6) == 0 {
+                            haystack.extend(c.to_uppercase());
+                        }
                     }
                 }
-            }
-            if !unicode {
-                haystack = haystack.replace('é', "e");
-            }
-            haystack
+                if !unicode {
+                    haystack = haystack.replace('é', "e");
+                }
+                haystack
+            })
         } else {
             // Repeating a few tokens reaches the bound more often than mixing
             let tokens: &[&str] = if unicode {
@@ -407,15 +441,17 @@ fn width_matches_reference() {
                 &["/aC", "/a", "aC", "aB", "a", "/", "_", "x", "A", "-b"]
             };
             let tokens = [rng.pick(tokens), rng.pick(tokens), rng.pick(tokens)];
-            let mut haystack = String::new();
-            while haystack.chars().count() < len + rng.below(len + 1) {
-                haystack.push_str(rng.pick(&tokens));
-            }
-            haystack
+            [(); 2].map(|_| {
+                let mut haystack = String::new();
+                while haystack.chars().count() < len + rng.below(len + 1) {
+                    haystack.push_str(rng.pick(&tokens));
+                }
+                haystack
+            })
         };
-        // A window of the haystack, some chars dropped, replaced or case
-        // flipped
-        let chars: Vec<char> = haystack.chars().collect();
+        // A window of the first haystack, some chars dropped, replaced or
+        // case flipped
+        let chars: Vec<char> = haystacks[0].chars().collect();
         let start = rng.below(chars.len().saturating_sub(len) + 1);
         let mutation_percent = rng.pick(&[0, 0, 3, 10]);
         let mut needle: String = chars[start..]
@@ -430,7 +466,7 @@ fn width_matches_reference() {
             needle.push('a');
         }
         let cs = rng.below(4) == 0;
-        check_case(&needle, &haystack, &scoring, unicode, cs);
+        check_case(&needle, &haystacks[0], &haystacks[1], &scoring, unicode, cs);
     }
 }
 

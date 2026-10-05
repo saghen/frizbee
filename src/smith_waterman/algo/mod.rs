@@ -28,6 +28,14 @@ struct ChunkBonuses<B: Backend> {
     prev_chunk_char_is_delimiter_mask: B::Mask,
 }
 
+impl<B: Backend> Clone for ChunkBonuses<B> {
+    #[inline(always)]
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+impl<B: Backend> Copy for ChunkBonuses<B> {}
+
 impl<B: Backend> ChunkBonuses<B> {
     #[inline(always)]
     unsafe fn new(include_prefix: bool, prefix_bonus: u16, vecs: &ScoringVecs<B::Score>) -> Self {
@@ -149,7 +157,7 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             scoring: scoring.clone(),
             scoring_vecs,
             score_matrix: Matrix::new(needle_len, MAX_HAYSTACK_LEN),
-            row_carry: vec![unsafe { (B::Score::zero(), B::Score::zero()) }; 2 * needle_len],
+            row_carry: vec![unsafe { (B::Score::zero(), B::Score::zero()) }; 3 * needle_len],
         }
     }
 
@@ -201,6 +209,12 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
     #[cfg_attr(target_arch = "wasm32", inline(never))]
     fn score_haystack(&mut self, haystack: &[u8], haystack_start_pos: usize) -> u16 {
         SmithWaterman::score_haystack(self, haystack, haystack_start_pos == 0)
+    }
+
+    #[inline(always)]
+    fn score_haystack_pair(&mut self, haystacks: [&[u8]; 2], start_pos: [usize; 2]) -> [u16; 2] {
+        let include_prefix = start_pos.map(|pos| pos == 0);
+        SmithWaterman::score_haystack_pair(self, haystacks, include_prefix)
     }
 
     #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
