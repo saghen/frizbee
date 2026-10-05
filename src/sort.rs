@@ -1,4 +1,4 @@
-use crate::Match;
+use crate::{Match, MatchIndices};
 use alloc::{vec, vec::Vec};
 
 /// Sorts a [`Vec`] of [`Match`] values in-place by descending `score` using a
@@ -58,6 +58,44 @@ fn radix_sort_second_pass(matches_b: Vec<Match>, matches: &mut [Match]) {
         let radix = (m.score >> 8) & 0xFF;
         matches[offsets[radix as usize] as usize] = m;
         offsets[radix as usize] += 1;
+    }
+}
+
+/// Stable sort of [`MatchIndices`] by descending score, through
+/// [`radix_sort_matches`] (std's stable sort would add a copy of driftsort
+/// to wasm builds)
+pub(crate) fn sort_indices_by_score(matches: &mut Vec<MatchIndices>) {
+    let mut order: Vec<Match> = matches
+        .iter()
+        .enumerate()
+        .map(|(i, m)| Match {
+            score: m.score,
+            index: i as u32,
+            exact: false,
+            #[cfg(feature = "match_end_col")]
+            end_col: 0,
+        })
+        .collect();
+    radix_sort_matches(&mut order);
+    let mut unsorted = core::mem::take(matches);
+    matches.extend(
+        order.iter().map(|m| {
+            core::mem::replace(&mut unsorted[m.index as usize], MatchIndices::from_index(0))
+        }),
+    );
+}
+
+/// Sorts `indices` descending with an insertion sort, as the indices of a
+/// match are few
+pub(crate) fn sort_indices_desc(indices: &mut [u32]) {
+    for i in 1..indices.len() {
+        let index = indices[i];
+        let mut j = i;
+        while j > 0 && indices[j - 1] < index {
+            indices[j] = indices[j - 1];
+            j -= 1;
+        }
+        indices[j] = index;
     }
 }
 
