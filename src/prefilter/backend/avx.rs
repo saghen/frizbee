@@ -202,6 +202,19 @@ impl Kernel for PrefilterAVX {
                 .match_haystack_unicode_many_typos(haystack, max_typos)
         }
     }
+
+    #[inline(always)]
+    fn many_typos_x4_available(&self, max_typos: u16) -> bool {
+        self.inner.many_typos_x4_available(max_typos)
+    }
+
+    #[inline(always)]
+    fn match_haystack_many_typos_x4(&self, haystacks: [&[u8]; 4], max_typos: u16) -> [Window; 4] {
+        unsafe {
+            self.inner
+                .match_haystack_many_typos_x4(haystacks, max_typos)
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

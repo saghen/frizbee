@@ -369,21 +369,77 @@ impl<B: Backend> Prefilter<B> {
     // iff LCS(needle, haystack) >= needle_len - max_typos
     #[inline(always)]
     unsafe fn match_haystack_lcs(&self, haystack: &[u8], max_typos: usize) -> (bool, usize, usize) {
-        let len = haystack.len();
-        let needle_len = self.needle_ascii.len();
+        let mut rows = [!0u64];
+        unsafe {
+            lcs_advance::<1>(
+                self.lcs_masks.as_ptr(),
+                &[haystack],
+                &mut rows,
+                0,
+                haystack.len(),
+            );
+            self.lcs_window(haystack, rows[0], max_typos)
+        }
+    }
+
+    #[inline(always)]
+    pub fn many_typos_x4_available(&self, max_typos: u16) -> bool {
+        !self.lcs_masks.is_empty() && self.needle_ascii.len() > max_typos as usize
+    }
+
+    // Four interleaved LCS rows: one row is a serial add chain, four fill the core
+    #[cfg_attr(not(target_arch = "wasm32"), inline(always))]
+    #[cfg_attr(target_arch = "wasm32", inline(never))]
+    pub unsafe fn match_haystack_many_typos_x4(
+        &self,
+        haystacks: [&[u8]; 4],
+        max_typos: u16,
+    ) -> [(bool, usize, usize); 4] {
         let masks = self.lcs_masks.as_ptr();
 
-        let mut v = !0u64;
-        for &byte in haystack {
-            let u = v & unsafe { *masks.add(byte as usize) };
-            v = v.wrapping_add(u) | v.wrapping_sub(u);
+        // longest first, so lanes that run out of bytes drop off the end
+        let mut order = [0usize, 1, 2, 3];
+        order.sort_unstable_by_key(|&lane| core::cmp::Reverse(haystacks[lane].len()));
+        let sorted = order.map(|lane| haystacks[lane]);
+
+        let mut rows = [!0u64; 4];
+        let (len3, len2, len1, len0) = (
+            sorted[3].len(),
+            sorted[2].len(),
+            sorted[1].len(),
+            sorted[0].len(),
+        );
+        unsafe {
+            lcs_advance::<4>(masks, &sorted, &mut rows, 0, len3);
+            lcs_advance::<3>(masks, &sorted, &mut rows, len3, len2);
+            lcs_advance::<2>(masks, &sorted, &mut rows, len2, len1);
+            lcs_advance::<1>(masks, &sorted, &mut rows, len1, len0);
         }
+
+        let mut windows = [(false, 0, 0); 4];
+        for (slot, &lane) in order.iter().enumerate() {
+            windows[lane] =
+                unsafe { self.lcs_window(sorted[slot], rows[slot], max_typos as usize) };
+        }
+        windows
+    }
+
+    #[inline(always)]
+    unsafe fn lcs_window(
+        &self,
+        haystack: &[u8],
+        row: u64,
+        max_typos: usize,
+    ) -> (bool, usize, usize) {
+        let len = haystack.len();
+        let needle_len = self.needle_ascii.len();
         let needle_bits = !0u64 >> (64 - needle_len);
-        if ((!v & needle_bits).count_ones() as usize) + max_typos < needle_len {
+        if ((!row & needle_bits).count_ones() as usize) + max_typos < needle_len {
             return (false, 0, len);
         }
 
         // the window starts at the first byte any typo path could consume
+        let masks = self.lcs_masks.as_ptr();
         let leading = !0u64 >> (63 - max_typos);
         let start_pos = haystack
             .iter()
@@ -429,4 +485,25 @@ impl<B: Backend> Prefilter<B> {
         }
         len
     }
+}
+
+// Advances the first `N` LCS rows over bytes `from..to` of their haystacks
+#[inline(always)]
+unsafe fn lcs_advance<const N: usize>(
+    masks: *const u64,
+    haystacks: &[&[u8]],
+    rows: &mut [u64],
+    from: usize,
+    to: usize,
+) {
+    let mut local = [0u64; N];
+    local.copy_from_slice(&rows[..N]);
+    for pos in from..to {
+        for (lane, row) in local.iter_mut().enumerate() {
+            let byte = unsafe { *haystacks.get_unchecked(lane).get_unchecked(pos) };
+            let hits = *row & unsafe { *masks.add(byte as usize) };
+            *row = row.wrapping_add(hits) | row.wrapping_sub(hits);
+        }
+    }
+    rows[..N].copy_from_slice(&local);
 }

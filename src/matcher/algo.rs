@@ -86,6 +86,34 @@ where
         matches: &mut Vec<Match>,
     ) {
         let max_typos = self.max_typos_runtime::<TYPOS>();
+        if TYPOS == MANY_TYPOS && !UNICODE && self.prefilter.many_typos_x4_available(max_typos) {
+            let (quads, rest) = haystacks.as_chunks::<4>();
+            let mut index = haystack_index_offset;
+            for quad in quads {
+                let bytes = [0, 1, 2, 3].map(|lane| quad[lane].as_ref().as_bytes());
+                let windows = self
+                    .prefilter
+                    .match_haystack_many_typos_x4(bytes, max_typos);
+                for (haystack, (matched, start_pos, end_pos)) in bytes.into_iter().zip(windows) {
+                    if matched {
+                        let (trimmed, start_pos, include_exact) =
+                            trim_haystack(haystack, start_pos, end_pos);
+                        matches.push(self.smith_waterman_one::<UNICODE>(
+                            trimmed,
+                            index,
+                            start_pos,
+                            include_exact,
+                        ));
+                    }
+                    index += 1;
+                }
+            }
+            for haystack in rest {
+                matches.extend(self.match_one_impl::<TYPOS, UNICODE, _>(haystack, index));
+                index += 1;
+            }
+            return;
+        }
         for (index, haystack_str) in (haystack_index_offset..).zip(haystacks.iter()) {
             let haystack = haystack_str.as_ref().as_bytes();
             let original_len = haystack.len();

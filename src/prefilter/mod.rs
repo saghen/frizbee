@@ -112,6 +112,8 @@ pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
     fn match_haystack_unicode_2_typos(&self, haystack: &[u8]) -> Window;
     fn match_haystack_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window;
     fn match_haystack_unicode_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window;
+    fn many_typos_x4_available(&self, max_typos: u16) -> bool;
+    fn match_haystack_many_typos_x4(&self, haystacks: [&[u8]; 4], max_typos: u16) -> [Window; 4];
 }
 
 impl<B: Backend> Kernel for Prefilter<B> {
@@ -163,6 +165,16 @@ impl<B: Backend> Kernel for Prefilter<B> {
     #[inline(always)]
     fn match_haystack_unicode_many_typos(&mut self, haystack: &[u8], max_typos: u16) -> Window {
         unsafe { self.match_haystack_unicode_many_typos(haystack, max_typos) }
+    }
+
+    #[inline(always)]
+    fn many_typos_x4_available(&self, max_typos: u16) -> bool {
+        self.many_typos_x4_available(max_typos)
+    }
+
+    #[inline(always)]
+    fn match_haystack_many_typos_x4(&self, haystacks: [&[u8]; 4], max_typos: u16) -> [Window; 4] {
+        unsafe { self.match_haystack_many_typos_x4(haystacks, max_typos) }
     }
 }
 
