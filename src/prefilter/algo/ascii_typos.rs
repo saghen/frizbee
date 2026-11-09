@@ -267,6 +267,9 @@ impl<B: Backend> Prefilter<B> {
         if len == 0 {
             return (false, 0, 0);
         }
+        if !self.lcs_masks.is_empty() {
+            return unsafe { self.match_haystack_lcs(haystack, max_typos) };
+        }
 
         let path_count = max_typos + 1;
         self.paths.resize(
@@ -360,6 +363,34 @@ impl<B: Backend> Prefilter<B> {
             match_start_pos
         };
         (false, match_start_pos, len)
+    }
+
+    // Bit-parallel LCS (Hyyro): at most `max_typos` needle bytes may be deleted
+    // iff LCS(needle, haystack) >= needle_len - max_typos
+    #[inline(always)]
+    unsafe fn match_haystack_lcs(&self, haystack: &[u8], max_typos: usize) -> (bool, usize, usize) {
+        let len = haystack.len();
+        let needle_len = self.needle_ascii.len();
+        let masks = self.lcs_masks.as_ptr();
+
+        let mut v = !0u64;
+        for &byte in haystack {
+            let u = v & unsafe { *masks.add(byte as usize) };
+            v = v.wrapping_add(u) | v.wrapping_sub(u);
+        }
+        let needle_bits = !0u64 >> (64 - needle_len);
+        if ((!v & needle_bits).count_ones() as usize) + max_typos < needle_len {
+            return (false, 0, len);
+        }
+
+        // the window starts at the first byte any typo path could consume
+        let leading = !0u64 >> (63 - max_typos);
+        let start_pos = haystack
+            .iter()
+            .position(|&byte| unsafe { *masks.add(byte as usize) } & leading != 0)
+            .unwrap_or(0);
+        let end_pos = unsafe { self.find_end_pos_with_typos(haystack, max_typos) };
+        (true, start_pos, end_pos)
     }
 
     #[inline(always)]
