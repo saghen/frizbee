@@ -139,6 +139,8 @@ pub(crate) struct SmithWaterman<B: Backend> {
     score_matrix: Matrix<B>,
     match_masks: Matrix<B>,
     unicode_pending_gap_open_masks: Vec<B::Score>,
+    col_bytes: Vec<B::Bytes>,
+    col_bonuses: Vec<B::Score>,
     /// Number of LANES-wide chunks (incl. the leading zero column) actually
     /// consumed by the most recent `score_haystack` call. The matrix stride is
     /// always sized for `MAX_HAYSTACK_LEN` for zero-free reuse.
