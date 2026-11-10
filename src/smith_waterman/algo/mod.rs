@@ -38,6 +38,12 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             score_matrix: Matrix::new(needle_len, MAX_HAYSTACK_LEN),
             match_masks: Matrix::new(needle_len, MAX_HAYSTACK_LEN),
             unicode_pending_gap_open_masks,
+            col_bytes: (0..(MAX_HAYSTACK_LEN.div_ceil(B::LANES) + 1))
+                .map(|_| unsafe { B::Bytes::splat(0) })
+                .collect(),
+            col_bonuses: (0..(MAX_HAYSTACK_LEN.div_ceil(B::LANES) + 1))
+                .map(|_| unsafe { B::Score::zero() })
+                .collect(),
             haystack_chunks: 0,
         }
     }

@@ -22,6 +22,8 @@ pub(crate) struct Prefilter<B: Backend> {
     needle_ascii: Vec<(B::Chunk, B::Chunk)>,
     needle_unicode: Vec<UnicodeChar>,
     paths: Vec<PathState<B::Mask>>,
+    // byte -> bitset of needle positions holding that byte; empty when needle > 64 bytes
+    lcs_masks: Vec<u64>,
 }
 
 impl<B: Backend> Prefilter<B> {
@@ -35,10 +37,23 @@ impl<B: Backend> Prefilter<B> {
             .collect();
         let needle_unicode = case_needle_unicode(needle, case_sensitive);
 
+        let mut lcs_masks = Vec::new();
+        if (1..=64).contains(&needle.len()) {
+            lcs_masks.resize(256, 0u64);
+            for (i, (c1, c2)) in case_needle(needle.as_bytes(), case_sensitive)
+                .into_iter()
+                .enumerate()
+            {
+                lcs_masks[c1 as usize] |= 1 << i;
+                lcs_masks[c2 as usize] |= 1 << i;
+            }
+        }
+
         Self {
             needle_ascii,
             needle_unicode,
             paths: Vec::new(),
+            lcs_masks,
         }
     }
 
