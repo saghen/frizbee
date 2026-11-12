@@ -1,8 +1,8 @@
 //! Literal matching: exact / prefix / suffix / substring
 //!
 //! Unlike the fuzzy [`crate::matcher`], literal matching requires the needle to
-//! appear as a *contiguous* run of characters. The only step that benefits from
-//! SIMD is finding *where* the needle occurs (substring search), which reuses
+//! appear as a *contiguous* run of characters. Finding *where* the needle
+//! occurs (substring search) and comparing it there both reuse
 //! [`crate::prefilter::backend::Backend`].
 //!
 //! All of the implementations ignore the `max_typos` parameter for now.

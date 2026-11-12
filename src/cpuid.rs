@@ -82,7 +82,10 @@ fn detect_bits() -> u32 {
             | flag(cfg!(target_feature = "ssse3"), SSSE3)
             | flag(cfg!(target_feature = "sse4.1"), SSE41)
             | flag(cfg!(target_feature = "avx"), AVX)
-            | flag(cfg!(target_feature = "avx2"), AVX2)
+            | flag(
+                cfg!(all(target_feature = "avx2", target_feature = "popcnt")),
+                AVX2,
+            )
             | flag(cfg!(target_feature = "fma"), FMA)
             | flag(cfg!(target_feature = "avx512f"), AVX512F)
             | flag(cfg!(target_feature = "avx512bw"), AVX512BW)
@@ -135,7 +138,8 @@ fn detect_bits() -> u32 {
     let avx512_os = xcr0 & 0xE6 == 0xE6; // includes XMM+YMM, not just ZMM state
 
     let avx = leaf1.ecx & (1 << 28) != 0 && avx_os;
-    let avx2 = avx && leaf7.ebx & (1 << 5) != 0;
+    // require POPCNT for AVX2 to simplify consumers, every AVX2 CPU has it
+    let avx2 = avx && leaf7.ebx & (1 << 5) != 0 && leaf1.ecx & (1 << 23) != 0;
     // require AVX2 for AVX512F to simplify consumers
     let avx512f = avx2 && avx512_os && leaf7.ebx & (1 << 16) != 0;
 

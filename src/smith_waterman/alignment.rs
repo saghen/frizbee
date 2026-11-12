@@ -282,7 +282,7 @@ static CLASSES: [u8; 256] = {
 /// The bonus for a match on byte `c` after byte `prev`, aside from the
 /// matching case (see `ChunkBonuses`)
 #[inline(always)]
-fn byte_bonus(prev: u8, c: u8, scoring: &Scoring) -> i32 {
+pub(crate) fn byte_bonus(prev: u8, c: u8, scoring: &Scoring) -> i32 {
     let (prev, c) = (CLASSES[prev as usize], CLASSES[c as usize]);
     let mut bonus = 0;
     if prev & DELIMITER != 0 && c & DELIMITER == 0 {

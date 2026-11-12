@@ -1,7 +1,8 @@
 use super::rank::rare_byte_offsets;
-use crate::prefilter::algo::load_window;
+use crate::prefilter::algo::can_overread;
 use crate::prefilter::backend::{Backend, BitMaskOps};
-use crate::prefilter::{UnicodeChar, case_needle, case_needle_unicode};
+use crate::prefilter::{case_byte, case_needle_unicode};
+use crate::smith_waterman::byte_bonus;
 use crate::{Config, Match, MatchIndices, Matching, Scoring};
 use alloc::vec::Vec;
 
@@ -13,21 +14,49 @@ pub(crate) struct LiteralImpl<B: Backend> {
     mode: Matching,
     scoring: Scoring,
     needle_len: usize,
-    /// Per-byte `(original, opposite-case)` bytes for ASCII case-insensitive
-    /// matching
-    needle_ascii: Vec<(u8, u8)>,
-    /// Per-codepoint needle, read only on the unicode path. Holds each
-    /// character's UTF-8 bytes and its opposite-case bytes, used for
-    /// whole-codepoint case-insensitive matching
-    needle_unicode: Vec<UnicodeChar>,
-    /// Needle byte offsets of the two rarest bytes, `seed_a_off <= seed_b_off`,
-    /// chosen as the two rarest bytes (see [`rare_byte_offsets`])
-    seed_a_off: usize,
-    seed_b_off: usize,
-    /// Splatted `(original, opposite-case)` bytes at `seed_a_off` /
-    /// `seed_b_off`, the two scan seeds
-    seed_a: (B::Chunk, B::Chunk),
-    seed_b: (B::Chunk, B::Chunk),
+    chunks: Vec<NeedleChunk<B>>,
+    /// The part of the score that only depends on the needle: the match
+    /// scores, and the delimiter bonuses past each chunk's first byte
+    base_score: u64,
+    /// The two rarest needle bytes (see [`rare_byte_offsets`]), checked before
+    /// the whole needle. `seed_a.offset <= seed_b.offset`
+    seed_a: Seed<B>,
+    seed_b: Seed<B>,
+}
+
+/// The needle byte at `offset` as `(original, opposite-case)`, plain and
+/// splatted
+#[derive(Debug, Clone)]
+struct Seed<B: Backend> {
+    offset: usize,
+    bytes: (u8, u8),
+    splat: (B::Chunk, B::Chunk),
+}
+
+impl<B: Backend> Seed<B> {
+    #[inline(always)]
+    fn hits(&self, byte: u8) -> bool {
+        (byte == self.bytes.0) | (byte == self.bytes.1)
+    }
+}
+
+/// Up to `LANES` needle bytes, compared against a haystack window at once. A
+/// scalar (a codepoint on the unicode path, a byte on the ASCII path) is never
+/// split between chunks. The masks have one bit per byte
+#[derive(Debug, Clone)]
+struct NeedleChunk<B: Backend> {
+    /// Byte offset in the needle
+    offset: usize,
+    /// The bytes and their opposite-case bytes
+    orig: B::Chunk,
+    flipped: B::Chunk,
+    /// The chunk's bytes
+    bytes: u64,
+    /// The bytes continuing a multi-byte scalar
+    continuations: u64,
+    /// The bytes that are an ASCII letter, and the uppercase ones
+    letters: u64,
+    upper: u64,
 }
 
 impl<B: Backend> LiteralImpl<B> {
@@ -36,49 +65,81 @@ impl<B: Backend> LiteralImpl<B> {
     #[inline(always)]
     pub(crate) unsafe fn new(needle: &str, config: &Config) -> Self {
         let case_sensitive = config.casing.respects_case_for(needle);
-        let unicode = config.unicode.respects_unicode_for(needle);
-        let needle_ascii = case_needle(needle.as_bytes(), case_sensitive);
-        let needle_unicode = case_needle_unicode(needle, case_sensitive);
-
-        // Per-byte `(original, opposite-case)` pairs used to splat the
-        // prefilter seeds. On the unicode path this flattens each codepoint's
-        // bytes; on the ASCII path it is `needle_ascii`.
-        let seed_bytes: Vec<(u8, u8)> = if unicode {
-            needle_unicode
+        // Per needle byte: the original, its opposite case, and whether it
+        // starts a scalar
+        let bytes: Vec<(u8, u8, bool)> = if config.unicode.respects_unicode_for(needle) {
+            case_needle_unicode(needle, case_sensitive)
                 .iter()
-                .flat_map(|c| (0..c.len).map(|i| (c.chars[i], c.flipped_chars[i])))
+                .flat_map(|c| (0..c.len).map(move |i| (c.chars[i], c.flipped_chars[i], i == 0)))
                 .collect()
         } else {
-            needle_ascii.clone()
+            needle
+                .bytes()
+                .map(|byte| (byte, case_byte(byte, case_sensitive).1, true))
+                .collect()
         };
 
-        // Seed the two-byte prefilter on the two rarest needle bytes. A
-        // single-byte (or empty) needle has no pair, so both seeds collapse
-        // onto offset 0.
-        let (seed_a_off, seed_b_off) = if seed_bytes.len() >= 2 {
+        let scoring = &config.scoring;
+        let scalars = bytes.iter().filter(|byte| byte.2).count();
+        let mut base_score = scalars as u64 * scoring.match_score as u64;
+        let mut chunks = Vec::new();
+        let mut offset = 0;
+        while offset < bytes.len() {
+            let mut end = (offset + B::LANES).min(bytes.len());
+            while end < bytes.len() && !bytes[end].2 {
+                end -= 1;
+            }
+            let chunk = &bytes[offset..end];
+
+            let (mut orig, mut flipped) = ([0u8; 64], [0u8; 64]);
+            let (mut continuations, mut letters, mut upper) = (0u64, 0u64, 0u64);
+            for (k, &(byte, flipped_byte, starts_scalar)) in chunk.iter().enumerate() {
+                (orig[k], flipped[k]) = (byte, flipped_byte);
+                continuations |= (!starts_scalar as u64) << k;
+                letters |= (byte.is_ascii_alphabetic() as u64) << k;
+                upper |= (byte.is_ascii_uppercase() as u64) << k;
+            }
+            let delimiter_bonuses = chunk
+                .windows(2)
+                .filter(|pair| is_delimiter(pair[0].0) && !is_delimiter(pair[1].0))
+                .count();
+            base_score += delimiter_bonuses as u64 * scoring.delimiter_bonus as u64;
+            chunks.push(NeedleChunk {
+                offset,
+                orig: unsafe { B::load(orig.as_ptr()) },
+                flipped: unsafe { B::load(flipped.as_ptr()) },
+                bytes: u64::first_n(chunk.len()),
+                continuations,
+                letters,
+                upper,
+            });
+            offset = end;
+        }
+
+        // A single-byte needle has no pair, so both seeds collapse onto offset
+        // 0
+        let (seed_a_off, seed_b_off) = if bytes.len() >= 2 {
             rare_byte_offsets(needle.as_bytes())
         } else {
             (0, 0)
         };
-        let splat = |off: usize| {
-            // Falls back to (0, 0) only for an empty needle, which never
-            // reaches the match methods
-            let (orig, flipped) = seed_bytes.get(off).copied().unwrap_or_default();
-            unsafe { (B::splat(orig), B::splat(flipped)) }
+        let seed = |offset: usize| {
+            let (orig, flipped, _) = bytes[offset];
+            Seed {
+                offset,
+                bytes: (orig, flipped),
+                splat: unsafe { (B::splat(orig), B::splat(flipped)) },
+            }
         };
-        let seed_a = splat(seed_a_off);
-        let seed_b = splat(seed_b_off);
 
         Self {
             mode: config.matching,
             scoring: config.scoring.clone(),
             needle_len: needle.len(),
-            needle_ascii,
-            needle_unicode,
-            seed_a_off,
-            seed_b_off,
-            seed_a,
-            seed_b,
+            chunks,
+            base_score,
+            seed_a: seed(seed_a_off),
+            seed_b: seed(seed_b_off),
         }
     }
 
@@ -87,27 +148,23 @@ impl<B: Backend> LiteralImpl<B> {
     }
 
     #[inline(always)]
-    pub(super) unsafe fn match_list_impl<const UNICODE: bool, H: AsRef<str>>(
+    pub(super) unsafe fn match_list_impl<H: AsRef<str>>(
         &self,
         haystacks: &[H],
         haystack_index_offset: u32,
         matches: &mut Vec<Match>,
     ) {
         for (index, haystack) in (haystack_index_offset..).zip(haystacks.iter()) {
-            if let Some(m) = unsafe { self.match_one_impl::<UNICODE>(haystack.as_ref(), index) } {
+            if let Some(m) = unsafe { self.match_one_impl(haystack.as_ref(), index) } {
                 matches.push(m);
             }
         }
     }
 
     #[inline(always)]
-    unsafe fn match_one_impl<const UNICODE: bool>(
-        &self,
-        haystack: &str,
-        index: u32,
-    ) -> Option<Match> {
+    pub(super) unsafe fn match_one_impl(&self, haystack: &str, index: u32) -> Option<Match> {
         let haystack = haystack.as_bytes();
-        let (pos, score) = unsafe { self.find::<UNICODE>(haystack) }?;
+        let (pos, score) = unsafe { self.find(haystack) }?;
         let exact = pos == 0 && self.needle_len == haystack.len();
         Some(Match {
             index,
@@ -121,13 +178,13 @@ impl<B: Backend> LiteralImpl<B> {
     }
 
     #[inline(always)]
-    pub(super) unsafe fn match_one_indices_impl<const UNICODE: bool>(
+    pub(super) unsafe fn match_one_indices_impl(
         &self,
         haystack: &str,
         index: u32,
     ) -> Option<MatchIndices> {
         let haystack = haystack.as_bytes();
-        let (pos, score) = unsafe { self.find::<UNICODE>(haystack) }?;
+        let (pos, score) = unsafe { self.find(haystack) }?;
         let exact = pos == 0 && self.needle_len == haystack.len();
         // Every byte of the matched run is a matched index, but add in reverse
         // order to match the fuzzy matcher implementation
@@ -143,83 +200,50 @@ impl<B: Backend> LiteralImpl<B> {
         })
     }
 
-    /// Verifies that the needle matches the haystack starting at byte `pos`
+    /// Scores the needle at byte `pos`, or `None` when it doesn't match there.
+    /// Each chunk is compared against its haystack window in both cases, and
+    /// the compare masks give the match and the bonuses.
+    ///
+    /// # Safety
+    /// The backend's target features must be enabled, and the needle must fit
+    /// in the haystack at `pos`.
     #[inline(always)]
-    fn matches_at<const UNICODE: bool>(&self, haystack: &[u8], pos: usize) -> bool {
-        if UNICODE {
-            let mut k = pos;
-            for c in &self.needle_unicode {
-                let bytes = &haystack[k..k + c.len];
-                if bytes != &c.chars[..c.len] && bytes != &c.flipped_chars[..c.len] {
-                    return false;
-                }
-                k += c.len;
+    unsafe fn score_at(&self, haystack: &[u8], pos: usize) -> Option<u16> {
+        let scoring = &self.scoring;
+        let mut score = self.base_score;
+        for chunk in &self.chunks {
+            let start = pos + chunk.offset;
+            let window = unsafe { load::<B>(haystack, start) };
+            let orig: u64 = unsafe { B::eq(window, chunk.orig) }.into();
+            let flipped: u64 = unsafe { B::eq(window, chunk.flipped) }.into();
+            // A scalar matches when all of its bytes match in the same case
+            let orig_misses = scalar_starts(!orig & chunk.bytes, chunk.continuations);
+            let flipped_misses = scalar_starts(!flipped & chunk.bytes, chunk.continuations);
+            if orig_misses & flipped_misses != 0 {
+                return None;
             }
-        } else {
-            for (k, &(orig, flipped)) in self.needle_ascii.iter().enumerate() {
-                let byte = haystack[pos + k];
-                if byte != orig && byte != flipped {
-                    return false;
-                }
-            }
-        }
-        true
-    }
 
-    /// Score contribution of a single matched scalar whose start byte is at
-    /// haystack index `start`. `matched_exact_case` is true when the
-    /// haystack scalar equals the needle's original case.
-    #[inline(always)]
-    fn score_scalar(&self, haystack: &[u8], start: usize, matched_exact_case: bool) -> u16 {
-        let s = &self.scoring;
-        let mut score = s.match_score;
-        if matched_exact_case {
-            score = score.saturating_add(s.matching_case_bonus);
-        }
-        if start == 0 {
-            score = score.saturating_add(s.prefix_bonus);
-        } else {
-            let byte = haystack[start];
-            let prev = haystack[start - 1];
-            if byte.is_ascii_uppercase() && prev.is_ascii_lowercase() {
-                score = score.saturating_add(s.capitalization_bonus);
-            }
-            if is_delimiter(prev) && !is_delimiter(byte) {
-                score = score.saturating_add(s.delimiter_bonus);
-            }
-        }
-        score
-    }
+            let matching_case = chunk.bytes & !chunk.continuations & !orig_misses;
+            // A haystack letter has the needle's case where the original
+            // matched, and the opposite case otherwise
+            let lower = (orig ^ chunk.upper) & chunk.letters;
+            let upper = lower ^ chunk.letters;
+            let capitalizations = upper & (lower << 1);
+            score += matching_case.count_ones() as u64 * scoring.matching_case_bonus as u64
+                + capitalizations.count_ones() as u64 * scoring.capitalization_bonus as u64;
 
-    /// Scores a contiguous match at byte `pos`, summing one
-    /// [`Self::score_scalar`] per needle scalar: a byte on the ASCII path
-    /// or a codepoint on the unicode path
-    #[inline(always)]
-    fn score_at<const UNICODE: bool>(&self, haystack: &[u8], pos: usize) -> u16 {
-        let mut score = 0u16;
-        if UNICODE {
-            let mut start = pos;
-            for c in &self.needle_unicode {
-                let matched_exact_case = haystack[start..start + c.len] == c.chars[..c.len];
-                score =
-                    score.saturating_add(self.score_scalar(haystack, start, matched_exact_case));
-                start += c.len;
-            }
-        } else {
-            for (k, &(orig, _)) in self.needle_ascii.iter().enumerate() {
-                let start = pos + k;
-                score = score.saturating_add(self.score_scalar(
-                    haystack,
-                    start,
-                    haystack[start] == orig,
-                ));
-            }
+            // The first byte's bonuses depend on the haystack byte before it
+            score += if start == 0 {
+                scoring.prefix_bonus as u64
+            } else {
+                byte_bonus(haystack[start - 1], haystack[start], scoring) as u64
+            };
         }
 
         if pos == 0 && self.needle_len == haystack.len() {
-            score = score.saturating_add(self.scoring.exact_match_bonus);
+            score += scoring.exact_match_bonus as u64;
         }
-        score
+        Some(score.min(u16::MAX as u64) as u16)
     }
 
     /// Returns the matched byte position (start) if the haystack matches under
@@ -227,36 +251,35 @@ impl<B: Backend> LiteralImpl<B> {
     /// For substring, it checks all positions to find the best-score,
     /// preferring earlier matches when tied.
     #[inline(always)]
-    unsafe fn find<const UNICODE: bool>(&self, haystack: &[u8]) -> Option<(usize, u16)> {
+    unsafe fn find(&self, haystack: &[u8]) -> Option<(usize, u16)> {
         let needle_len = self.needle_len;
         if haystack.len() < needle_len {
             return None;
         }
 
-        match self.mode {
+        // The anchored modes have one position
+        let pos = match self.mode {
             Matching::Fuzzy => unreachable!("fuzzy matching does not use the literal backend"),
-            Matching::Exact => (haystack.len() == needle_len
-                && self.matches_at::<UNICODE>(haystack, 0))
-            .then(|| (0, self.score_at::<UNICODE>(haystack, 0))),
-            Matching::Prefix => self
-                .matches_at::<UNICODE>(haystack, 0)
-                .then(|| (0, self.score_at::<UNICODE>(haystack, 0))),
-            Matching::Suffix => {
-                let pos = haystack.len() - needle_len;
-                self.matches_at::<UNICODE>(haystack, pos)
-                    .then(|| (pos, self.score_at::<UNICODE>(haystack, pos)))
-            }
-            Matching::Substring => unsafe { self.find_substring::<UNICODE>(haystack) },
+            Matching::Exact if haystack.len() != needle_len => return None,
+            Matching::Exact | Matching::Prefix => 0,
+            Matching::Suffix => haystack.len() - needle_len,
+            Matching::Substring => return unsafe { self.find_substring(haystack) },
+        };
+        // The seeds reject most haystacks without loading a window
+        if !(self.seed_a.hits(haystack[pos + self.seed_a.offset])
+            & self.seed_b.hits(haystack[pos + self.seed_b.offset]))
+        {
+            return None;
         }
+        Some((pos, unsafe { self.score_at(haystack, pos) }?))
     }
 
     /// Two-byte SIMD prefilter (similar to `memchr::memmem`)
     ///
     /// Scan the string for both seed bytes (the two rarest bytes from the
-    /// needle), and on a match, perform a scalar scan for the rest of the
-    /// needle.
+    /// needle), and on a match, compare the whole needle.
     #[inline(always)]
-    unsafe fn find_substring<const UNICODE: bool>(&self, haystack: &[u8]) -> Option<(usize, u16)> {
+    unsafe fn find_substring(&self, haystack: &[u8]) -> Option<(usize, u16)> {
         let len = haystack.len();
         let needle_len = self.needle_len;
         debug_assert!(needle_len > 0, "empty needles are handled by the caller");
@@ -278,8 +301,8 @@ impl<B: Backend> LiteralImpl<B> {
             // Seed window lane `k` corresponds to position `pos = start + k`:
             // it reads `haystack[start + seed_off + k] = haystack[pos +
             // seed_off]`.
-            let (chunk_a, _) = unsafe { load_window::<B>(haystack, start + self.seed_a_off, len) };
-            let hits_a = unsafe { B::occ(chunk_a, self.seed_a) }.and(valid);
+            let chunk_a = unsafe { load::<B>(haystack, start + self.seed_a.offset) };
+            let hits_a = unsafe { B::occ(chunk_a, self.seed_a.splat) }.and(valid);
             // Skip the second load entirely when the first seed matches nowhere
             // in this window.
             if hits_a.is_zero() {
@@ -290,29 +313,56 @@ impl<B: Backend> LiteralImpl<B> {
             // A single-byte needle has only one seed (both offsets will be 0),
             // so skip Branch predictor will predict this perfectly, so there's
             // no performance cost
-            let mut hits = if self.seed_a_off != self.seed_b_off {
-                let (chunk_b, _) =
-                    unsafe { load_window::<B>(haystack, start + self.seed_b_off, len) };
-                hits_a.and(unsafe { B::occ(chunk_b, self.seed_b) })
+            let mut hits = if self.seed_a.offset != self.seed_b.offset {
+                let chunk_b = unsafe { load::<B>(haystack, start + self.seed_b.offset) };
+                hits_a.and(unsafe { B::occ(chunk_b, self.seed_b.splat) })
             } else {
                 hits_a
             };
             while !hits.is_zero() {
                 let pos = start + unsafe { B::first_hit_pos(hits) };
                 hits = hits.clear_through_lowest(hits);
-                // We've verified the seeds but we have to check the rest of the
-                // needle matches now
-                if (!UNICODE && needle_len <= 2) || self.matches_at::<UNICODE>(haystack, pos) {
-                    let score = self.score_at::<UNICODE>(haystack, pos);
-                    if best.is_none_or(|(_, best_score)| score > best_score) {
-                        best = Some((pos, score));
-                    }
+                // The seeds hit, the rest of the needle may not
+                if let Some(score) = unsafe { self.score_at(haystack, pos) }
+                    && best.is_none_or(|(_, best_score)| score > best_score)
+                {
+                    best = Some((pos, score));
                 }
             }
             start += B::LANES;
         }
         best
     }
+}
+
+/// Loads the `LANES` bytes at `start`. The ones past the haystack are
+/// unspecified
+///
+/// # Safety
+/// The backend's target features must be enabled, and `start` must be inside
+/// the haystack.
+#[inline(always)]
+unsafe fn load<B: Backend>(haystack: &[u8], start: usize) -> B::Chunk {
+    unsafe {
+        let ptr = haystack.as_ptr().add(start);
+        let remaining = haystack.len() - start;
+        // One rarely taken branch: haystack lengths vary around `LANES`, so
+        // `||` would mispredict
+        if (remaining >= B::LANES) | can_overread(ptr, B::LANES) {
+            B::load(ptr)
+        } else {
+            B::load_partial(ptr, remaining, B::Mask::first_n(remaining))
+        }
+    }
+}
+
+/// Moves the bits on a scalar's continuation bytes down to its first byte
+#[inline(always)]
+fn scalar_starts(mut bits: u64, continuations: u64) -> u64 {
+    while bits & continuations != 0 {
+        bits = (bits & !continuations) | ((bits & continuations) >> 1);
+    }
+    bits
 }
 
 #[inline(always)]

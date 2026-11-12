@@ -31,8 +31,8 @@ pub(crate) type LiteralWasm = LiteralImpl<PrefilterWasmBackend>;
 pub(crate) type LiteralScalar = LiteralImpl<PrefilterScalarBackend>;
 
 /// Implements [`Specialized`] for one literal backend. `TYPOS` is ignored
-/// (literal matching has no typo tolerance); `UNICODE` selects the byte-level
-/// ASCII path or the per-codepoint unicode path.
+/// (literal matching has no typo tolerance), and so is `UNICODE`: the needle
+/// holds its own scalar boundaries.
 macro_rules! impl_specialized_literal {
     ($backend:ty $(, target_feature = $feature:literal)?) => {
         impl Specialized for LiteralImpl<$backend> {
@@ -50,7 +50,7 @@ macro_rules! impl_specialized_literal {
                 matches: &mut Vec<Match>,
             ) {
                 unsafe {
-                    self.match_list_impl::<UNICODE, H>(haystacks, haystack_index_offset, matches)
+                    self.match_list_impl(haystacks, haystack_index_offset, matches)
                 }
             }
 
@@ -60,7 +60,7 @@ macro_rules! impl_specialized_literal {
                 haystack: &str,
                 index: u32,
             ) -> Option<MatchIndices> {
-                unsafe { self.match_one_indices_impl::<UNICODE>(haystack, index) }
+                unsafe { self.match_one_indices_impl(haystack, index) }
             }
         }
     };
@@ -69,10 +69,10 @@ macro_rules! impl_specialized_literal {
 #[cfg(target_arch = "x86_64")]
 impl_specialized_literal!(
     PrefilterAVX512Backend,
-    target_feature = "avx512f,avx512bw,bmi1,bmi2"
+    target_feature = "avx512f,avx512bw,bmi1,bmi2,popcnt"
 );
 #[cfg(target_arch = "x86_64")]
-impl_specialized_literal!(PrefilterAVXBackend, target_feature = "avx2");
+impl_specialized_literal!(PrefilterAVXBackend, target_feature = "avx2,popcnt");
 #[cfg(target_arch = "x86_64")]
 impl_specialized_literal!(PrefilterSSEBackend, target_feature = "sse2");
 #[cfg(target_arch = "aarch64")]

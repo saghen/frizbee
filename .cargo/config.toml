@@ -1,10 +1,10 @@
 [target.'cfg(miri)']
 rustflags = [
   "-C",
-  "target-feature=+ssse3,+sse4.1,+sse4.2,+avx,+avx2,+avx512f,+avx512bw,+avx512vl,+avx512dq",
+  "target-feature=+ssse3,+sse4.1,+sse4.2,+popcnt,+avx,+avx2,+avx512f,+avx512bw,+avx512vl,+avx512dq",
 ]
 rustdocflags = [
-  "--doctest-build-arg=-Ctarget-feature=+ssse3,+sse4.1,+sse4.2,+avx,+avx2,+avx512f,+avx512bw,+avx512vl,+avx512dq",
+  "--doctest-build-arg=-Ctarget-feature=+ssse3,+sse4.1,+sse4.2,+popcnt,+avx,+avx2,+avx512f,+avx512bw,+avx512vl,+avx512dq",
 ]
 
 # include this in your repo if you're using wasm32 builds

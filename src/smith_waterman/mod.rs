@@ -66,6 +66,7 @@ use matrix::Matrix;
 
 mod algo;
 mod alignment;
+pub(crate) use alignment::byte_bonus;
 pub(crate) mod backend;
 mod greedy;
 mod matrix;
