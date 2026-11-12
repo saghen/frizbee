@@ -154,17 +154,36 @@ impl<B: Backend> LiteralImpl<B> {
         haystack_index_offset: u32,
         matches: &mut Vec<Match>,
     ) {
+        // One loop for the substring scan and one for the anchored modes, each
+        // with its own code alone
+        unsafe {
+            if self.mode == Matching::Substring {
+                self.match_list_mode(true, haystacks, haystack_index_offset, matches)
+            } else {
+                self.match_list_mode(false, haystacks, haystack_index_offset, matches)
+            }
+        }
+    }
+
+    #[inline(always)]
+    unsafe fn match_list_mode<H: AsRef<str>>(
+        &self,
+        substring: bool,
+        haystacks: &[H],
+        haystack_index_offset: u32,
+        matches: &mut Vec<Match>,
+    ) {
         for (index, haystack) in (haystack_index_offset..).zip(haystacks.iter()) {
-            if let Some(m) = unsafe { self.match_one_impl(haystack.as_ref(), index) } {
+            if let Some(m) = unsafe { self.match_one_impl(substring, haystack.as_ref(), index) } {
                 matches.push(m);
             }
         }
     }
 
     #[inline(always)]
-    pub(super) unsafe fn match_one_impl(&self, haystack: &str, index: u32) -> Option<Match> {
+    unsafe fn match_one_impl(&self, substring: bool, haystack: &str, index: u32) -> Option<Match> {
         let haystack = haystack.as_bytes();
-        let (pos, score) = unsafe { self.find(haystack) }?;
+        let (pos, score) = unsafe { self.find(substring, haystack) }?;
         let exact = pos == 0 && self.needle_len == haystack.len();
         Some(Match {
             index,
@@ -184,7 +203,8 @@ impl<B: Backend> LiteralImpl<B> {
         index: u32,
     ) -> Option<MatchIndices> {
         let haystack = haystack.as_bytes();
-        let (pos, score) = unsafe { self.find(haystack) }?;
+        let substring = self.mode == Matching::Substring;
+        let (pos, score) = unsafe { self.find(substring, haystack) }?;
         let exact = pos == 0 && self.needle_len == haystack.len();
         // Every byte of the matched run is a matched index, but add in reverse
         // order to match the fuzzy matcher implementation
@@ -251,19 +271,20 @@ impl<B: Backend> LiteralImpl<B> {
     /// For substring, it checks all positions to find the best-score,
     /// preferring earlier matches when tied.
     #[inline(always)]
-    unsafe fn find(&self, haystack: &[u8]) -> Option<(usize, u16)> {
+    unsafe fn find(&self, substring: bool, haystack: &[u8]) -> Option<(usize, u16)> {
         let needle_len = self.needle_len;
         if haystack.len() < needle_len {
             return None;
         }
+        if substring {
+            return unsafe { self.find_substring(haystack) };
+        }
 
         // The anchored modes have one position
         let pos = match self.mode {
-            Matching::Fuzzy => unreachable!("fuzzy matching does not use the literal backend"),
             Matching::Exact if haystack.len() != needle_len => return None,
-            Matching::Exact | Matching::Prefix => 0,
             Matching::Suffix => haystack.len() - needle_len,
-            Matching::Substring => return unsafe { self.find_substring(haystack) },
+            _ => 0,
         };
         // The seeds reject most haystacks without loading a window
         if !(self.seed_a.hits(haystack[pos + self.seed_a.offset])
