@@ -111,9 +111,8 @@ mod backend_parity {
     }
 
     #[test]
-    fn simd_backends_agree_with_scalar() {
-        use crate::literal::LiteralScalar;
-
+    fn backends_agree_with_reference_on_edge_cases() {
+        let backends = backends();
         let cases: &[(&str, &str)] = &[
             ("bar", "foobar"),
             ("bar", "foo_bar"),
@@ -156,57 +155,213 @@ mod backend_parity {
                 let config = Config::default()
                     .matching(matching)
                     .sort(SortStrategy::IndexAsc);
-                let expected = unsafe { probe::<LiteralScalar>(needle, haystack, &config) };
+                let expected = reference(needle, haystack, &config);
+                for (name, probe) in &backends {
+                    assert_eq!(
+                        probe(needle, haystack, &config),
+                        expected,
+                        "{name} mismatch: needle={needle:?} haystack={haystack:?} {matching:?}"
+                    );
+                }
+            }
+        }
+    }
 
-                #[cfg(target_arch = "x86_64")]
-                {
-                    use crate::literal::{LiteralAVX, LiteralAVX512, LiteralSSE};
-                    if LiteralAVX512::is_available() {
-                        assert_eq!(
-                            unsafe { probe::<LiteralAVX512>(needle, haystack, &config) },
-                            expected,
-                            "AVX-512 mismatch: needle={needle:?} haystack={haystack:?} {matching:?}"
-                        );
+    type Probe = fn(&str, &str, &Config) -> (Option<(u16, bool)>, Option<Vec<u32>>);
+
+    fn backends() -> Vec<(&'static str, Probe)> {
+        use crate::literal::LiteralScalar;
+        let mut backends: Vec<(&'static str, Probe)> = vec![("scalar", |n, h, c| unsafe {
+            probe::<LiteralScalar>(n, h, c)
+        })];
+        #[cfg(target_arch = "x86_64")]
+        {
+            use crate::literal::{LiteralAVX, LiteralAVX512, LiteralSSE};
+            if LiteralAVX512::is_available() {
+                backends.push(("avx512", |n, h, c| unsafe {
+                    probe::<LiteralAVX512>(n, h, c)
+                }));
+            }
+            if LiteralAVX::is_available() {
+                backends.push(("avx2", |n, h, c| unsafe { probe::<LiteralAVX>(n, h, c) }));
+            }
+            if LiteralSSE::is_available() {
+                backends.push(("sse", |n, h, c| unsafe { probe::<LiteralSSE>(n, h, c) }));
+            }
+        }
+        #[cfg(target_arch = "aarch64")]
+        {
+            use crate::literal::LiteralNEON;
+            if LiteralNEON::is_available() {
+                backends.push(("neon", |n, h, c| unsafe { probe::<LiteralNEON>(n, h, c) }));
+            }
+        }
+        #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
+        {
+            use crate::literal::LiteralWasm;
+            if LiteralWasm::is_available() {
+                backends.push(("wasm", |n, h, c| unsafe { probe::<LiteralWasm>(n, h, c) }));
+            }
+        }
+        backends
+    }
+
+    /// The literal semantics spelled out a scalar at a time: the earliest of
+    /// the best-scoring positions the mode allows, in the shape of [`probe`]
+    fn reference(
+        needle: &str,
+        haystack: &str,
+        config: &Config,
+    ) -> (Option<(u16, bool)>, Option<Vec<u32>>) {
+        use crate::prefilter::{case_byte, case_needle_unicode};
+
+        let case_sensitive = config.casing.respects_case_for(needle);
+        let scalars: Vec<(Vec<u8>, Vec<u8>)> = if config.unicode.respects_unicode_for(needle) {
+            case_needle_unicode(needle, case_sensitive)
+                .iter()
+                .map(|c| (c.chars[..c.len].to_vec(), c.flipped_chars[..c.len].to_vec()))
+                .collect()
+        } else {
+            needle
+                .bytes()
+                .map(|byte| (vec![byte], vec![case_byte(byte, case_sensitive).1]))
+                .collect()
+        };
+
+        let (haystack, scoring) = (haystack.as_bytes(), &config.scoring);
+        if haystack.len() < needle.len() {
+            return (None, None);
+        }
+        let last = haystack.len() - needle.len();
+        let is_delimiter = |byte: u8| byte.is_ascii() && !byte.is_ascii_alphanumeric();
+        let score_at = |pos: usize| {
+            let (mut score, mut start) = (0u16, pos);
+            let mut add = |bonus: u16| score = score.saturating_add(bonus);
+            for (orig, flipped) in &scalars {
+                let bytes = &haystack[start..start + orig.len()];
+                if bytes != orig && bytes != flipped {
+                    return None;
+                }
+                add(scoring.match_score);
+                if bytes == orig {
+                    add(scoring.matching_case_bonus);
+                }
+                if start == 0 {
+                    add(scoring.prefix_bonus);
+                } else {
+                    let (prev, byte) = (haystack[start - 1], haystack[start]);
+                    if prev.is_ascii_lowercase() && byte.is_ascii_uppercase() {
+                        add(scoring.capitalization_bonus);
                     }
-                    if LiteralAVX::is_available() {
-                        assert_eq!(
-                            unsafe { probe::<LiteralAVX>(needle, haystack, &config) },
-                            expected,
-                            "AVX2 mismatch: needle={needle:?} haystack={haystack:?} {matching:?}"
-                        );
-                    }
-                    if LiteralSSE::is_available() {
-                        assert_eq!(
-                            unsafe { probe::<LiteralSSE>(needle, haystack, &config) },
-                            expected,
-                            "SSE mismatch: needle={needle:?} haystack={haystack:?} {matching:?}"
-                        );
+                    if is_delimiter(prev) && !is_delimiter(byte) {
+                        add(scoring.delimiter_bonus);
                     }
                 }
+                start += orig.len();
+            }
+            if pos == 0 && last == 0 {
+                add(scoring.exact_match_bonus);
+            }
+            Some(score)
+        };
 
-                #[cfg(target_arch = "aarch64")]
-                {
-                    use crate::literal::LiteralNEON;
-                    if LiteralNEON::is_available() {
-                        assert_eq!(
-                            unsafe { probe::<LiteralNEON>(needle, haystack, &config) },
-                            expected,
-                            "NEON mismatch: needle={needle:?} haystack={haystack:?} {matching:?}"
-                        );
-                    }
-                }
+        let positions = match config.matching {
+            Matching::Exact if last != 0 => return (None, None),
+            Matching::Exact | Matching::Prefix => 0..=0,
+            Matching::Suffix => last..=last,
+            Matching::Substring => 0..=last,
+            Matching::Fuzzy => unreachable!(),
+        };
+        // `max_by_key` keeps the last maximum, so walk the positions backwards
+        let best = positions
+            .rev()
+            .filter_map(|pos| Some((score_at(pos)?, pos)))
+            .max_by_key(|&(score, _)| score);
+        best.map(|(score, pos)| {
+            let indices = (pos..pos + needle.len()).rev().map(|i| i as u32).collect();
+            ((score, pos == 0 && last == 0), indices)
+        })
+        .unzip()
+    }
 
-                #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
-                {
-                    use crate::literal::LiteralWasm;
-                    if LiteralWasm::is_available() {
-                        assert_eq!(
-                            unsafe { probe::<LiteralWasm>(needle, haystack, &config) },
-                            expected,
-                            "WASM mismatch: needle={needle:?} haystack={haystack:?} {matching:?}"
-                        );
-                    }
+    #[test]
+    fn backends_agree_with_reference_on_random_cases() {
+        use crate::smith_waterman::reference::Rng;
+        use crate::{CaseMatching, Scoring, UnicodeMatching};
+
+        let alphabet: Vec<char> = "abcABC_/.1éÉиИ다Ꭰꭰß".chars().collect();
+        let scorings = [
+            Scoring::default(),
+            // a capitalization worth more than a matching case
+            Scoring {
+                capitalization_bonus: 9,
+                matching_case_bonus: 2,
+                delimiter_bonus: 5,
+                prefix_bonus: 7,
+                exact_match_bonus: 3,
+                ..Scoring::default()
+            },
+            // saturates on long needles
+            Scoring {
+                match_score: 9000,
+                ..Scoring::default()
+            },
+        ];
+        let backends = backends();
+        let mut rng = Rng(0x0117_e2a1);
+        for round in 0..if cfg!(miri) { 40 } else { 40_000 } {
+            // mostly short needles, some longer than every backend's chunk
+            let needle_len = 1 + rng.below(if round % 16 == 0 { 80 } else { 5 });
+            let needle = rng.string(&alphabet, needle_len);
+            // random text around needles planted in a random case
+            let gap = if round % 8 == 0 { 90 } else { 10 };
+            let mut haystack = String::new();
+            for _ in 0..rng.below(4) {
+                let filler = rng.below(gap);
+                haystack += &rng.string(&alphabet, filler);
+                for c in needle.chars() {
+                    let flipped = if c.is_lowercase() {
+                        c.to_uppercase().next()
+                    } else {
+                        c.to_lowercase().next()
+                    };
+                    haystack.push(if rng.below(4) == 0 {
+                        flipped.unwrap()
+                    } else {
+                        c
+                    });
                 }
+            }
+            let filler = rng.below(gap);
+            haystack += &rng.string(&alphabet, filler);
+
+            let config = Config::default()
+                .matching(rng.pick(&[
+                    Matching::Exact,
+                    Matching::Prefix,
+                    Matching::Suffix,
+                    Matching::Substring,
+                    Matching::Substring,
+                ]))
+                .casing(rng.pick(&[
+                    CaseMatching::Smart,
+                    CaseMatching::Ignore,
+                    CaseMatching::Respect,
+                ]))
+                .unicode(rng.pick(&[
+                    UnicodeMatching::Smart,
+                    UnicodeMatching::Ignore,
+                    UnicodeMatching::Always,
+                ]))
+                .scoring(scorings[rng.below(scorings.len())].clone())
+                .sort(SortStrategy::IndexAsc);
+            let expected = reference(&needle, &haystack, &config);
+            for (name, probe) in &backends {
+                assert_eq!(
+                    probe(&needle, &haystack, &config),
+                    expected,
+                    "{name} mismatch: needle={needle:?} haystack={haystack:?} {config:?}"
+                );
             }
         }
     }
