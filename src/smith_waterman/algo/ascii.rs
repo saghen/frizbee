@@ -118,10 +118,13 @@ impl<B: Backend> SmithWaterman<B> {
                     }
                 }
 
-                // Up gaps pay the open penalty below a match
-                let mut up_penalty = [gap_extend_penalty; N];
-                // The previous chunk's row above, shifted in by the diagonal
-                let mut prev_chunk_row_above = [B::Score::zero(); N];
+                // The row above after an up gap, which pays the open penalty
+                // below a match
+                let mut up_scores = [B::Score::zero(); N];
+                // The row above shifted by the diagonal. Carried with
+                // `up_scores` in place of their three sources, so the pair loop
+                // fits in 16 registers
+                let mut diag_scores = [B::Score::zero(); N];
 
                 for (row_idx, (needle_char, flipped_case_needle_char)) in
                     self.needle_simd.iter().enumerate().map(|(i, c)| (i + 1, c))
@@ -154,17 +157,12 @@ impl<B: Backend> SmithWaterman<B> {
                         // Diagonal - typical match/mismatch, advancing one
                         // cell. The mismatch penalty is always paid (and undone
                         // by the match score)
-                        let diag_scores = prev_row_scores[s]
-                            .shift_right_padded::<1>(prev_chunk_row_above[s])
-                            .add(bonuses);
-
-                        // Up - skipping a char in the needle
-                        let up_scores = prev_row_scores[s].subs(up_penalty[s]);
+                        let diag = diag_scores[s].add(bonuses);
 
                         // Left - skipping chars in the haystack. Gaps opened
                         // from a match pay the open penalty at their source
                         let open = match_mask.and(gap_open_penalty);
-                        let mut row_scores = diag_scores.subs(mismatch_penalty).max(up_scores);
+                        let mut row_scores = diag.subs(mismatch_penalty).max(up_scores[s]);
                         // The scan can't raise the last row's max: skip it
                         // there unless the matrix is stored
                         if STORE || row_idx != needle_len {
@@ -178,14 +176,15 @@ impl<B: Backend> SmithWaterman<B> {
                                 row_scores,
                             );
                             carry_out.write((row_scores, scan));
-                            prev_chunk_row_above[s] = prev_chunk_row;
+                            diag_scores[s] = row_scores.shift_right_padded::<1>(prev_chunk_row);
 
                             if STORE {
                                 score_matrix.set(row_idx, col_idx, row_scores);
                             }
                         }
                         prev_row_scores[s] = row_scores;
-                        up_penalty[s] = gap_extend_penalty.add(open);
+                        // Up - skipping a char in the needle
+                        up_scores[s] = row_scores.subs(gap_extend_penalty.add(open));
                     }
                 }
             }
