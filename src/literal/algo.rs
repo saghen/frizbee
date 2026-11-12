@@ -310,36 +310,16 @@ impl<B: Backend> LiteralImpl<B> {
 
         let mut start = 0usize;
         while start < last_start {
-            // Mask out any over-read lanes and any lanes that can't possibly
-            // match the needle
-            let usable = last_start - start;
-            let valid = if usable >= B::LANES {
-                B::Mask::all()
-            } else {
-                B::Mask::first_n(usable)
-            };
-
             // Seed window lane `k` corresponds to position `pos = start + k`:
             // it reads `haystack[start + seed_off + k] = haystack[pos +
             // seed_off]`.
             let chunk_a = unsafe { load::<B>(haystack, start + self.seed_a.offset) };
-            let hits_a = unsafe { B::occ(chunk_a, self.seed_a.splat) }.and(valid);
-            // Skip the second load entirely when the first seed matches nowhere
-            // in this window.
-            if hits_a.is_zero() {
-                start += B::LANES;
-                continue;
-            }
-
-            // A single-byte needle has only one seed (both offsets will be 0),
-            // so skip Branch predictor will predict this perfectly, so there's
-            // no performance cost
-            let mut hits = if self.seed_a.offset != self.seed_b.offset {
-                let chunk_b = unsafe { load::<B>(haystack, start + self.seed_b.offset) };
-                hits_a.and(unsafe { B::occ(chunk_b, self.seed_b.splat) })
-            } else {
-                hits_a
-            };
+            let chunk_b = unsafe { load::<B>(haystack, start + self.seed_b.offset) };
+            // Mask out any over-read lanes and any lanes that can't possibly
+            // match the needle
+            let mut hits = unsafe { B::occ(chunk_a, self.seed_a.splat) }
+                .and(unsafe { B::occ(chunk_b, self.seed_b.splat) })
+                .and(B::Mask::first_n(last_start - start));
             while !hits.is_zero() {
                 let pos = start + unsafe { B::first_hit_pos(hits) };
                 hits = hits.clear_through_lowest(hits);
