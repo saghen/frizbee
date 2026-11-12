@@ -18,6 +18,9 @@ pub(crate) struct LiteralImpl<B: Backend> {
     /// The part of the score that only depends on the needle: the match
     /// scores, and the delimiter bonuses past each chunk's first byte
     base_score: u64,
+    /// The highest score of a match past the haystack's start, where the
+    /// substring scan stops
+    max_later_score: u16,
     /// The two rarest needle bytes (see [`rare_byte_offsets`]), checked before
     /// the whole needle. `seed_a.offset <= seed_b.offset`
     seed_a: Seed<B>,
@@ -116,6 +119,24 @@ impl<B: Backend> LiteralImpl<B> {
             offset = end;
         }
 
+        // The best match past the haystack's start is the needle in its own
+        // case, after a delimiter or a lowercase letter. A letter in the
+        // opposite case loses the matching case bonus and gains at most one
+        // capitalization bonus
+        let bonuses = bytes
+            .windows(2)
+            .map(|pair| byte_bonus(pair[0].0, pair[1].0, scoring))
+            .sum::<i32>()
+            + byte_bonus(b'_', bytes[0].0, scoring).max(byte_bonus(b'a', bytes[0].0, scoring));
+        let letters = bytes.iter().filter(|byte| byte.0.is_ascii_alphabetic());
+        let opposite_case_gain = scoring
+            .capitalization_bonus
+            .saturating_sub(scoring.matching_case_bonus);
+        let max_later_score = scalars as u64
+            * (scoring.match_score as u64 + scoring.matching_case_bonus as u64)
+            + bonuses as u64
+            + letters.count() as u64 * opposite_case_gain as u64;
+
         // A single-byte needle has no pair, so both seeds collapse onto offset
         // 0
         let (seed_a_off, seed_b_off) = if bytes.len() >= 2 {
@@ -138,6 +159,7 @@ impl<B: Backend> LiteralImpl<B> {
             needle_len: needle.len(),
             chunks,
             base_score,
+            max_later_score: max_later_score.min(u16::MAX as u64) as u16,
             seed_a: seed(seed_a_off),
             seed_b: seed(seed_b_off),
         }
@@ -328,6 +350,9 @@ impl<B: Backend> LiteralImpl<B> {
                     && best.is_none_or(|(_, best_score)| score > best_score)
                 {
                     best = Some((pos, score));
+                    if score >= self.max_later_score {
+                        return best;
+                    }
                 }
             }
             start += B::LANES;
