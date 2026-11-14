@@ -68,14 +68,18 @@ macro_rules! for_each_backend {
         $callback!($($ctx)* ; all(), "Scalar-u16", BackendScalar8, BackendScalar8, false);
         $callback!($($ctx)* ; all(), "Scalar-u8", BackendScalar16U8, BackendScalar16U8, true);
 
-        $callback!($($ctx)* ; target_arch = "x86_64", "SSE-u16",
-            super::super::BackendSSE, BackendScalar8, false);
+        $callback!($($ctx)* ; target_arch = "x86_64", "SSE41-u16",
+            super::super::BackendSSE<true>, BackendScalar8, false);
+        $callback!($($ctx)* ; target_arch = "x86_64", "SSE2-u16",
+            super::super::BackendSSE<false>, BackendScalar8, false);
         $callback!($($ctx)* ; target_arch = "x86_64", "AVX-u16",
             super::super::BackendAVX, super::super::scalar::TestScalar16, false);
         $callback!($($ctx)* ; target_arch = "x86_64", "AVX-512-u16",
             super::super::BackendAVX512, super::super::scalar::TestScalar32, false);
-        $callback!($($ctx)* ; target_arch = "x86_64", "SSE-u8",
-            super::super::BackendSSEU8, BackendScalar16U8, true);
+        $callback!($($ctx)* ; target_arch = "x86_64", "SSE41-u8",
+            super::super::BackendSSEU8<true>, BackendScalar16U8, true);
+        $callback!($($ctx)* ; target_arch = "x86_64", "SSE2-u8",
+            super::super::BackendSSEU8<false>, BackendScalar16U8, true);
         $callback!($($ctx)* ; target_arch = "x86_64", "AVX-u8",
             super::super::BackendAVXU8, super::super::scalar::TestScalar32U8, true);
         $callback!($($ctx)* ; target_arch = "x86_64", "AVX-512-u8",

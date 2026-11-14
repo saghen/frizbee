@@ -45,7 +45,8 @@ pub fn detect() -> Features {
         {
             bits = match std::env::var("FRIZBEE_FORCE_BACKEND").as_deref() {
                 Ok("avx2") => bits & !(AVX512F | AVX512BW | AVX512VBMI),
-                Ok("sse") => bits & !(AVX512F | AVX512BW | AVX512VBMI | AVX2 | AVX | FMA),
+                Ok("sse41") => bits & !(AVX512F | AVX512BW | AVX512VBMI | AVX2 | AVX | FMA),
+                Ok("sse2") => bits & (SSE2 | INIT),
                 Ok("scalar") => INIT,
                 _ => bits,
             };
