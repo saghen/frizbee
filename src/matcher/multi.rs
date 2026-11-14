@@ -30,6 +30,7 @@ pub(super) struct CompiledPattern {
 }
 
 impl Matcher {
+    #[inline]
     pub(super) fn match_one_multi(
         patterns: &mut [CompiledPattern],
         haystack: &str,
@@ -55,6 +56,7 @@ impl Matcher {
         Some(combined)
     }
 
+    #[inline]
     pub(super) fn match_one_indices_multi(
         patterns: &mut [CompiledPattern],
         haystack: &str,

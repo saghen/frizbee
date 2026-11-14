@@ -419,6 +419,7 @@ impl Matcher {
         })
     }
 
+    #[inline]
     fn dispatch_pattern_one(
         pattern: &mut CompiledPattern,
         haystack: &str,
