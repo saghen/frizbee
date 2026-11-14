@@ -419,6 +419,8 @@ impl Matcher {
         })
     }
 
+    // builds in the caller's crate, where it merges with the caller's list loop
+    #[inline]
     fn dispatch_pattern_one(
         pattern: &mut CompiledPattern,
         haystack: &str,
