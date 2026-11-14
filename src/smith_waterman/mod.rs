@@ -131,19 +131,11 @@ macro_rules! kernel {
     };
 }
 
-// The u8 and u16 AVX-512 kernels need different features (VBMI), so they
-// stay separate tiers. Every other tier picks the width at construction
-#[cfg(target_arch = "x86_64")]
-kernel!(
-    SmithWatermanAVX512U8,
-    SmithWaterman<BackendAVX512U8>,
-    target_feature = "avx512f,avx512bw,avx512vbmi,bmi1,bmi2"
-);
 #[cfg(target_arch = "x86_64")]
 kernel!(
     SmithWatermanAVX512,
-    SmithWaterman<BackendAVX512>,
-    target_feature = "avx512f,avx512bw,bmi1,bmi2"
+    ScoreWidth<BackendAVX512U8, BackendAVX512>,
+    target_feature = "avx512f,avx512bw,avx512vbmi,bmi1,bmi2"
 );
 #[cfg(target_arch = "x86_64")]
 kernel!(

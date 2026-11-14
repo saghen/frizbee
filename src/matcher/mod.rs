@@ -1,4 +1,3 @@
-use crate::smith_waterman::score_fits_in_u8;
 use crate::sort::radix_sort_matches;
 use crate::{Config, Match, MatchIndices, Pattern};
 use alloc::{vec, vec::Vec};
@@ -26,8 +25,6 @@ pub use iter::{FuzzyMatch, FuzzyMatchExt, FuzzyMatchIndices};
 macro_rules! dispatch {
     ($self:expr, $m:ident => $body:expr) => {
         match $self {
-            #[cfg(target_arch = "x86_64")]
-            MatcherBackend::AVX512U8($m) => $body,
             #[cfg(target_arch = "x86_64")]
             MatcherBackend::AVX512($m) => $body,
             #[cfg(target_arch = "x86_64")]
@@ -466,13 +463,7 @@ impl Matcher {
 
         #[cfg(target_arch = "x86_64")]
         {
-            if score_fits_in_u8(needle.len(), &config.scoring) {
-                if MatcherAVX512U8::is_available() {
-                    return MatcherBackend::AVX512U8(unsafe {
-                        MatcherAVX512U8::build(needle, config)
-                    });
-                }
-            } else if MatcherAVX512::is_available() {
+            if MatcherAVX512::is_available() {
                 return MatcherBackend::AVX512(unsafe { MatcherAVX512::build(needle, config) });
             }
             if MatcherAVX::is_available() {
@@ -827,9 +818,7 @@ mod tests {
         use crate::smith_waterman::ScoreWidth;
         match backend {
             #[cfg(target_arch = "x86_64")]
-            MatcherBackend::AVX512U8(_) => true,
-            #[cfg(target_arch = "x86_64")]
-            MatcherBackend::AVX512(_) => false,
+            MatcherBackend::AVX512(m) => matches!(m.smith_waterman, ScoreWidth::U8(_)),
             #[cfg(target_arch = "x86_64")]
             MatcherBackend::AVX(m) => matches!(m.smith_waterman, ScoreWidth::U8(_)),
             #[cfg(target_arch = "x86_64")]
