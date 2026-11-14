@@ -29,7 +29,8 @@ use crate::smith_waterman::SmithWatermanScalar;
 use crate::smith_waterman::SmithWatermanWasm;
 #[cfg(target_arch = "x86_64")]
 use crate::smith_waterman::{
-    SmithWatermanAVX, SmithWatermanAVX512, SmithWatermanAVX512U8, SmithWatermanSSE,
+    SmithWatermanAVX, SmithWatermanAVX512, SmithWatermanAVX512U8, SmithWatermanSSE2,
+    SmithWatermanSSE41,
 };
 
 #[cfg(target_arch = "x86_64")]
@@ -39,7 +40,9 @@ pub type MatcherAVX512 = MatcherImpl<PrefilterAVX512, SmithWatermanAVX512>;
 #[cfg(target_arch = "x86_64")]
 pub type MatcherAVX = MatcherImpl<PrefilterAVX, SmithWatermanAVX>;
 #[cfg(target_arch = "x86_64")]
-pub type MatcherSSE = MatcherImpl<PrefilterSSE, SmithWatermanSSE>;
+pub type MatcherSSE41 = MatcherImpl<PrefilterSSE, SmithWatermanSSE41>;
+#[cfg(target_arch = "x86_64")]
+pub type MatcherSSE2 = MatcherImpl<PrefilterSSE, SmithWatermanSSE2>;
 #[cfg(target_arch = "aarch64")]
 pub type MatcherNEON = MatcherImpl<PrefilterNEON, SmithWatermanNEON>;
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
@@ -58,7 +61,9 @@ pub enum MatcherBackend {
     AVX(MatcherAVX),
     #[allow(clippy::upper_case_acronyms)]
     #[cfg(target_arch = "x86_64")]
-    SSE(MatcherSSE),
+    SSE41(MatcherSSE41),
+    #[cfg(target_arch = "x86_64")]
+    SSE2(MatcherSSE2),
     #[cfg(target_arch = "aarch64")]
     NEON(MatcherNEON),
     #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
@@ -140,9 +145,11 @@ impl_specialized!(PrefilterAVX, SmithWatermanAVX, target_feature = "avx2");
 #[cfg(target_arch = "x86_64")]
 impl_specialized!(
     PrefilterSSE,
-    SmithWatermanSSE,
+    SmithWatermanSSE41,
     target_feature = "sse2,ssse3,sse4.1"
 );
+#[cfg(target_arch = "x86_64")]
+impl_specialized!(PrefilterSSE, SmithWatermanSSE2, target_feature = "sse2");
 #[cfg(target_arch = "aarch64")]
 impl_specialized!(PrefilterNEON, SmithWatermanNEON, target_feature = "neon");
 #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]

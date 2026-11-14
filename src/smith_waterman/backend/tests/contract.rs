@@ -265,9 +265,13 @@ macro_rules! backend_contract_tests {
 backend_contract_tests!(scalar8, super::super::BackendScalar8);
 backend_contract_tests!(scalar16_u8, super::super::BackendScalar16U8);
 #[cfg(target_arch = "x86_64")]
-backend_contract_tests!(sse, super::super::BackendSSE);
+backend_contract_tests!(sse41, super::super::BackendSSE<true>);
 #[cfg(target_arch = "x86_64")]
-backend_contract_tests!(sse_u8, super::super::BackendSSEU8);
+backend_contract_tests!(sse2, super::super::BackendSSE<false>);
+#[cfg(target_arch = "x86_64")]
+backend_contract_tests!(sse41_u8, super::super::BackendSSEU8<true>);
+#[cfg(target_arch = "x86_64")]
+backend_contract_tests!(sse2_u8, super::super::BackendSSEU8<false>);
 #[cfg(target_arch = "x86_64")]
 backend_contract_tests!(avx, super::super::BackendAVX);
 #[cfg(target_arch = "x86_64")]

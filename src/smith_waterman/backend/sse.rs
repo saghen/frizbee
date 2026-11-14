@@ -5,35 +5,47 @@ use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
 
 use super::{Backend, BytesVec, MaskVec, ScoreVec};
 
+/// `_mm_alignr_epi8`, built from SSE2 shifts on the tier without SSSE3
+macro_rules! alignr {
+    ($n:literal, $a:expr, $b:expr) => {
+        if SSE41 {
+            _mm_alignr_epi8::<$n>($a, $b)
+        } else {
+            _mm_or_si128(_mm_srli_si128::<$n>($b), _mm_slli_si128::<{ 16 - $n }>($a))
+        }
+    };
+}
+
 /// 8-lane u16 scoring (128-bit __mm128i)
 /// 8-lane u8 input (low half of __m128i)
 #[derive(Debug, Clone, Copy)]
-pub struct BackendSSE;
+pub struct BackendSSE<const SSE41: bool>;
 
 /// Physically occupies a full 128-bit register, but only the low 8 bytes are
 /// used since we'll eventually widen the 8-bit per lane to 16-bit per lane
 /// for the Score vector
 #[derive(Debug, Clone, Copy)]
-pub struct SseBytes(__m128i);
+pub struct SseBytes<const SSE41: bool>(__m128i);
 
 #[derive(Debug, Clone, Copy)]
-pub struct SseScore(__m128i);
+pub struct SseScore<const SSE41: bool>(__m128i);
 
-impl Backend for BackendSSE {
+impl<const SSE41: bool> Backend for BackendSSE<SSE41> {
     const LANES: usize = 8;
     const LANE_BYTES: usize = 2;
-    type Bytes = SseBytes;
-    type Mask = SseBytes;
-    type Score = SseScore;
+    type Bytes = SseBytes<SSE41>;
+    type Mask = SseBytes<SSE41>;
+    type Score = SseScore<SSE41>;
 
     fn is_available() -> bool {
         let features = crate::cpuid::detect();
-        features.sse2 && features.ssse3 && features.sse41
+        features.sse2 && (!SSE41 || (features.ssse3 && features.sse41))
     }
 
     #[inline(always)]
     unsafe fn widen_mask(m: Self::Mask) -> Self::Score {
-        unsafe { SseScore(_mm_cvtepi8_epi16(m.0)) }
+        // mask bytes are 0 or 0xff, so doubling them sign extends
+        unsafe { SseScore(_mm_unpacklo_epi8(m.0, m.0)) }
     }
 
     #[inline(always)]
@@ -46,7 +58,7 @@ impl Backend for BackendSSE {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            ascii_gap::propagate_8_lane::<BackendSSE>(
+            ascii_gap::propagate_8_lane::<Self>(
                 row,
                 adjacent_row,
                 match_mask,
@@ -71,7 +83,7 @@ impl Backend for BackendSSE {
         gap_extend_penalty: Self::Score,
     ) -> (Self::Score, Self::Score) {
         unsafe {
-            unicode_gap::propagate_unicode_8_lane::<BackendSSE>(
+            unicode_gap::propagate_unicode_8_lane::<Self>(
                 row,
                 adjacent_row,
                 pending_gap_open_mask,
@@ -87,7 +99,7 @@ impl Backend for BackendSSE {
     }
 }
 
-impl SseBytes {
+impl<const SSE41: bool> SseBytes<SSE41> {
     /// Safe page-bounded read of 0..8 bytes into the low 64 bits of an __m128i
     #[inline(always)]
     unsafe fn load_partial_safe(ptr: *const u8, len: usize) -> __m128i {
@@ -126,8 +138,8 @@ impl SseBytes {
     }
 }
 
-impl BytesVec for SseBytes {
-    type Mask = SseBytes;
+impl<const SSE41: bool> BytesVec for SseBytes<SSE41> {
+    type Mask = SseBytes<SSE41>;
 
     #[inline(always)]
     unsafe fn splat(value: u8) -> Self {
@@ -194,7 +206,7 @@ impl BytesVec for SseBytes {
     }
 }
 
-impl MaskVec for SseBytes {
+impl<const SSE41: bool> MaskVec for SseBytes<SSE41> {
     #[inline(always)]
     unsafe fn zero() -> Self {
         unsafe { Self(_mm_setzero_si128()) }
@@ -226,7 +238,7 @@ impl MaskVec for SseBytes {
             //   = [shifted[15], self[0..15]]
             //   = [prev[7], self[0..15]]
             // Low 8 bytes: [prev[7], self[0..7]]. Upper 8 are don't-care.
-            Self(_mm_alignr_epi8::<15>(self.0, shifted))
+            Self(alignr!(15, self.0, shifted))
         }
     }
 
@@ -247,7 +259,7 @@ impl MaskVec for SseBytes {
     }
 }
 
-impl ScoreVec for SseScore {
+impl<const SSE41: bool> ScoreVec for SseScore<SSE41> {
     #[inline(always)]
     unsafe fn zero() -> Self {
         unsafe { Self(_mm_setzero_si128()) }
@@ -262,11 +274,23 @@ impl ScoreVec for SseScore {
     }
     #[inline(always)]
     unsafe fn max(self, other: Self) -> Self {
-        unsafe { Self(_mm_max_epu16(self.0, other.0)) }
+        unsafe {
+            Self(if SSE41 {
+                _mm_max_epu16(self.0, other.0)
+            } else {
+                _mm_adds_epu16(_mm_subs_epu16(self.0, other.0), other.0)
+            })
+        }
     }
     #[inline(always)]
     unsafe fn horizontal_max(self) -> u16 {
         unsafe {
+            if !SSE41 {
+                let m = self.max(Self(_mm_srli_si128::<8>(self.0)));
+                let m = m.max(Self(_mm_srli_si128::<4>(m.0)));
+                let m = m.max(Self(_mm_srli_si128::<2>(m.0)));
+                return _mm_extract_epi16::<0>(m.0) as u16;
+            }
             // PHMINPOSUW finds the minimum; invert to find the max.
             let all_ones = _mm_set1_epi16(-1);
             let inverted = _mm_xor_si128(self.0, all_ones);
@@ -293,13 +317,13 @@ impl ScoreVec for SseScore {
             const { assert!(L >= 0 && L <= 8) };
             Self(match L {
                 0 => self.0,
-                1 => _mm_alignr_epi8::<14>(self.0, prev.0),
-                2 => _mm_alignr_epi8::<12>(self.0, prev.0),
-                3 => _mm_alignr_epi8::<10>(self.0, prev.0),
-                4 => _mm_alignr_epi8::<8>(self.0, prev.0),
-                5 => _mm_alignr_epi8::<6>(self.0, prev.0),
-                6 => _mm_alignr_epi8::<4>(self.0, prev.0),
-                7 => _mm_alignr_epi8::<2>(self.0, prev.0),
+                1 => alignr!(14, self.0, prev.0),
+                2 => alignr!(12, self.0, prev.0),
+                3 => alignr!(10, self.0, prev.0),
+                4 => alignr!(8, self.0, prev.0),
+                5 => alignr!(6, self.0, prev.0),
+                6 => alignr!(4, self.0, prev.0),
+                7 => alignr!(2, self.0, prev.0),
                 8 => prev.0,
                 _ => core::hint::unreachable_unchecked(),
             })
@@ -329,23 +353,23 @@ impl ScoreVec for SseScore {
 
 /// 16-lane u8 scoring (128-bit __m128i), 16-lane u8 input (128-bit __m128i)
 #[derive(Debug, Clone, Copy)]
-pub struct BackendSSEU8;
+pub struct BackendSSEU8<const SSE41: bool>;
 
 #[derive(Debug, Clone, Copy)]
-pub struct SseU8Bytes(__m128i);
+pub struct SseU8Bytes<const SSE41: bool>(__m128i);
 
 #[derive(Debug, Clone, Copy)]
-pub struct SseU8Score(__m128i);
+pub struct SseU8Score<const SSE41: bool>(__m128i);
 
-impl Backend for BackendSSEU8 {
+impl<const SSE41: bool> Backend for BackendSSEU8<SSE41> {
     const LANES: usize = 16;
     const LANE_BYTES: usize = 1;
-    type Bytes = SseU8Bytes;
-    type Mask = SseU8Bytes;
-    type Score = SseU8Score;
+    type Bytes = SseU8Bytes<SSE41>;
+    type Mask = SseU8Bytes<SSE41>;
+    type Score = SseU8Score<SSE41>;
 
     fn is_available() -> bool {
-        BackendSSE::is_available()
+        BackendSSE::<SSE41>::is_available()
     }
 
     #[inline(always)]
@@ -363,7 +387,7 @@ impl Backend for BackendSSEU8 {
         gap_extend_penalty: Self::Score,
     ) -> Self::Score {
         unsafe {
-            ascii_gap::propagate_16_lane::<BackendSSEU8>(
+            ascii_gap::propagate_16_lane::<Self>(
                 row,
                 adjacent_row,
                 match_mask,
@@ -388,7 +412,7 @@ impl Backend for BackendSSEU8 {
         gap_extend_penalty: Self::Score,
     ) -> (Self::Score, Self::Score) {
         unsafe {
-            unicode_gap::propagate_unicode_16_lane::<BackendSSEU8>(
+            unicode_gap::propagate_unicode_16_lane::<Self>(
                 row,
                 adjacent_row,
                 pending_gap_open_mask,
@@ -404,8 +428,8 @@ impl Backend for BackendSSEU8 {
     }
 }
 
-impl BytesVec for SseU8Bytes {
-    type Mask = SseU8Bytes;
+impl<const SSE41: bool> BytesVec for SseU8Bytes<SSE41> {
+    type Mask = SseU8Bytes<SSE41>;
 
     #[inline(always)]
     unsafe fn splat(value: u8) -> Self {
@@ -453,7 +477,7 @@ impl BytesVec for SseU8Bytes {
     }
 }
 
-impl MaskVec for SseU8Bytes {
+impl<const SSE41: bool> MaskVec for SseU8Bytes<SSE41> {
     #[inline(always)]
     unsafe fn zero() -> Self {
         unsafe { Self(_mm_setzero_si128()) }
@@ -478,7 +502,7 @@ impl MaskVec for SseU8Bytes {
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         // Full 16-byte register, full 16 meaningful bytes. alignr_epi8::<15>
         // gives [prev[15], self[0..15]] which is the desired result.
-        unsafe { Self(_mm_alignr_epi8::<15>(self.0, prev.0)) }
+        unsafe { Self(alignr!(15, self.0, prev.0)) }
     }
 
     #[cfg(test)]
@@ -498,7 +522,7 @@ impl MaskVec for SseU8Bytes {
     }
 }
 
-impl ScoreVec for SseU8Score {
+impl<const SSE41: bool> ScoreVec for SseU8Score<SSE41> {
     #[inline(always)]
     unsafe fn zero() -> Self {
         unsafe { Self(_mm_setzero_si128()) }
@@ -523,7 +547,7 @@ impl ScoreVec for SseU8Score {
             let m = _mm_max_epu8(m, _mm_srli_si128::<4>(m));
             let m = _mm_max_epu8(m, _mm_srli_si128::<2>(m));
             let m = _mm_max_epu8(m, _mm_srli_si128::<1>(m));
-            (_mm_extract_epi8::<0>(m) as u8) as u16
+            (_mm_cvtsi128_si32(m) as u8) as u16
         }
     }
     #[inline(always)]
@@ -544,21 +568,21 @@ impl ScoreVec for SseU8Score {
             const { assert!(L >= 0 && L <= 16) };
             Self(match L {
                 0 => self.0,
-                1 => _mm_alignr_epi8::<15>(self.0, prev.0),
-                2 => _mm_alignr_epi8::<14>(self.0, prev.0),
-                3 => _mm_alignr_epi8::<13>(self.0, prev.0),
-                4 => _mm_alignr_epi8::<12>(self.0, prev.0),
-                5 => _mm_alignr_epi8::<11>(self.0, prev.0),
-                6 => _mm_alignr_epi8::<10>(self.0, prev.0),
-                7 => _mm_alignr_epi8::<9>(self.0, prev.0),
-                8 => _mm_alignr_epi8::<8>(self.0, prev.0),
-                9 => _mm_alignr_epi8::<7>(self.0, prev.0),
-                10 => _mm_alignr_epi8::<6>(self.0, prev.0),
-                11 => _mm_alignr_epi8::<5>(self.0, prev.0),
-                12 => _mm_alignr_epi8::<4>(self.0, prev.0),
-                13 => _mm_alignr_epi8::<3>(self.0, prev.0),
-                14 => _mm_alignr_epi8::<2>(self.0, prev.0),
-                15 => _mm_alignr_epi8::<1>(self.0, prev.0),
+                1 => alignr!(15, self.0, prev.0),
+                2 => alignr!(14, self.0, prev.0),
+                3 => alignr!(13, self.0, prev.0),
+                4 => alignr!(12, self.0, prev.0),
+                5 => alignr!(11, self.0, prev.0),
+                6 => alignr!(10, self.0, prev.0),
+                7 => alignr!(9, self.0, prev.0),
+                8 => alignr!(8, self.0, prev.0),
+                9 => alignr!(7, self.0, prev.0),
+                10 => alignr!(6, self.0, prev.0),
+                11 => alignr!(5, self.0, prev.0),
+                12 => alignr!(4, self.0, prev.0),
+                13 => alignr!(3, self.0, prev.0),
+                14 => alignr!(2, self.0, prev.0),
+                15 => alignr!(1, self.0, prev.0),
                 16 => prev.0,
                 _ => core::hint::unreachable_unchecked(),
             })
