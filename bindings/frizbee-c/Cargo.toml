@@ -15,7 +15,7 @@ name = "frizbee"
 capi = []
 
 [dependencies]
-frizbee = { path = "../..", default-features = false, features = ["std"] }
+frizbee = { path = "../..", default-features = false, features = ["std", "typos"] }
 
 [package.metadata.capi]
 min_version = "0.10.19"

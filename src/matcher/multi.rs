@@ -339,6 +339,7 @@ mod tests {
         assert_eq!(matcher.match_list(&["foobar"]).len(), 1);
     }
 
+    #[cfg(feature = "typos")]
     #[test]
     fn pattern_max_typos_override_beats_config() {
         // "helloz" has a 'z' absent from "hello", so it needs one typo to
@@ -363,6 +364,7 @@ mod tests {
         assert_eq!(lenient.iter().map(|m| m.index).collect::<Vec<_>>(), vec![0]);
     }
 
+    #[cfg(feature = "typos")]
     #[test]
     fn pattern_max_typos_override_applies_per_pattern() {
         // "foo" inherits the config's zero-typo budget while "barz" (with its
@@ -381,6 +383,7 @@ mod tests {
         assert_eq!(matches.iter().map(|m| m.index).collect::<Vec<_>>(), vec![0]);
     }
 
+    #[cfg(feature = "typos")]
     #[test]
     fn set_config_preserves_pattern_max_typos_override() {
         let haystacks = ["helloz"];

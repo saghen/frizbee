@@ -108,6 +108,9 @@ where
 
         let (matched, start_pos, end_pos) = match max_typos {
             None => (true, 0, haystack.len()),
+            Some(_) if !cfg!(feature = "typos") => {
+                self.prefilter_haystack::<0, UNICODE>(haystack, 0)
+            }
             Some(max_typos) => self.prefilter_haystack::<MANY_TYPOS, UNICODE>(haystack, max_typos),
         };
         if !matched {
@@ -281,6 +284,7 @@ mod tests {
         assert_eq!(matches.len(), 1);
     }
 
+    #[cfg(feature = "typos")]
     #[test]
     fn greedy_fallback_membership_agrees_between_match_list_and_indices() {
         // the match window exceeds MAX_HAYSTACK_LEN so the greedy fallback
@@ -296,6 +300,7 @@ mod tests {
         assert!(indices[0].indices.is_empty());
     }
 
+    #[cfg(feature = "typos")]
     #[test]
     fn penalty_above_u8_range_is_not_truncated() {
         // mismatch_penalty 260 previously wrapped to 4 in the u8 backend's

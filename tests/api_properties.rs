@@ -558,6 +558,7 @@ fn long_prefiltered_fallback_preserves_scores_and_original_byte_offsets() {
     assert_eq!(filtered_indices[0].indices, vec![1203, 2, 1]);
 }
 
+#[cfg(feature = "typos")]
 #[test]
 fn unicode_matcher_typo_prefilter_counts_scalar_values() {
     let haystacks = ["ن", "😀", "x"];

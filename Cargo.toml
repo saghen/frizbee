@@ -54,10 +54,13 @@ bench = false
 serde = { version = "1.0", default-features = false, features = ["derive", "alloc"], optional = true }
 
 [features]
-default = ["std"]
+default = ["std", "typos"]
 # required for `Matcher::match_list_parallel`
 std = ["serde?/std"]
 serde = ["dep:serde"]
+# typo resistance. Without it `max_typos` is treated as `Some(0)` and only the 0 typo
+# loops are built
+typos = []
 match_end_col = []
 safe_read = []
 # Benchmark-only: honour FRIZBEE_FORCE_BACKEND=avx2|sse41|sse2|scalar to cap the SIMD tier
