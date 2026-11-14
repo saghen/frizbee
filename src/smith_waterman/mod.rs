@@ -153,9 +153,15 @@ kernel!(
 );
 #[cfg(target_arch = "x86_64")]
 kernel!(
-    SmithWatermanSSE,
-    ScoreWidth<BackendSSEU8, BackendSSE>,
+    SmithWatermanSSE41,
+    ScoreWidth<BackendSSEU8<true>, BackendSSE<true>>,
     target_feature = "sse2,ssse3,sse4.1"
+);
+#[cfg(target_arch = "x86_64")]
+kernel!(
+    SmithWatermanSSE2,
+    ScoreWidth<BackendSSEU8<false>, BackendSSE<false>>,
+    target_feature = "sse2"
 );
 #[cfg(target_arch = "aarch64")]
 kernel!(

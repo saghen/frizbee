@@ -9,7 +9,7 @@ fn main() {
     let simd_guaranteed = match arch.as_str() {
         "aarch64" => has("neon"),
         "wasm32" => has("simd128"),
-        "x86_64" => has("ssse3") && has("sse4.1"),
+        "x86_64" => has("sse2"),
         _ => false,
     };
     if !simd_guaranteed || std::env::var("CARGO_FEATURE_FORCE_BACKEND").is_ok() {

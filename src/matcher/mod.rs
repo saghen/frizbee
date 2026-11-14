@@ -33,7 +33,9 @@ macro_rules! dispatch {
             #[cfg(target_arch = "x86_64")]
             MatcherBackend::AVX($m) => $body,
             #[cfg(target_arch = "x86_64")]
-            MatcherBackend::SSE($m) => $body,
+            MatcherBackend::SSE41($m) => $body,
+            #[cfg(target_arch = "x86_64")]
+            MatcherBackend::SSE2($m) => $body,
             #[cfg(target_arch = "aarch64")]
             MatcherBackend::NEON($m) => $body,
             #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
@@ -477,8 +479,11 @@ impl Matcher {
             if MatcherAVX::is_available() {
                 return MatcherBackend::AVX(unsafe { MatcherAVX::build(needle, config) });
             }
-            if MatcherSSE::is_available() {
-                return MatcherBackend::SSE(unsafe { MatcherSSE::build(needle, config) });
+            if MatcherSSE41::is_available() {
+                return MatcherBackend::SSE41(unsafe { MatcherSSE41::build(needle, config) });
+            }
+            if MatcherSSE2::is_available() {
+                return MatcherBackend::SSE2(unsafe { MatcherSSE2::build(needle, config) });
             }
         }
 
