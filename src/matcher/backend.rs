@@ -29,12 +29,9 @@ use crate::smith_waterman::SmithWatermanScalar;
 use crate::smith_waterman::SmithWatermanWasm;
 #[cfg(target_arch = "x86_64")]
 use crate::smith_waterman::{
-    SmithWatermanAVX, SmithWatermanAVX512, SmithWatermanAVX512U8, SmithWatermanSSE2,
-    SmithWatermanSSE41,
+    SmithWatermanAVX, SmithWatermanAVX512, SmithWatermanSSE2, SmithWatermanSSE41,
 };
 
-#[cfg(target_arch = "x86_64")]
-pub type MatcherAVX512U8 = MatcherImpl<PrefilterAVX512, SmithWatermanAVX512U8>;
 #[cfg(target_arch = "x86_64")]
 pub type MatcherAVX512 = MatcherImpl<PrefilterAVX512, SmithWatermanAVX512>;
 #[cfg(target_arch = "x86_64")]
@@ -50,10 +47,9 @@ pub type MatcherWasm = MatcherImpl<PrefilterWasm, SmithWatermanWasm>;
 #[cfg(scalar_fallback)]
 pub type MatcherScalar = MatcherImpl<PrefilterScalar, SmithWatermanScalar>;
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum MatcherBackend {
-    #[cfg(target_arch = "x86_64")]
-    AVX512U8(MatcherAVX512U8),
     #[cfg(target_arch = "x86_64")]
     AVX512(MatcherAVX512),
     #[allow(clippy::upper_case_acronyms)]
@@ -131,14 +127,8 @@ macro_rules! impl_specialized {
 #[cfg(target_arch = "x86_64")]
 impl_specialized!(
     PrefilterAVX512,
-    SmithWatermanAVX512U8,
-    target_feature = "avx512f,avx512bw,avx512vbmi,bmi1,bmi2"
-);
-#[cfg(target_arch = "x86_64")]
-impl_specialized!(
-    PrefilterAVX512,
     SmithWatermanAVX512,
-    target_feature = "avx512f,avx512bw,bmi1,bmi2"
+    target_feature = "avx512f,avx512bw,avx512vbmi,bmi1,bmi2"
 );
 #[cfg(target_arch = "x86_64")]
 impl_specialized!(PrefilterAVX, SmithWatermanAVX, target_feature = "avx2");

@@ -59,10 +59,6 @@ impl<B: Backend> SmithWaterman<B> {
         }
     }
 
-    pub(crate) fn is_available() -> bool {
-        B::is_available()
-    }
-
     #[inline(always)]
     pub(crate) fn score_haystack_indices(
         &mut self,
