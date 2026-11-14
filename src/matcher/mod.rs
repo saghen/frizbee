@@ -61,7 +61,8 @@ macro_rules! dispatch {
 #[rustfmt::skip]
 macro_rules! dispatch_typos {
     ($max_typos:expr, $needs_unicode:expr, |$typos:ident, $unicode:ident| $body:expr) => {
-        match ($max_typos, $needs_unicode) {
+        // constant without the `typos` feature, so only the 0 typo loops are built
+        match (if cfg!(feature = "typos") { $max_typos } else { Some(0) }, $needs_unicode) {
             (None, false)     => { const $typos: u16 = NO_PREFILTER; const $unicode: bool = false; $body }
             (None, true)      => { const $typos: u16 = NO_PREFILTER; const $unicode: bool = true;  $body }
             (Some(0), false)  => { const $typos: u16 = 0;            const $unicode: bool = false; $body }
@@ -217,7 +218,10 @@ impl Matcher {
         if source.needle.is_empty() {
             return None;
         }
-        let config = source.config.resolve(config);
+        let mut config = source.config.resolve(config);
+        if !cfg!(feature = "typos") {
+            config.max_typos = Some(0);
+        }
         Some(CompiledPattern {
             negated: source.negated,
             needs_unicode: config.unicode.respects_unicode_for(&source.needle),
@@ -596,6 +600,19 @@ mod tests {
         assert!(!matches.is_empty());
     }
 
+    #[cfg(not(feature = "typos"))]
+    #[test]
+    fn max_typos_is_ignored_without_typos_feature() {
+        let haystacks = ["deadbeef", "deadbf"];
+        for max_typos in [None, Some(1)] {
+            let config = Config::default().max_typos(max_typos);
+            let mut matcher = Matcher::new("deadbe", &config);
+            assert_eq!(matcher.match_list(&haystacks).len(), 1);
+            assert_eq!(matcher.match_list_indices(&haystacks).len(), 1);
+        }
+    }
+
+    #[cfg(feature = "typos")]
     #[test]
     fn test_basic() {
         let needle = "deadbe";

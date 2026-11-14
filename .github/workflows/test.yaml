@@ -29,6 +29,9 @@ jobs:
       - name: Run tests
         run: cargo test --verbose
 
+      - name: Run tests (no typos)
+        run: cargo test --verbose --no-default-features --features std
+
   wasm:
     runs-on: ubuntu-latest
 

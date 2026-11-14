@@ -246,7 +246,15 @@ Unlike FZF/Nucleo, Frizbee will not match `a` against `á`.
 Frizbee supports `no_std` (requires `alloc`) by disabling the default `std` feature, in which case `Matcher::match_list_parallel` is unavailable.
 
 ```toml
-frizbee = { version = "...", default-features = false }
+frizbee = { version = "...", default-features = false, features = ["typos"] }
+```
+
+## Binary size
+
+Each SIMD tier gets its own matching loop per typo count, so a Rust program matching `&[&str]` carries ~470KB of Frizbee code on x86-64 (~100KB on ARM64). Disabling the default `typos` feature builds only the 0 typo loops, leaving ~160KB on x86-64.
+
+```toml
+frizbee = { version = "...", default-features = false, features = ["std"] }
 ```
 
 ## Safety
