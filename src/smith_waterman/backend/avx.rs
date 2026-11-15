@@ -499,8 +499,8 @@ impl MaskVec for AvxU8Bytes {
     #[inline(always)]
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         unsafe {
-            // permute2x128(prev, self, 0x21) = (low = prev_high, high = self_low)
-            // alignr_epi8 then runs per 128-bit lane, splicing
+            // permute2x128(prev, self, 0x21) = (low = prev_high, high =
+            // self_low) alignr_epi8 then runs per 128-bit lane, splicing
             //   low  = [prev[31], self[0..15]]
             //   high = [self[15], self[16..30]]
             // which together form the desired right-shift-by-1-byte result.

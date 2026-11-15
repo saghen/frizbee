@@ -58,8 +58,8 @@ mod tests {
     fn exact_matches_whole_haystack_only() {
         let haystacks = ["foo", "foobar", "xfoo", "FOO"];
         let got = scores(Matching::Exact, "foo", &haystacks);
-        // "foo" (exact, case match) and "FOO" (exact, case-insensitive) match; nothing
-        // else.
+        // "foo" (exact, case match) and "FOO" (exact, case-insensitive) match;
+        // nothing else.
         assert_eq!(got.iter().map(|m| m.0).collect::<Vec<_>>(), vec![0, 3]);
         assert!(got.iter().all(|m| m.2), "all exact");
     }
@@ -97,7 +97,8 @@ mod tests {
 
     #[test]
     fn exact_and_prefix_scores_match_fuzzy() {
-        // For matches anchored at position 0, the literal score equals the fuzzy score.
+        // For matches anchored at position 0, the literal score equals the
+        // fuzzy score.
         for (needle, haystack) in [
             ("foo", "foo"),
             ("foo", "foobar"),
@@ -120,7 +121,8 @@ mod tests {
 
     #[test]
     fn test_score_multibyte_needle() {
-        // Interior "bar" in "foobar": three matched bytes, no prefix or delimiter.
+        // Interior "bar" in "foobar": three matched bytes, no prefix or
+        // delimiter.
         assert_eq!(get_score("bar", "foobar"), 3 * CHAR_SCORE);
         // "bar" after a delimiter earns the delimiter bonus on its first byte.
         assert_eq!(
@@ -131,8 +133,8 @@ mod tests {
 
     #[test]
     fn substring_picks_best_scoring_occurrence() {
-        // In "ab_ab" the position-0 occurrence (prefix bonus) must beat the one after
-        // '_' (delimiter bonus).
+        // In "ab_ab" the position-0 occurrence (prefix bonus) must beat the one
+        // after '_' (delimiter bonus).
         assert_eq!(get_score("ab", "ab_ab"), 2 * CHAR_SCORE + PREFIX_BONUS);
     }
 
@@ -195,7 +197,8 @@ mod tests {
 
     #[test]
     fn substring_scan_handles_chunk_boundaries() {
-        // Exercise occurrences straddling the SIMD lane boundaries of every backend.
+        // Exercise occurrences straddling the SIMD lane boundaries of every
+        // backend.
         for prefix_len in [0usize, 1, 7, 8, 15, 16, 31, 32, 63, 64, 65] {
             let haystack = format!("{}bar", "x".repeat(prefix_len));
             let got = scores(Matching::Substring, "bar", &[&haystack]);
@@ -224,8 +227,8 @@ mod tests {
 
     #[test]
     fn test_score_exact_match() {
-        // Unlike the raw Smith-Waterman scorer, the literal scorer adds the exact-match
-        // bonus when the run covers the whole haystack.
+        // Unlike the raw Smith-Waterman scorer, the literal scorer adds the
+        // exact-match bonus when the run covers the whole haystack.
         assert_eq!(
             get_score("a", "a"),
             CHAR_SCORE + PREFIX_BONUS + EXACT_MATCH_BONUS
@@ -281,7 +284,8 @@ mod tests {
 
     #[test]
     fn case_sensitive_scoring_rejects_folded_bytes() {
-        // A digit prefix keeps the seed byte free of capitalization/delimiter bonuses.
+        // A digit prefix keeps the seed byte free of capitalization/delimiter
+        // bonuses.
         assert_eq!(
             get_score_case("A", "0A", CaseMatching::Respect),
             Some(CHAR_SCORE)
@@ -293,9 +297,9 @@ mod tests {
         );
     }
 
-    // Unicode matching: a non-ASCII needle takes the per-codepoint path. Multibyte
-    // characters are scored once (not once per UTF-8 byte) and case folding
-    // compares whole codepoints.
+    // Unicode matching: a non-ASCII needle takes the per-codepoint path.
+    // Multibyte characters are scored once (not once per UTF-8 byte) and case
+    // folding compares whole codepoints.
 
     #[test]
     fn test_score_unicode_per_codepoint() {
@@ -304,8 +308,8 @@ mod tests {
             get_score("é", "é"),
             CHAR_SCORE + PREFIX_BONUS + EXACT_MATCH_BONUS
         );
-        // Two codepoints (é is 2 bytes, x is 1) score as two characters, not three
-        // bytes.
+        // Two codepoints (é is 2 bytes, x is 1) score as two characters, not
+        // three bytes.
         assert_eq!(
             get_score("éx", "éx"),
             2 * CHAR_SCORE + PREFIX_BONUS + EXACT_MATCH_BONUS
@@ -316,8 +320,8 @@ mod tests {
 
     #[test]
     fn unicode_case_insensitive_fold() {
-        // Whole-codepoint case folding across several scripts (é/É, Cyrillic и/И, Greek
-        // α/Α).
+        // Whole-codepoint case folding across several scripts (é/É, Cyrillic
+        // и/И, Greek α/Α).
         for (needle, upper) in [("é", "É"), ("и", "И"), ("α", "Α")] {
             assert!(
                 get_score_case(needle, upper, CaseMatching::Ignore).is_some(),
@@ -335,8 +339,8 @@ mod tests {
     fn unicode_rejects_hybrid_case_bytes() {
         // Cherokee case pairs are the same length but differ in every byte:
         //   'Ꭰ' U+13A0 = E1 8E A0, 'ꭰ' U+AB70 = EA AD B0.
-        // A per-byte verifier would accept the hybrid E1 AD B0 (= U+1B70 '᭰'); the
-        // codepoint verifier must reject it while still matching the true
+        // A per-byte verifier would accept the hybrid E1 AD B0 (= U+1B70 '᭰');
+        // the codepoint verifier must reject it while still matching the true
         // lowercase form.
         assert_eq!(
             get_score_case("Ꭰ", "\u{1b70}", CaseMatching::Ignore),
@@ -351,8 +355,8 @@ mod tests {
 
     #[test]
     fn unicode_length_changing_fold_is_case_sensitive() {
-        // 'ß' folds to "SS" (a length change), so it is treated case-sensitively: it
-        // matches only itself, never "SS"/"ss".
+        // 'ß' folds to "SS" (a length change), so it is treated
+        // case-sensitively: it matches only itself, never "SS"/"ss".
         assert!(get_score_case("ß", "ß", CaseMatching::Ignore).is_some());
         assert_eq!(get_score_case("ß", "SS", CaseMatching::Ignore), None);
         assert_eq!(get_score_case("ß", "ss", CaseMatching::Ignore), None);
@@ -360,7 +364,8 @@ mod tests {
 
     #[test]
     fn unicode_indices_span_whole_utf8_run() {
-        // Matched indices are byte offsets covering the full UTF-8 run, reversed.
+        // Matched indices are byte offsets covering the full UTF-8 run,
+        // reversed.
         let matches =
             Matcher::new("é다", &config(Matching::Substring)).match_list_indices(&["xxé다yy"]);
         assert_eq!(matches.len(), 1);

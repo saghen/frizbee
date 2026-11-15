@@ -173,8 +173,8 @@ impl PatternsArg {
 /// your list.
 #[pyclass(name = "Matcher", module = "frizbee")]
 pub(crate) struct PyMatcher {
-    // Compiled SIMD backends require 64-byte alignment (AVX-512 vectors), which CPython does not
-    // guarantee for the pyclass payload itself, so box
+    // Compiled SIMD backends require 64-byte alignment (AVX-512 vectors), which
+    // CPython does not guarantee for the pyclass payload itself, so box
     inner: Box<frizbee::Matcher>,
     /// Truncates results after sorting; `None` means unlimited
     limit: Option<u32>,

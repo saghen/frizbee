@@ -72,7 +72,8 @@ struct haystack_str_t(frizbee_str_t);
 
 impl AsRef<str> for haystack_str_t {
     fn as_ref(&self) -> &str {
-        // SAFETY: the caller promised the bytes are valid UTF-8 (see `frizbee_str_t`)
+        // SAFETY: the caller promised the bytes are valid UTF-8 (see
+        // `frizbee_str_t`)
         unsafe { str_from_c(self.0) }
     }
 }

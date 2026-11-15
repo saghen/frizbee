@@ -510,8 +510,8 @@ impl Scoring {
             return usize::MAX;
         }
 
-        // The diagonal transiently holds the score plus the mismatch penalty before
-        // subtracting it
+        // The diagonal transiently holds the score plus the mismatch penalty
+        // before subtracting it
         let headroom = u16::MAX
             .saturating_sub(self.max_one_time_bonus())
             .saturating_sub(self.prefix_bonus)

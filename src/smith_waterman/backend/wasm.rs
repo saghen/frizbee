@@ -66,7 +66,8 @@ impl Backend for BackendWasm {
     type Score = WasmScore;
 
     fn is_available() -> bool {
-        // simd128 must be enabled at compile-time, it cannot be runtime-detected
+        // simd128 must be enabled at compile-time, it cannot be
+        // runtime-detected
         true
     }
 
@@ -436,7 +437,8 @@ impl BytesVec for WasmU8Bytes {
                 1..=7 => u64x2(load_u64_partial_safe(ptr, remaining), 0),
                 9..=15 => {
                     // low half loads bytes 0..8
-                    // high half re-loads the last 8 bytes and shifts them into place
+                    // high half re-loads the last 8 bytes and shifts them into
+                    // place
                     let lo = v128_load64_zero(ptr as *const u64);
                     let hi = v128_load64_zero(ptr.add(remaining - 8) as *const u64);
                     let shift = u8x16_splat((16 - remaining) as u8);
@@ -543,7 +545,8 @@ impl ScoreVec for WasmU8Score {
     }
     #[inline(always)]
     unsafe fn horizontal_max(self) -> u16 {
-        // pairwise maxes, halving the lane count each step (16 -> 8 -> 4 -> 2 -> 1)
+        // pairwise maxes, halving the lane count each step (16 -> 8 -> 4 -> 2
+        // -> 1)
         let m = u8x16_max(self.0, u64x2_shuffle::<1, 1>(self.0, self.0));
         let m = u8x16_max(m, u32x4_shuffle::<1, 1, 1, 1>(m, m));
         let m = u8x16_max(m, u16x8_shuffle::<1, 1, 1, 1, 1, 1, 1, 1>(m, m));

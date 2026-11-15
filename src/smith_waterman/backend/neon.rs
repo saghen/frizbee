@@ -256,9 +256,9 @@ impl ScoreVec for NeonScore {
     unsafe fn shift_right_padded<const L: i32>(self, prev: Self) -> Self {
         unsafe {
             const { assert!(L >= 0 && L <= 8) };
-            // vextq_u16(prev, self, N) takes 8 u16s starting at lane N of (prev || self).
-            // For a right shift by L lanes filled from prev, we want lanes
-            //   (8 - L) .. (8 - L + 8) of (prev || self), i.e. N = 8 - L.
+            // vextq_u16(prev, self, N) takes 8 u16s starting at lane N of (prev
+            // || self). For a right shift by L lanes filled from prev, we want
+            // lanes   (8 - L) .. (8 - L + 8) of (prev || self), i.e. N = 8 - L.
             Self(match L {
                 0 => self.0,
                 1 => vextq_u16::<7>(prev.0, self.0),

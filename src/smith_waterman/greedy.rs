@@ -154,8 +154,8 @@ mod tests {
 
     #[test]
     fn huge_gap_saturates_instead_of_overflowing() {
-        // the gap penalty exceeds u16::MAX, so the score saturates to 0 before the case
-        // bonus
+        // the gap penalty exceeds u16::MAX, so the score saturates to 0 before
+        // the case bonus
         let scoring = Scoring {
             gap_extend_penalty: u16::MAX / 2 + 1,
             ..Scoring::default()

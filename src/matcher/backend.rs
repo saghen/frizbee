@@ -82,15 +82,15 @@ pub enum MatcherBackend {
     WasmU8(MatcherWasmU8),
     #[cfg(all(target_arch = "wasm32", target_feature = "simd128"))]
     Wasm(MatcherWasm),
-    // simd128 cannot be runtime-detected, so when it's statically enabled the scalar
-    // fallback is unreachable
+    // simd128 cannot be runtime-detected, so when it's statically enabled the
+    // scalar fallback is unreachable
     #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
     ScalarU8(MatcherScalarU8),
     #[cfg(not(all(target_arch = "wasm32", target_feature = "simd128")))]
     Scalar(MatcherScalar),
 
-    // Literal matching backends (exact / prefix / suffix / substring). Selected when
-    // `Config::matching` is not `Matching::Fuzzy`.
+    // Literal matching backends (exact / prefix / suffix / substring). Selected
+    // when `Config::matching` is not `Matching::Fuzzy`.
     #[cfg(target_arch = "x86_64")]
     LiteralAVX512(LiteralAVX512),
     #[cfg(target_arch = "x86_64")]

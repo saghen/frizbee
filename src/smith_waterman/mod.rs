@@ -392,8 +392,8 @@ mod tests {
     #[test]
     #[cfg(feature = "match_end_col")]
     fn test_end_col_unicode() {
-        // The match column is the scalar start of "é" (byte 2), not the unwritten
-        // byte-length row that previously returned 0
+        // The match column is the scalar start of "é" (byte 2), not the
+        // unwritten byte-length row that previously returned 0
         assert_eq!(get_end_col_unicode("é", "xxé"), 2);
         assert_eq!(get_end_col_unicode("abc", "abcdef"), 2);
     }
@@ -536,8 +536,8 @@ mod tests {
     #[test]
     fn score_fits_in_u8_bounds_gap_extend_doubling() {
         assert!(score_fits_in_u8(4, &Scoring::default()));
-        // The gap propagators scale the gap extend penalty by up to 64x on the widest
-        // u8 backend, so 8 * 64 = 512 would wrap the u8 gap penalty
+        // The gap propagators scale the gap extend penalty by up to 64x on the
+        // widest u8 backend, so 8 * 64 = 512 would wrap the u8 gap penalty
         let scoring = Scoring {
             gap_extend_penalty: 8,
             ..Scoring::default()

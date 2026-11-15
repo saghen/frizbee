@@ -611,8 +611,8 @@ fn case_matching_modes_apply_to_matches_and_indices() {
 
 #[test]
 fn long_needle_scores_saturate() {
-    // Needles past `max_needle_len` match with scores capped at u16::MAX instead
-    // of panicking
+    // Needles past `max_needle_len` match with scores capped at u16::MAX
+    // instead of panicking
     let scoring = Scoring {
         match_score: u16::MAX / 4 + 1,
         ..Scoring::default()

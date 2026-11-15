@@ -147,8 +147,8 @@ impl Pattern {
         let substring = !prefix && strip_first(&mut rest, '\'');
         let suffix = strip_last(&mut rest, '$');
 
-        // Escaped special characters collapse to the literal character; the backslash
-        // is kept before anything else (including another backslash)
+        // Escaped special characters collapse to the literal character; the
+        // backslash is kept before anything else (including another backslash)
         let is_special = |c: char| matches!(c, '!' | '^' | '\'' | '$') || c.is_whitespace();
         let mut needle = String::with_capacity(atom.len());
         for &(c, escaped) in rest {
@@ -163,8 +163,9 @@ impl Pattern {
             (true, false, _) => Some(Matching::Prefix),
             (false, true, _) => Some(Matching::Suffix),
             (false, false, true) => Some(Matching::Substring),
-            // Negating a fuzzy match excludes far more than users typically expect,
-            // so bare negated atoms match substrings, like fzf and nucleo
+            // Negating a fuzzy match excludes far more than users typically
+            // expect, so bare negated atoms match substrings, like fzf and
+            // nucleo
             _ if negated => Some(Matching::Substring),
             _ => None,
         };
@@ -216,7 +217,8 @@ impl Pattern {
 
         for (i, c) in query.char_indices() {
             if escaped {
-                // Previous char was an escaping backslash; keep this char in the atom
+                // Previous char was an escaping backslash; keep this char in
+                // the atom
                 escaped = false;
             } else if c == '\\' {
                 start.get_or_insert(i);
@@ -387,7 +389,8 @@ mod tests {
 
     #[test]
     fn parse_query_escaped_backslash_before_space_splits() {
-        // The escaped backslash consumes the escape, so the space still separates atoms
+        // The escaped backslash consumes the escape, so the space still
+        // separates atoms
         let patterns = Pattern::parse_query("foo\\\\ bar");
         assert_eq!(patterns.len(), 2);
         assert_eq!(patterns[0].needle, "foo\\\\");

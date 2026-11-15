@@ -113,7 +113,8 @@ pub fn k_merge_matches_by<O: MergeOrder>(runs: Vec<Vec<Match>>) -> Vec<Match> {
         let next_match_idx = heap[0].match_idx + 1;
         merged.push(heap[0].head);
 
-        // Advance the winning run in place; only remove it when it is exhausted.
+        // Advance the winning run in place; only remove it when it is
+        // exhausted.
         if let Some(&head) = runs[run_idx].get(next_match_idx) {
             heap[0].match_idx = next_match_idx;
             heap[0].head = head;

@@ -88,7 +88,8 @@ extern "C" {
 /// Reads `obj[key]`, mapping `undefined`/`null` to `None` (both mean "use the
 /// default", like serde's treatment of `Option`)
 pub(crate) fn get_opt(obj: &JsValue, key: &str) -> Option<JsValue> {
-    // Reflect::get only throws when obj is not an object; every caller checks first
+    // Reflect::get only throws when obj is not an object; every caller checks
+    // first
     let value = Reflect::get(obj, &JsValue::from_str(key)).unwrap_throw();
     (!value.is_undefined() && !value.is_null()).then_some(value)
 }

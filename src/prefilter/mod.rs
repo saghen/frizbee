@@ -318,8 +318,8 @@ mod tests {
 
     #[test]
     fn unicode_prefilter_decoy_last_byte_does_not_hide_case_flipped_match() {
-        // '٩' (0xD9 0xA9) shares 'é''s (0xC3 0xA9) last byte, while 'É' only matches
-        // case flipped
+        // '٩' (0xD9 0xA9) shares 'é''s (0xC3 0xA9) last byte, while 'É' only
+        // matches case flipped
         assert_eq!("٩".as_bytes()[1], "é".as_bytes()[1]);
         assert_eq!(unicode_result_generic("é", "٩É", false), (true, 2, 4));
         assert!(!unicode_result_generic("é", "٩É", true).0);
@@ -523,8 +523,8 @@ mod tests {
 
     #[test]
     fn unicode_mixed_width_matches_oracle() {
-        // needles that mix char byte widths so a width change happens mid-scan, which
-        // previously misaligned the SIMD window on the 0-typo path
+        // needles that mix char byte widths so a width change happens mid-scan,
+        // which previously misaligned the SIMD window on the 0-typo path
         let needles = ["aé", "éa", "aébc", "é✓", "✓é", "a✓é", "é😀x", "aXé😀"];
         let haystacks = [
             "",

@@ -136,8 +136,8 @@ impl<'a> Iterator for AlignmentPathIter<'a> {
         let haystack_idx = self.col_idx - self.lanes_per_chunk;
         let current_pos = (self.row_idx - 1, haystack_idx + self.haystack_start_pos);
 
-        // Cannot move up or left when on a continuation byte (multi-byte unicode char)
-        // so walk left
+        // Cannot move up or left when on a continuation byte (multi-byte
+        // unicode char) so walk left
         if let Some(haystack) = self.unicode_haystack
             && haystack
                 .get(haystack_idx)

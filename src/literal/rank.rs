@@ -322,8 +322,8 @@ mod tests {
 
     #[test]
     fn prefers_rarer_bytes_over_position() {
-        // 'z' is far rarer than 'a', so it must be chosen even though it is neither
-        // first nor last.
+        // 'z' is far rarer than 'a', so it must be chosen even though it is
+        // neither first nor last.
         assert!(RANK[b'z' as usize] < RANK[b'a' as usize]);
         let (a, b) = rare_byte_offsets(b"aazaa");
         assert!(

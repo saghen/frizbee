@@ -379,9 +379,9 @@ mod tests {
 
     #[test]
     fn greedy_fallback_membership_agrees_between_match_list_and_indices() {
-        // the match window exceeds MAX_HAYSTACK_LEN so the greedy fallback runs, and it
-        // can't find 'c': both APIs must still return the prefiltered haystack, with
-        // score 0 and no indices
+        // the match window exceeds MAX_HAYSTACK_LEN so the greedy fallback
+        // runs, and it can't find 'c': both APIs must still return the
+        // prefiltered haystack, with score 0 and no indices
         let haystack = format!("a{}b", "z".repeat(1100));
         let config = Config::default().max_typos(Some(1));
         let matches = Matcher::new("abc", &config).match_list(&[haystack.as_str()]);
@@ -394,8 +394,8 @@ mod tests {
 
     #[test]
     fn penalty_above_u8_range_is_not_truncated() {
-        // mismatch_penalty 260 previously wrapped to 4 in the u8 backend's splat,
-        // so raising the penalty raised the score
+        // mismatch_penalty 260 previously wrapped to 4 in the u8 backend's
+        // splat, so raising the penalty raised the score
         let score = |mismatch_penalty| {
             let config = Config::default().max_typos(Some(1)).scoring(Scoring {
                 mismatch_penalty,
@@ -408,8 +408,9 @@ mod tests {
 
     #[test]
     fn zero_gap_capitalization_scores_do_not_saturate_u8() {
-        // with no gap penalties, every matched char can earn the full capitalization
-        // bonus, so the u8 backend's 255 ceiling must not be selected
+        // with no gap penalties, every matched char can earn the full
+        // capitalization bonus, so the u8 backend's 255 ceiling must not be
+        // selected
         let config = Config::default().scoring(Scoring {
             match_score: 40,
             capitalization_bonus: 40,

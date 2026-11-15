@@ -146,8 +146,8 @@ mod backend_parity {
             ("다", "가나다라마"),
             ("z", "abcdefghijklmnopqrstuvwxyz"),
             ("FoO", "prefix_FoO_FOO_foo"),
-            // Two-byte prefilter stress: common first byte, len 1/2, first == last, match at the
-            // end, and overlapping occurrences.
+            // Two-byte prefilter stress: common first byte, len 1/2, first ==
+            // last, match at the end, and overlapping occurrences.
             ("a", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
             ("ab", "abababababababababababab"),
             ("aa", "baaab"),
@@ -156,9 +156,9 @@ mod backend_parity {
             ("bar", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxbar"),
             ("ba", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaba"),
             ("foobar", "foobatefoobarfoobar"),
-            // Unicode codepoint path with case folding: mixed-case occurrences, script mixes, and
-            // the Cherokee hybrid (E1 8E A0 / EA AD B0) that per-byte matching would wrongly
-            // accept.
+            // Unicode codepoint path with case folding: mixed-case occurrences,
+            // script mixes, and the Cherokee hybrid (E1 8E A0 / EA AD B0) that
+            // per-byte matching would wrongly accept.
             ("é", "xÉyéZÉ"),
             ("café", "un CAFÉ, deux cafés"),
             ("Ꭰ", "\u{1b70}Ꭰꭰ\u{1b70}"),

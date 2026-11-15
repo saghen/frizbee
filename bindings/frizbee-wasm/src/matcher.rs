@@ -183,8 +183,9 @@ impl Matcher {
     /// to `matchHaystacks`) so that no strings cross the boundary per call
     #[wasm_bindgen(js_name = matchList, skip_typescript)]
     pub fn match_list(&mut self, haystacks: Vec<String>) -> MatchArray {
-        // borrow as &str so the core monomorphizes once for H = &str (shared with the
-        // Haystacks path), halving the largest family of functions in the binary
+        // borrow as &str so the core monomorphizes once for H = &str (shared
+        // with the Haystacks path), halving the largest family of functions in
+        // the binary
         let haystacks: Vec<&str> = haystacks.iter().map(String::as_str).collect();
         let mut matches = self.inner.match_list(&haystacks);
         self.truncate(&mut matches);

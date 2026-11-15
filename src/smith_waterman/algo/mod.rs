@@ -85,9 +85,9 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             match pos {
                 Some(Alignment::Match((_, haystack_idx))) => indices.push(haystack_idx as u32),
                 Some(_) => {}
-                // TODO: it's possible for us to lose alignment due to score == 0
-                // but to stay consistent with results of `match_list`, we simply
-                // don't return the full list of indices
+                // TODO: it's possible for us to lose alignment due to score ==
+                // 0 but to stay consistent with results of `match_list`, we
+                // simply don't return the full list of indices
                 None => break,
             }
         }
@@ -145,9 +145,9 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
                     }
                 }
                 Some(_) => {}
-                // TODO: it's possible for us to lose alignment due to score == 0
-                // but to stay consistent with results of `match_list`, we simply
-                // don't return the full list of indices
+                // TODO: it's possible for us to lose alignment due to score ==
+                // 0 but to stay consistent with results of `match_list`, we
+                // simply don't return the full list of indices
                 None => break,
             }
         }
@@ -182,7 +182,8 @@ impl<B: Backend> Kernel for SmithWaterman<B> {
             .min(u16::MAX as u32) as u16;
         }
 
-        // The unicode scorer walks one row per codepoint, the ASCII scorer one per byte
+        // The unicode scorer walks one row per codepoint, the ASCII scorer one
+        // per byte
         let final_row = if unicode {
             self.needle_unicode.len()
         } else {

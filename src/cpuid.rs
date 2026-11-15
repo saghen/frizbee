@@ -65,7 +65,8 @@ const fn flag(cond: bool, bit: u32) -> u32 {
 // `__cpuid`/`__cpuid_count` became safe in Rust 1.94 but we support >= 1.89
 #[allow(unused_unsafe)]
 fn detect_bits() -> u32 {
-    // miri cannot execute `cpuid`/`xgetbv`, so fall back to compile time detection
+    // miri cannot execute `cpuid`/`xgetbv`, so fall back to compile time
+    // detection
     if cfg!(miri) {
         return flag(cfg!(target_feature = "sse2"), SSE2)
             | flag(cfg!(target_feature = "ssse3"), SSSE3)
@@ -102,9 +103,9 @@ fn detect_bits() -> u32 {
         // Caller observed OSXSAVE, which implies both that `xgetbv` exists
         // and that CR4.OSXSAVE is set, so it cannot fault.
         //
-        // Raw asm rather than `_xgetbv` intrinsic to avoid the compiler hoisting this
-        // out of the branch guard, even though in practice, it shouldn't. We're just
-        // being extra safe here.
+        // Raw asm rather than `_xgetbv` intrinsic to avoid the compiler
+        // hoisting this out of the branch guard, even though in practice, it
+        // shouldn't. We're just being extra safe here.
         unsafe {
             asm!(
                 "xgetbv",

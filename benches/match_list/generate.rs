@@ -83,8 +83,8 @@ pub fn generate_haystack(needle: &str, options: HaystackGenerationOptions) -> Ve
                     .take(length)
                     .collect(),
 
-                // Generate a random string of the desired length with a random number of matching
-                // characters
+                // Generate a random string of the desired length with a random
+                // number of matching characters
                 MatchType::Partial => {
                     // Get random characters from the needle
                     let match_count = rng.random_range(0..length.min(needle.len()));
@@ -93,7 +93,8 @@ pub fn generate_haystack(needle: &str, options: HaystackGenerationOptions) -> Ve
                         .map(|i| needle.chars().nth(i).unwrap())
                         .collect::<Vec<char>>();
 
-                    // Get remaining characters to fill the remaining length randomly
+                    // Get remaining characters to fill the remaining length
+                    // randomly
                     let remaining_chars = StdRng::seed_from_u64(rng.random())
                         .sample_iter(Alphanumeric)
                         .map(char::from)
@@ -109,10 +110,11 @@ pub fn generate_haystack(needle: &str, options: HaystackGenerationOptions) -> Ve
                         .collect()
                 }
 
-                // Generate a random string that matches the entire needle, with additional random
-                // characters
-                // NOTE: The length of the generated string may not match the desired length
-                // if the needle is close to or longer than the median length.
+                // Generate a random string that matches the entire needle, with
+                // additional random characters
+                // NOTE: The length of the generated string may not match the
+                // desired length if the needle is close to or longer than the
+                // median length.
                 MatchType::Full => {
                     let needle_chars = needle.chars().collect::<Vec<char>>();
                     let remaining_chars = (0..(length.saturating_sub(needle.len())))

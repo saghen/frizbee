@@ -91,7 +91,8 @@ impl<B: Backend> SmithWaterman<B> {
                 let continuation_gap_extend_penalty =
                     B::widen_mask(continuation_mask).and(gap_extend_penalty);
 
-                // Bonus for matching a capital letter after a lowercase ASCII letter
+                // Bonus for matching a capital letter after a lowercase ASCII
+                // letter
                 let is_upper_mask = haystack_chunk
                     .lt(B::Bytes::splat(b'Z' + 1))
                     .and(haystack_chunk.gt(B::Bytes::splat(b'A' - 1)));

@@ -219,7 +219,8 @@ impl MaskVec for SseBytes {
     unsafe fn shift_right_padded_1(self, prev: Self) -> Self {
         unsafe {
             // Want low 8 bytes = [prev[7], self[0..7]].
-            // Move prev's low 8 bytes to bytes 8..16 so prev[7] lands at byte 15.
+            // Move prev's low 8 bytes to bytes 8..16 so prev[7] lands at byte
+            // 15.
             let shifted = _mm_slli_si128::<8>(prev.0);
             // alignr<15>(self, shifted) = (self || shifted)[15..31]
             //   = [shifted[15], self[0..15]]

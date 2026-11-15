@@ -40,9 +40,9 @@ impl<B: Backend> LiteralImpl<B> {
         let needle_ascii = case_needle(needle.as_bytes(), case_sensitive);
         let needle_unicode = case_needle_unicode(needle, case_sensitive);
 
-        // Per-byte `(original, opposite-case)` pairs used to splat the prefilter seeds.
-        // On the unicode path this flattens each codepoint's bytes; on the
-        // ASCII path it is `needle_ascii`.
+        // Per-byte `(original, opposite-case)` pairs used to splat the
+        // prefilter seeds. On the unicode path this flattens each codepoint's
+        // bytes; on the ASCII path it is `needle_ascii`.
         let seed_bytes: Vec<(u8, u8)> = if unicode {
             needle_unicode
                 .iter()
@@ -52,16 +52,17 @@ impl<B: Backend> LiteralImpl<B> {
             needle_ascii.clone()
         };
 
-        // Seed the two-byte prefilter on the two rarest needle bytes. A single-byte (or
-        // empty) needle has no pair, so both seeds collapse onto offset 0.
+        // Seed the two-byte prefilter on the two rarest needle bytes. A
+        // single-byte (or empty) needle has no pair, so both seeds collapse
+        // onto offset 0.
         let (seed_a_off, seed_b_off) = if seed_bytes.len() >= 2 {
             rare_byte_offsets(needle.as_bytes())
         } else {
             (0, 0)
         };
         let splat = |off: usize| {
-            // Falls back to (0, 0) only for an empty needle, which never reaches the match
-            // methods
+            // Falls back to (0, 0) only for an empty needle, which never
+            // reaches the match methods
             let (orig, flipped) = seed_bytes.get(off).copied().unwrap_or_default();
             unsafe { (B::splat(orig), B::splat(flipped)) }
         };
@@ -144,8 +145,8 @@ impl<B: Backend> LiteralImpl<B> {
         let haystack = haystack.as_ref().as_bytes();
         let (pos, score) = unsafe { self.find::<UNICODE>(haystack) }?;
         let exact = pos == 0 && self.needle_len == haystack.len();
-        // Every byte of the matched run is a matched index, but add in reverse order to
-        // match the fuzzy matcher implementation
+        // Every byte of the matched run is a matched index, but add in reverse
+        // order to match the fuzzy matcher implementation
         let indices = (pos..pos + self.needle_len)
             .rev()
             .map(|i| i as u32)
@@ -281,8 +282,8 @@ impl<B: Backend> LiteralImpl<B> {
 
         let mut start = 0usize;
         while start < last_start {
-            // Mask out any over-read lanes and any lanes that can't possibly match the
-            // needle
+            // Mask out any over-read lanes and any lanes that can't possibly
+            // match the needle
             let usable = last_start - start;
             let valid = if usable >= B::LANES {
                 B::Mask::all()
@@ -290,19 +291,21 @@ impl<B: Backend> LiteralImpl<B> {
                 B::Mask::first_n(usable)
             };
 
-            // Seed window lane `k` corresponds to position `pos = start + k`: it reads
-            // `haystack[start + seed_off + k] = haystack[pos + seed_off]`.
+            // Seed window lane `k` corresponds to position `pos = start + k`:
+            // it reads `haystack[start + seed_off + k] = haystack[pos +
+            // seed_off]`.
             let (chunk_a, _) = unsafe { load_window::<B>(haystack, start + self.seed_a_off, len) };
             let hits_a = unsafe { B::occ(chunk_a, self.seed_a) }.and(valid);
-            // Skip the second load entirely when the first seed matches nowhere in this
-            // window.
+            // Skip the second load entirely when the first seed matches nowhere
+            // in this window.
             if hits_a.is_zero() {
                 start += B::LANES;
                 continue;
             }
 
-            // A single-byte needle has only one seed (both offsets will be 0), so skip
-            // Branch predictor will predict this perfectly, so there's no performance cost
+            // A single-byte needle has only one seed (both offsets will be 0),
+            // so skip Branch predictor will predict this perfectly, so there's
+            // no performance cost
             let mut hits = if self.seed_a_off != self.seed_b_off {
                 let (chunk_b, _) =
                     unsafe { load_window::<B>(haystack, start + self.seed_b_off, len) };
@@ -313,8 +316,8 @@ impl<B: Backend> LiteralImpl<B> {
             while !hits.is_zero() {
                 let pos = start + unsafe { B::first_hit_pos(hits) };
                 hits = hits.clear_through_lowest(hits);
-                // We've verified the seeds but we have to check the rest of the needle matches
-                // now
+                // We've verified the seeds but we have to check the rest of the
+                // needle matches now
                 if (!UNICODE && needle_len <= 2) || self.matches_at::<UNICODE>(haystack, pos) {
                     let score = self.score_at::<UNICODE>(haystack, pos);
                     if best.is_none_or(|(_, best_score)| score > best_score) {

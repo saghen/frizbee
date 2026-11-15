@@ -191,7 +191,8 @@ impl<B: Backend> Prefilter<B> {
                             B::splat(needle_char.flipped_chars[needle_char.len - 1]),
                         )
                     };
-                    // reload the window when the char width changes to realign the lanes
+                    // reload the window when the char width changes to realign
+                    // the lanes
                     if needle_char.len != char_len {
                         if start + needle_char.len > len {
                             break;
@@ -239,10 +240,11 @@ impl<B: Backend> Prefilter<B> {
             let (chunk, chunk_mask) =
                 unsafe { load_window::<B>(haystack, start + char_len - 1, len) };
 
-            // we check both the original and flipped case bytes simultaneously since either
-            // could have matched. this can result in a false positive, but that's fine for
-            // this stage since this just controls bounds, and bounds being too large hurt
-            // performance, not correctness.
+            // we check both the original and flipped case bytes simultaneously
+            // since either could have matched. this can result in a false
+            // positive, but that's fine for this stage since this just controls
+            // bounds, and bounds being too large hurt performance, not
+            // correctness.
             let mut mask = unsafe { B::eq(chunk, last_bytes.0).or(B::eq(chunk, last_bytes.1)) }
                 .and(chunk_mask);
 

@@ -12,7 +12,8 @@ impl Backend for PrefilterWasmBackend {
     type Mask = u16;
 
     fn is_available() -> bool {
-        // simd128 must be enabled at compile-time, it cannot be runtime-detected
+        // simd128 must be enabled at compile-time, it cannot be
+        // runtime-detected
         true
     }
 

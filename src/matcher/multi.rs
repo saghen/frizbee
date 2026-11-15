@@ -73,7 +73,8 @@ impl Matcher {
                 combined.indices.extend(m.indices);
             }
         }
-        // Indices are reported in reverse order, and patterns may share matched chars.
+        // Indices are reported in reverse order, and patterns may share matched
+        // chars.
         combined.indices.sort_unstable_by(|a, b| b.cmp(a));
         combined.indices.dedup();
         Some(combined)
@@ -121,10 +122,11 @@ impl Matcher {
             hits.clear();
             Self::dispatch_pattern_into(pattern, &gathered, 0, &mut hits);
 
-            // Backends emit matches in input order, so `hit.index` is the position of the
-            // candidate it matched.
+            // Backends emit matches in input order, so `hit.index` is the
+            // position of the candidate it matched.
             if pattern.negated {
-                // `retain` visits in order, so the counter tracks each candidate's position.
+                // `retain` visits in order, so the counter tracks each
+                // candidate's position.
                 let mut hits = hits.iter().peekable();
                 let mut position = 0;
                 candidates.retain(|_| {
@@ -319,7 +321,8 @@ mod tests {
         assert_eq!(matcher.patterns(), &[Pattern::parse("^foo")]);
         assert_eq!(matcher.match_list(&["foobar", "^foo"]).len(), 1);
 
-        // Same needle string, but the matcher must rebuild to match it literally
+        // Same needle string, but the matcher must rebuild to match it
+        // literally
         matcher.set_pattern("^foo");
         let matches = matcher.match_list(&["foobar", "^foo"]);
         assert_eq!(matches.iter().map(|m| m.index).collect::<Vec<_>>(), vec![1]);
@@ -336,8 +339,9 @@ mod tests {
 
     #[test]
     fn pattern_max_typos_override_beats_config() {
-        // "helloz" has a 'z' absent from "hello", so it needs one typo to match. The
-        // config forbids typos, but the pattern raises the budget to one.
+        // "helloz" has a 'z' absent from "hello", so it needs one typo to
+        // match. The config forbids typos, but the pattern raises the budget to
+        // one.
         let haystacks = ["hello", "world"];
         let config = Config::default()
             .max_typos(Some(0))
@@ -359,9 +363,9 @@ mod tests {
 
     #[test]
     fn pattern_max_typos_override_applies_per_pattern() {
-        // "foo" inherits the config's zero-typo budget while "barz" (with its absent
-        // 'z') raises its own budget to one. So "foo" must match exactly but
-        // "bar" may be a typo off.
+        // "foo" inherits the config's zero-typo budget while "barz" (with its
+        // absent 'z') raises its own budget to one. So "foo" must match exactly
+        // but "bar" may be a typo off.
         let haystacks = ["foo bar", "fox bar"];
         let config = Config::default()
             .max_typos(Some(0))
