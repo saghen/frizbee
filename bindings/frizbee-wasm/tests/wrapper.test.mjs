@@ -47,6 +47,12 @@ test('wrapper matchList/matchListIndices equal the native results', () => {
   assert.ok(haystacksCalls > 0, 'wrapper did not route through matchHaystacks')
 })
 
+test('limit keeps the first matchListIndices results', () => {
+  const limited = new native.Matcher('foo', { maxTypos: 1, limit: 2 })
+  assert.deepStrictEqual(limited.matchListIndices(haystacks), nativeIndices.slice(0, 2))
+  limited.free()
+})
+
 test('owned Haystacks equal the native results', () => {
   // the wrapper constructor encodes straight into the arena; growth across pushes
   // exercises reserve/commit on a non-empty arena
