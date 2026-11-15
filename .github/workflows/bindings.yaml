@@ -30,7 +30,7 @@ jobs:
   c:
     strategy:
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-14, windows-2022]
+        os: [ubuntu-latest, ubuntu-26.04-arm, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -49,7 +49,7 @@ jobs:
   py:
     strategy:
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm]
+        os: [ubuntu-latest, ubuntu-26.04-arm]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -71,7 +71,7 @@ jobs:
         run: just test-py
 
   wasm:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v7

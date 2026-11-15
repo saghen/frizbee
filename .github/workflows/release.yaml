@@ -14,7 +14,7 @@ permissions:
 jobs:
   # check tag and workspace version agree
   check:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v7
@@ -49,22 +49,22 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-24.04
+          - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          - os: ubuntu-24.04
+          - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             rustflags: "-C target-feature=-crt-static"
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-26.04-arm
             target: aarch64-unknown-linux-gnu
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-26.04-arm
             target: aarch64-unknown-linux-musl
             rustflags: "-C target-feature=-crt-static"
           # x86_64 cross-compiled on arm, since intel macos runners are deprecated
-          - os: macos-14
+          - os: macos-latest
             target: x86_64-apple-darwin
-          - os: macos-14
+          - os: macos-latest
             target: aarch64-apple-darwin
-          - os: windows-2022
+          - os: windows-latest
             target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
 
@@ -108,7 +108,7 @@ jobs:
   github-release:
     needs: [check, test, bindings, c]
     if: github.ref_type == 'tag'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     permissions:
       contents: write
 
@@ -141,13 +141,13 @@ jobs:
       matrix:
         # prettier-ignore
         include:
-          - { name: linux-x86_64,  os: ubuntu-24.04,     target: x86_64,  manylinux: auto }
-          - { name: linux-aarch64, os: ubuntu-24.04-arm, target: aarch64, manylinux: auto }
-          - { name: musl-x86_64,   os: ubuntu-24.04,     target: x86_64,  manylinux: musllinux_1_2 }
-          - { name: musl-aarch64,  os: ubuntu-24.04-arm, target: aarch64, manylinux: musllinux_1_2 }
-          - { name: macos-x86_64,  os: macos-14,         target: x86_64 }
-          - { name: macos-aarch64, os: macos-14,         target: aarch64 }
-          - { name: windows-x64,   os: windows-2022,     target: x64 }
+          - { name: linux-x86_64,  os: ubuntu-latest,    target: x86_64,  manylinux: auto }
+          - { name: linux-aarch64, os: ubuntu-26.04-arm, target: aarch64, manylinux: auto }
+          - { name: musl-x86_64,   os: ubuntu-latest,    target: x86_64,  manylinux: musllinux_1_2 }
+          - { name: musl-aarch64,  os: ubuntu-26.04-arm, target: aarch64, manylinux: musllinux_1_2 }
+          - { name: macos-x86_64,  os: macos-latest,     target: x86_64 }
+          - { name: macos-aarch64, os: macos-latest,     target: aarch64 }
+          - { name: windows-x64,   os: windows-latest,   target: x64 }
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -168,7 +168,7 @@ jobs:
 
   py-sdist:
     needs: check
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v7
@@ -199,7 +199,7 @@ jobs:
     name: Publish to PyPI
     needs: [check, test, bindings, py-wheels, py-sdist]
     if: github.ref_type == 'tag'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     environment: pypi
     permissions:
       id-token: write # OIDC
@@ -220,7 +220,7 @@ jobs:
     name: Publish to npm
     needs: [check, test, bindings]
     if: github.ref_type == 'tag'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     permissions:
       id-token: write # OIDC
       contents: read
@@ -254,7 +254,7 @@ jobs:
     name: Publish to crates.io
     needs: [check, test, bindings]
     if: github.ref_type == 'tag'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     permissions:
       id-token: write # OIDC
 
