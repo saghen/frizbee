@@ -99,20 +99,14 @@ macro_rules! kernel {
                 <$kernel>::score_inline::<UNICODE>(self, haystack, haystack_start_pos)
             }
 
-            #[inline(never)]
-            $(#[target_feature(enable = $feature)])?
-            unsafe fn score_indices<const UNICODE: bool>(
+            #[inline(always)]
+            fn score_indices<const UNICODE: bool>(
                 &mut self,
                 haystack: &[u8],
                 haystack_start_pos: usize,
                 max_typos: Option<u16>,
             ) -> (u16, Vec<u32>) {
-                <$kernel>::score_indices_inline::<UNICODE>(
-                    self,
-                    haystack,
-                    haystack_start_pos,
-                    max_typos,
-                )
+                <$kernel>::score_indices::<UNICODE>(self, haystack, haystack_start_pos, max_typos)
             }
         }
     };
@@ -263,15 +257,13 @@ impl<B8: Backend, B16: Backend> ScoreWidth<B8, B16> {
     }
 
     #[inline(always)]
-    fn score_indices_inline<const UNICODE: bool>(
+    fn score_indices<const UNICODE: bool>(
         &mut self,
         haystack: &[u8],
         haystack_start_pos: usize,
         max_typos: Option<u16>,
     ) -> (u16, Vec<u32>) {
-        either!(self, sw => {
-            sw.score_indices_inline::<UNICODE>(haystack, haystack_start_pos, max_typos)
-        })
+        either!(self, sw => sw.score_indices::<UNICODE>(haystack, haystack_start_pos, max_typos))
     }
 }
 
@@ -298,11 +290,7 @@ pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
         haystack_start_pos: usize,
     ) -> u16;
 
-    /// Outlined like [`Kernel::score`]
-    ///
-    /// # Safety
-    /// The backend's required CPU features must be available
-    unsafe fn score_indices<const UNICODE: bool>(
+    fn score_indices<const UNICODE: bool>(
         &mut self,
         haystack: &[u8],
         haystack_start_pos: usize,
@@ -353,7 +341,7 @@ mod tests {
         let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
 
         matcher
-            .score_indices_inline::<false>(haystack.as_bytes(), 0, None)
+            .score_indices::<false>(haystack.as_bytes(), 0, None)
             .1
     }
 
@@ -361,7 +349,7 @@ mod tests {
         let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
 
         matcher
-            .score_indices_inline::<true>(haystack.as_bytes(), 0, None)
+            .score_indices::<true>(haystack.as_bytes(), 0, None)
             .1
     }
 
@@ -579,7 +567,7 @@ mod tests {
 
         assert_eq!(
             matcher
-                .score_indices_inline::<true>("é".as_bytes(), 3, None)
+                .score_indices::<true>("é".as_bytes(), 3, None)
                 .1,
             vec![3, 4]
         );
@@ -591,7 +579,7 @@ mod tests {
 
         assert_eq!(
             matcher
-                .score_indices_inline::<true>("é😀x".as_bytes(), 3, None)
+                .score_indices::<true>("é😀x".as_bytes(), 3, None)
                 .1,
             vec![3, 4, 9]
         );

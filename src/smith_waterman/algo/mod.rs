@@ -76,7 +76,7 @@ impl<B: Backend> SmithWaterman<B> {
     }
 
     #[inline(always)]
-    pub(crate) fn score_indices_inline<const UNICODE: bool>(
+    pub(crate) fn score_indices<const UNICODE: bool>(
         &mut self,
         haystack: &[u8],
         haystack_start_pos: usize,

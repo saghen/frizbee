@@ -132,10 +132,9 @@ where
         }
 
         let (trimmed, start_pos, include_exact) = trim_haystack(haystack, start_pos, end_pos);
-        let (mut score, indices) = unsafe {
-            self.smith_waterman
-                .score_indices::<UNICODE>(trimmed, start_pos, max_typos)
-        };
+        let (mut score, indices) = self
+            .smith_waterman
+            .score_indices::<UNICODE>(trimmed, start_pos, max_typos);
 
         let exact = include_exact && self.needle.as_bytes() == trimmed;
         if exact {

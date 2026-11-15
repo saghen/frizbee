@@ -134,7 +134,7 @@ fn score_with<B: Backend>(needle: &str, haystack: &str) -> u16 {
 fn indices_with<B: Backend>(needle: &str, haystack: &str) -> Vec<u32> {
     let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), false);
     matcher
-        .score_indices_inline::<false>(haystack.as_bytes(), 0, None)
+        .score_indices::<false>(haystack.as_bytes(), 0, None)
         .1
 }
 
@@ -217,7 +217,7 @@ fn indices_bytes_with<B: Backend>(
     case_sensitive: bool,
 ) -> (u16, Vec<u32>) {
     let mut matcher = SmithWaterman::<B>::new(needle, &Scoring::default(), case_sensitive);
-    matcher.score_indices_inline::<false>(haystack, 0, None)
+    matcher.score_indices::<false>(haystack, 0, None)
 }
 
 fn assert_backend<B: Backend>(
