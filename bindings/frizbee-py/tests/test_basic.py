@@ -51,6 +51,11 @@ class BasicTests(unittest.TestCase):
         rebuilt = Matcher(patterns)
         self.assertEqual(rebuilt.match(["foo", "barfoo", "foobar"]), matches)
 
+    def test_limit_keeps_the_first_match_indices(self):
+        items = ["foo", "prelude", "xfoo", "foobar"]
+        expected = Matcher("foo").match_indices(items)[:2]
+        self.assertEqual(Matcher("foo", limit=2).match_indices(items), expected)
+
     def test_haystacks(self):
         items = ["foo", "prelude", "xfoo", "foobar"]
         matcher = Matcher("foo")

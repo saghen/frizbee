@@ -128,6 +128,22 @@ impl Matcher {
             matches.truncate(limit as usize);
         }
     }
+
+    fn match_indices(&mut self, haystacks: &[&str]) -> Vec<frizbee::MatchIndices> {
+        if self.limit.is_none() {
+            return self.inner.match_list_indices(haystacks);
+        }
+        // trace only the matches within the limit, the rest are discarded
+        let mut matches = self.inner.match_list(haystacks);
+        self.truncate(&mut matches);
+        matches
+            .iter()
+            .filter_map(|m| {
+                self.inner
+                    .match_one_indices(haystacks[m.index as usize], m.index)
+            })
+            .collect()
+    }
 }
 
 #[wasm_bindgen]
@@ -202,9 +218,7 @@ impl Matcher {
     #[wasm_bindgen(js_name = matchListIndices, skip_typescript)]
     pub fn match_list_indices(&mut self, haystacks: Vec<String>) -> MatchIndicesArray {
         let haystacks: Vec<&str> = haystacks.iter().map(String::as_str).collect();
-        let mut matches = self.inner.match_list_indices(&haystacks);
-        self.truncate(&mut matches);
-        matches_indices_to_js(&matches)
+        matches_indices_to_js(&self.match_indices(&haystacks))
     }
 
     /// Like `matchList` but matches an owned [`Haystacks`] list. No strings
@@ -222,9 +236,7 @@ impl Matcher {
     /// `matchHaystacks`)
     #[wasm_bindgen(js_name = matchHaystacksIndices)]
     pub fn match_haystacks_indices(&mut self, haystacks: &Haystacks) -> MatchIndicesArray {
-        let mut matches = self.inner.match_list_indices(&haystacks.as_strs());
-        self.truncate(&mut matches);
-        matches_indices_to_js(&matches)
+        matches_indices_to_js(&self.match_indices(&haystacks.as_strs()))
     }
 
     /// Matches a single haystack, returning its `Match` if it passes. This

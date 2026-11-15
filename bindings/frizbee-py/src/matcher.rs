@@ -188,8 +188,20 @@ impl PyMatcher {
     }
 
     fn match_indices_impl<S: AsRef<str>>(&mut self, haystacks: &[S]) -> Vec<PyMatchIndices> {
-        let mut matches = self.inner.match_list_indices(haystacks);
-        self.truncate(&mut matches);
+        let matches = if self.limit.is_none() {
+            self.inner.match_list_indices(haystacks)
+        } else {
+            // trace only the matches within the limit, the rest are discarded
+            let mut matches = self.inner.match_list(haystacks);
+            self.truncate(&mut matches);
+            matches
+                .iter()
+                .filter_map(|m| {
+                    self.inner
+                        .match_one_indices(&haystacks[m.index as usize], m.index)
+                })
+                .collect()
+        };
         matches
             .into_iter()
             .map(|matched| {
