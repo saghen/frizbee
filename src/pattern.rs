@@ -225,14 +225,14 @@ impl Pattern {
                 escaped = true;
             } else if c.is_whitespace() {
                 if let Some(s) = start.take() {
-                    push(&query[s..i]);
+                    push(query.get(s..i).unwrap_or_default());
                 }
             } else if start.is_none() {
                 start = Some(i);
             }
         }
         if let Some(s) = start {
-            push(&query[s..]);
+            push(query.get(s..).unwrap_or_default());
         }
 
         patterns
