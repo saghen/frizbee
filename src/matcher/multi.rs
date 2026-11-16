@@ -48,10 +48,6 @@ impl Matcher {
                 let m = result?;
                 combined.score = combined.score.saturating_add(m.score);
                 combined.exact |= m.exact;
-                #[cfg(feature = "match_end_col")]
-                {
-                    combined.end_col = combined.end_col.max(m.end_col);
-                }
             }
         }
         Some(combined)
@@ -146,10 +142,6 @@ impl Matcher {
                         hit.index = candidate.index;
                         hit.score = hit.score.saturating_add(candidate.score);
                         hit.exact |= candidate.exact;
-                        #[cfg(feature = "match_end_col")]
-                        {
-                            hit.end_col = hit.end_col.max(candidate.end_col);
-                        }
                         hit
                     })
                     .collect();
@@ -209,8 +201,6 @@ mod tests {
             assert_eq!(c.index, s.index);
             assert_eq!(c.score, s.score * 2);
             assert_eq!(c.exact, s.exact);
-            #[cfg(feature = "match_end_col")]
-            assert_eq!(c.end_col, s.end_col);
         }
     }
 

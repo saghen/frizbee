@@ -6,14 +6,10 @@ use crate::smith_waterman::{
 };
 
 impl<B: Backend> SmithWaterman<B> {
-    /// Scores the haystack without filling the matrices, unless they're
-    /// needed for the match's end column
+    /// Scores the haystack without filling the matrices
     #[inline(always)]
     pub(crate) fn score_haystack_unicode(&mut self, haystack: &[u8], include_prefix: bool) -> u16 {
-        self.score_haystack_unicode_impl::<{ cfg!(feature = "match_end_col") }>(
-            haystack,
-            include_prefix,
-        )
+        self.score_haystack_unicode_impl::<false>(haystack, include_prefix)
     }
 
     /// Scores the haystack and fills the score matrix for the

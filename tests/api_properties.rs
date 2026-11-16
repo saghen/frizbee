@@ -165,20 +165,10 @@ fn assert_indices_contract(case: &ApiCase, matches: &[Match], indices: &[MatchIn
     }
 }
 
-#[cfg(not(feature = "match_end_col"))]
 type MatchView = (u16, u32, bool);
 
-#[cfg(feature = "match_end_col")]
-type MatchView = (u16, u32, bool, u16);
-
-#[cfg(not(feature = "match_end_col"))]
 fn match_view(match_: &Match) -> MatchView {
     (match_.score, match_.index, match_.exact)
-}
-
-#[cfg(feature = "match_end_col")]
-fn match_view(match_: &Match) -> MatchView {
-    (match_.score, match_.index, match_.exact, match_.end_col)
 }
 
 fn match_views(matches: &[Match]) -> Vec<MatchView> {
@@ -223,8 +213,6 @@ fn mtch(score: u16, index: u32) -> Match {
         score,
         index,
         exact: false,
-        #[cfg(feature = "match_end_col")]
-        end_col: 0,
     }
 }
 
@@ -352,10 +340,6 @@ fn reference_multi_pattern(case: &MultiPatternCase) -> Vec<Match> {
                     let hit = hit?;
                     combined.score = combined.score.saturating_add(hit.score);
                     combined.exact |= hit.exact;
-                    #[cfg(feature = "match_end_col")]
-                    {
-                        combined.end_col = combined.end_col.max(hit.end_col);
-                    }
                 }
             }
             Some(combined)
@@ -782,19 +766,6 @@ fn public_indices_are_reverse_byte_offsets() {
     assert_eq!(matches[0].indices, vec![3, 2, 1]);
     assert_eq!(matches[1].index, 1);
     assert_eq!(matches[1].indices, vec![4, 2, 0]);
-}
-
-#[test]
-#[cfg(feature = "match_end_col")]
-fn match_end_col_survives_prefilter_offsets() {
-    let config = Config::default()
-        .max_typos(None)
-        .sort(SortStrategy::IndexAsc);
-    let matches = Matcher::new("abc", &config).match_list(&["xabcx", "abcdef", "xxabc"]);
-    assert_eq!(matches.len(), 3);
-    assert_eq!(matches[0].end_col, 3);
-    assert_eq!(matches[1].end_col, 2);
-    assert_eq!(matches[2].end_col, 4);
 }
 
 #[test]

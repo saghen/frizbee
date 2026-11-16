@@ -71,8 +71,6 @@ pub(crate) fn sort_indices_by_score(matches: &mut Vec<MatchIndices>) {
             score: m.score,
             index: i as u32,
             exact: false,
-            #[cfg(feature = "match_end_col")]
-            end_col: 0,
         })
         .collect();
     radix_sort_matches(&mut order);
@@ -112,8 +110,6 @@ mod test {
                 score: rng.random::<u16>(),
                 index,
                 exact: rng.random_bool(0.5),
-                #[cfg(feature = "match_end_col")]
-                end_col: 0,
             })
             .collect::<Vec<_>>();
 

@@ -114,10 +114,6 @@ impl<B: Backend> LiteralImpl<B> {
             index,
             score,
             exact,
-            #[cfg(feature = "match_end_col")]
-            end_col: (pos + self.needle_len)
-                .saturating_sub(1)
-                .min(u16::MAX as usize) as u16,
         })
     }
 

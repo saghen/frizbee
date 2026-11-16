@@ -119,4 +119,4 @@ jobs:
         run: cargo +nightly miri setup
 
       - name: Run Miri tests
-        run: cargo +nightly miri test --features match_end_col
+        run: cargo +nightly miri test

@@ -182,8 +182,6 @@ mod tests {
             score,
             index,
             exact: false,
-            #[cfg(feature = "match_end_col")]
-            end_col: 0,
         }
     }
 

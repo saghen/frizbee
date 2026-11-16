@@ -119,11 +119,6 @@ macro_rules! kernel {
                     max_typos,
                 )
             }
-
-            #[cfg(feature = "match_end_col")]
-            fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16 {
-                <$kernel>::match_end_col(self, haystack, unicode)
-            }
         }
     };
 }
@@ -289,11 +284,6 @@ impl<B8: Backend, B16: Backend> ScoreWidth<B8, B16> {
             sw.score_indices_inline::<UNICODE>(haystack, haystack_start_pos, max_typos)
         })
     }
-
-    #[cfg(feature = "match_end_col")]
-    fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16 {
-        either!(self, sw => sw.match_end_col(haystack, unicode))
-    }
 }
 
 /// The Smith Waterman kernel of one SIMD tier
@@ -329,9 +319,6 @@ pub(crate) trait Kernel: Clone + core::fmt::Debug + 'static {
         haystack_start_pos: usize,
         max_typos: Option<u16>,
     ) -> (u16, Vec<u32>);
-
-    #[cfg(feature = "match_end_col")]
-    fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16;
 }
 
 #[cfg(test)]
@@ -541,62 +528,6 @@ mod tests {
             get_score_typos_case("A", "a", 0, false),
             Some(MATCH_SCORE + PREFIX_BONUS)
         );
-    }
-
-    #[cfg(feature = "match_end_col")]
-    fn get_end_col(needle: &str, haystack: &str) -> u16 {
-        let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
-        matcher.score_haystack(haystack.as_bytes(), true);
-        matcher.match_end_col(haystack.as_bytes(), false)
-    }
-
-    #[cfg(feature = "match_end_col")]
-    fn get_end_col_unicode(needle: &str, haystack: &str) -> u16 {
-        let mut matcher = SmithWaterman::<BackendScalar8>::new(needle, &Scoring::default(), false);
-        matcher.score_haystack_unicode(haystack.as_bytes(), true);
-        matcher.match_end_col(haystack.as_bytes(), true)
-    }
-
-    #[test]
-    #[cfg(feature = "match_end_col")]
-    fn test_end_col_unicode() {
-        // The match column is the scalar start of "é" (byte 2), not the
-        // unwritten byte-length row that previously returned 0
-        assert_eq!(get_end_col_unicode("é", "xxé"), 2);
-        assert_eq!(get_end_col_unicode("abc", "abcdef"), 2);
-    }
-
-    #[test]
-    #[cfg(feature = "match_end_col")]
-    fn test_end_col_basic() {
-        assert_eq!(get_end_col("abc", "abcdef"), 2);
-        assert_eq!(get_end_col("a", "abc"), 0);
-        assert_eq!(get_end_col("c", "abc"), 2);
-        assert_eq!(get_end_col("def", "abcdef"), 5);
-        assert_eq!(get_end_col("def", "________________abcdef"), 21);
-    }
-
-    #[test]
-    #[cfg(feature = "match_end_col")]
-    fn long_input_end_col_uses_original_haystack_offsets() {
-        let haystack = format!("{}abc", "x".repeat(510));
-        assert_eq!(get_end_col("abc", &haystack), 512);
-    }
-
-    #[test]
-    #[cfg(feature = "match_end_col")]
-    fn huge_haystack_end_col_saturates() {
-        let haystack = format!("a{}bc", "x".repeat(70000));
-        assert_eq!(get_end_col("abc", &haystack), u16::MAX);
-    }
-
-    #[test]
-    #[cfg(feature = "match_end_col")]
-    fn long_input_boundary_end_cols_cover_matrix_and_greedy() {
-        for (prefix_len, want) in [(509usize, 511u16), (510, 512)] {
-            let haystack = format!("{}abc", "x".repeat(prefix_len));
-            assert_eq!(get_end_col("abc", &haystack), want);
-        }
     }
 
     #[test]

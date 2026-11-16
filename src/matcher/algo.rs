@@ -197,18 +197,10 @@ where
             score = score.saturating_add(self.config.scoring.exact_match_bonus);
         }
 
-        #[cfg(not(feature = "match_end_col"))]
-        let _ = haystack_start_pos;
-
         Match {
             index,
             score,
             exact,
-            #[cfg(feature = "match_end_col")]
-            end_col: self
-                .smith_waterman
-                .match_end_col(haystack, UNICODE)
-                .saturating_add(haystack_start_pos.min(u16::MAX as usize) as u16),
         }
     }
 
@@ -377,13 +369,4 @@ mod tests {
         assert_eq!(matches[1].indices, vec![4, 2, 0]);
     }
 
-    #[test]
-    #[cfg(feature = "match_end_col")]
-    fn filtered_match_end_col_uses_original_haystack_offsets() {
-        let config = Config::default().sort(SortStrategy::IndexAsc);
-
-        let matches = Matcher::new("abc", &config).match_list(&["xxabcxx"]);
-        assert_eq!(matches.len(), 1);
-        assert_eq!(matches[0].end_col, 4);
-    }
 }

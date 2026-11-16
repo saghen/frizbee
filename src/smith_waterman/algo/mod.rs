@@ -200,40 +200,4 @@ impl<B: Backend> SmithWaterman<B> {
             self.score_haystack_indices(haystack, haystack_start_pos, max_typos)
         }
     }
-
-    #[cfg(feature = "match_end_col")]
-    pub(crate) fn match_end_col(&self, haystack: &[u8], unicode: bool) -> u16 {
-        if haystack.len() > MAX_HAYSTACK_LEN {
-            return match_greedy(
-                self.needle.as_bytes(),
-                haystack,
-                &self.scoring,
-                self.case_sensitive,
-                true,
-            )
-            .and_then(|(_, indices)| indices.last().copied())
-            .unwrap_or(0)
-            .min(u16::MAX as u32) as u16;
-        }
-
-        // The unicode scorer walks one row per codepoint, the ASCII scorer one
-        // per byte
-        let final_row = if unicode {
-            self.needle_unicode.len()
-        } else {
-            self.needle.len()
-        };
-        let mut match_end_col: u16 = 0;
-        let mut max_score = 0;
-        for col_idx in 1..(haystack.len().div_ceil(B::LANES) + 1) {
-            let chunk_scores = self.score_matrix.get(final_row, col_idx);
-            let chunk_max_score = unsafe { chunk_scores.horizontal_max() };
-            if chunk_max_score > max_score {
-                max_score = chunk_max_score;
-                let lane = unsafe { chunk_scores.find_lane(chunk_max_score) };
-                match_end_col = ((col_idx - 1) * B::LANES + lane) as u16;
-            }
-        }
-        match_end_col
-    }
 }

@@ -906,16 +906,4 @@ mod tests {
         );
     }
 
-    #[test]
-    #[cfg(feature = "match_end_col")]
-    fn test_match_end_col_through_match_list() {
-        let config = Config::default()
-            .max_typos(None)
-            .sort(SortStrategy::IndexAsc);
-        let matches = Matcher::new("abc", &config).match_list(&["xabcx", "abcdef", "xxabc"]);
-        assert_eq!(matches.len(), 3);
-        assert_eq!(matches[0].end_col, 3);
-        assert_eq!(matches[1].end_col, 2);
-        assert_eq!(matches[2].end_col, 4);
-    }
 }
