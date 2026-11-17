@@ -42,9 +42,7 @@ jobs:
         run: rustup target add wasm32-wasip1 wasm32-unknown-unknown
 
       - name: Install wasmtime
-        run: |
-          curl https://wasmtime.dev/install.sh -sSf | bash
-          echo "$HOME/.wasmtime/bin" >> "$GITHUB_PATH"
+        uses: bytecodealliance/actions/wasmtime/setup@v1
 
       # .cargo/config.toml enables +simd128 and sets wasmtime as the runner
       # --lib because criterion's bench harness doesn't build on wasm
