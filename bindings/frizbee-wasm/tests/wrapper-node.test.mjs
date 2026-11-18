@@ -40,7 +40,10 @@ test('no-arg init() loads the wasm from disk; wrapper surface works', async () =
   assert.deepStrictEqual(matches.map((m) => m.index).sort(), [0, 1])
 
   const owned = new pkg.Haystacks(['foo', 'bar'])
-  assert.deepStrictEqual(matcher.matchList(owned).map((m) => m.index), [0])
+  assert.deepStrictEqual(
+    matcher.matchList(owned).map((m) => m.index),
+    [0],
+  )
   owned.free()
   matcher.free()
 })

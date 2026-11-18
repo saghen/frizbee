@@ -56,8 +56,8 @@ macro_rules! unicode_steps {
     };
 }
 
-// Wider steps read the 1, 4 or 16 lane step, so 64 lanes take 3 dependent shifts
-// instead of 6. The radix-2 16-lane scan needs no 3-lane decay.
+// Wider steps read the 1, 4 or 16 lane step, so 64 lanes take 3 dependent
+// shifts instead of 6. The radix-2 16-lane scan needs no 3-lane decay.
 unicode_steps!(
     unicode_steps_8_lane,
     (1, 1, 0, 0),

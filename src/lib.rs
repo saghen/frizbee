@@ -518,20 +518,25 @@ impl Scoring {
     /// Max additional score that a needle character can receive, aside from the
     /// match score
     pub(crate) fn max_per_char_bonus(&self) -> u16 {
-        self.amortized_bonus().saturating_add(self.matching_case_bonus)
+        self.amortized_bonus()
+            .saturating_add(self.matching_case_bonus)
     }
 
     /// Max bonus given to a score one time, aside from the prefix or exact
     /// bonuses
     pub(crate) fn max_one_time_bonus(&self) -> u16 {
-        let both = self.delimiter_bonus.saturating_add(self.capitalization_bonus);
+        let both = self
+            .delimiter_bonus
+            .saturating_add(self.capitalization_bonus);
         both - self.amortized_bonus()
     }
 
     /// Delimiter and capitalization bonus amortized per needle char
     fn amortized_bonus(&self) -> u16 {
         let either = self.delimiter_bonus.max(self.capitalization_bonus);
-        let both = self.delimiter_bonus.saturating_add(self.capitalization_bonus);
+        let both = self
+            .delimiter_bonus
+            .saturating_add(self.capitalization_bonus);
         // "/aC" earns both on adjacent chars, then pays a row or a gap
         either
             .div_ceil(2)

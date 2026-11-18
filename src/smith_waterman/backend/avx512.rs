@@ -1,5 +1,5 @@
-use core::arch::x86_64::*;
 use crate::smith_waterman::algo::{ascii_gap, unicode_gap};
+use core::arch::x86_64::*;
 
 use crate::prefilter::algo::can_overread;
 

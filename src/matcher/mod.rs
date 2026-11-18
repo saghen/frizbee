@@ -905,5 +905,4 @@ mod tests {
             &Matcher::new("fB", &third_config).match_list(&first_haystacks)
         );
     }
-
 }

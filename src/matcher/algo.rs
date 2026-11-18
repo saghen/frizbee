@@ -386,5 +386,4 @@ mod tests {
             assert_eq!(matches[0].indices, indices);
         }
     }
-
 }
